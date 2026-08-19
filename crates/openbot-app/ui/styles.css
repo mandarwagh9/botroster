@@ -93,7 +93,14 @@
   --coat-1: light-dark(#326f64, #54b9a6);
   --coat-2: light-dark(#c7363b, #ec5358);
   --coat-3: light-dark(#a64f20, #ed712e);
-  --coat-4: light-dark(#915e22, #f19d38);
+  /* Was #f19d38, an amber. Two things wrong with it. Amber is the one warm
+     colour this product reserves for "a person is blocking progress", so a Bot
+     idly wearing it put the waiting-on-you signal on screen when nothing was
+     waiting. And it sat beside --coat-3 at roughly the same hue, so the two
+     Bots wearing them were the same orange in the roster — which defeats the
+     only per-Bot identity the sidebar has. Olive is unoccupied: no other coat
+     is near it, and it is nobody's status colour. */
+  --coat-4: light-dark(#5c6b34, #a8bd66);
   --coat-5: light-dark(#bc387a, #eb4699);
   --coat-6: light-dark(#377749, #5bc67a);
   --coat-7: light-dark(#3068c5, #3c82f6);
