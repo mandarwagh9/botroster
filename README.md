@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/mandarwagh9/openbot/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/mandarwagh9/openbot/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
   <img alt="Rust 1.89+" src="https://img.shields.io/badge/rust-1.89%2B-orange.svg">
 </p>
