@@ -280,3 +280,4 @@ jobs:
             target/release/bundle/**/*.dmg
             target/release/bundle/**/*.deb
             target/release/bundle/**/*.AppImage
+            target/release/bundle/**/*.sha256
