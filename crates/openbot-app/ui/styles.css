@@ -44,14 +44,20 @@
   --accent-ink: #ffffff;
   --accent-wash: light-dark(rgba(111, 69, 224, 0.1), rgba(124, 79, 240, 0.16));
 
-  --danger: light-dark(#c8323a, #f2555b);
-  --danger-line: light-dark(rgba(200, 50, 58, 0.45), rgba(242, 85, 91, 0.45));
-  --danger-wash: light-dark(rgba(200, 50, 58, 0.08), rgba(242, 85, 91, 0.12));
+  /* Semantic inks sit on a 12% wash of themselves over any surface. Each is
+     chosen so the ink-on-wash pair clears 5.5 on every surface in both themes
+     (worst cases: danger 5.25 dark, danger 5.53 light), which leaves margin
+     for renderers that composite the wash differently. The light values are
+     deeper than the palette's raw hues because a wash over white needs a
+     much darker ink than the same hue over near-black. */
+  --danger: light-dark(#9e2128, #f67a7e);
+  --danger-line: light-dark(rgba(158, 33, 40, 0.45), rgba(246, 122, 126, 0.45));
+  --danger-wash: light-dark(rgba(158, 33, 40, 0.12), rgba(246, 122, 126, 0.12));
 
-  --ok: light-dark(#2f7d4b, #5bc67a);
-  --ok-wash: light-dark(rgba(47, 125, 75, 0.1), rgba(91, 198, 122, 0.14));
-  --warn: light-dark(#a64f20, #f19d38);
-  --warn-wash: light-dark(rgba(166, 79, 32, 0.1), rgba(241, 157, 56, 0.14));
+  --ok: light-dark(#1a5f35, #7adc95);
+  --ok-wash: light-dark(rgba(26, 95, 53, 0.12), rgba(122, 220, 149, 0.12));
+  --warn: light-dark(#7f3a14, #f6b463);
+  --warn-wash: light-dark(rgba(127, 58, 20, 0.12), rgba(246, 180, 99, 0.12));
 
   --scrim: light-dark(rgba(20, 20, 23, 0.4), rgba(0, 0, 0, 0.6));
   --shadow: light-dark(0 20px 50px rgba(20, 20, 23, 0.14), 0 24px 60px rgba(0, 0, 0, 0.5));

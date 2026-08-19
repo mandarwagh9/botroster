@@ -281,6 +281,23 @@ async fn settle() {
     tokio::time::sleep(Duration::from_millis(150)).await;
 }
 
+/// Polls a page-side predicate until it holds or the deadline passes.
+///
+/// For anything the page does on a timer. A fixed sleep equal to the timer
+/// races it: on a loaded runner the timer has not fired when the sleep
+/// returns, and the test fails for being run on a slower machine. Waiting for
+/// the condition asserts the behaviour and not the clock.
+async fn wait_until(b: &Browser, predicate: &str, deadline: Duration) -> bool {
+    let started = std::time::Instant::now();
+    while started.elapsed() < deadline {
+        if b.text_of(predicate).await.unwrap_or_default() == "true" {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    false
+}
+
 /// Two approvals arriving together must both stay answerable. Rendering each
 /// ask over the last would discard the first one's buttons (which close over
 /// its id), leaving it unanswerable until it timed out with the turn stalled
@@ -746,7 +763,14 @@ async fn a_stale_search_answer_does_not_land_on_a_newer_query() {
     )
     .await
     .expect("type once");
-    settle().await;
+    // The message hit arrives after the debounce and the round trip; wait for
+    // it rather than for a fixed interval that a slow runner can miss.
+    wait_until(
+        &b,
+        "String([...document.querySelectorAll('.palette-item')].some(x => x.textContent.includes('renewal risk')))",
+        Duration::from_secs(3),
+    )
+    .await;
     let shown = b
         .text_of(
             "JSON.stringify([...document.querySelectorAll('.palette-item')].map(x=>x.textContent))",
@@ -2813,7 +2837,14 @@ async fn typing_in_the_palette_searches_once_it_settles() {
         "a scan of every conversation went out mid-word"
     );
 
-    settle().await;
+    // Once the pause elapses, exactly one scan goes out. Waited for, not
+    // slept for: the debounce is a timer and a fixed sleep races it.
+    wait_until(
+        &b,
+        "String(window.__sent('search').length >= 1)",
+        Duration::from_secs(3),
+    )
+    .await;
     let after = b
         .text_of("String(window.__sent('search').length)")
         .await
@@ -3144,58 +3175,86 @@ async fn no_text_in_any_surface_falls_below_the_contrast_it_needs() {
         }
     };
 
-    sweep(
-        b.text_of(&contrast_sweep()).await.expect("a sweep"),
-        "workspace",
-        &mut looked,
-        &mut bad,
-    );
-
-    for (label, opener, shown) in SURFACES {
-        b.text_of(&format!("{opener}; 'ok'"))
-            .await
-            .unwrap_or_else(|e| panic!("`{label}` could not be opened by `{opener}`: {e}"));
+    // Both themes. The CI runners default to a light scheme and the
+    // development machine to dark, so a sweep of one theme holds only for the
+    // machines that happen to match it. The theme is switched the way the page
+    // switches it: `color-scheme` on the root, which `light-dark()` follows.
+    for scheme in ["dark", "light"] {
+        b.text_of(&format!(
+            "document.documentElement.style.colorScheme = '{scheme}'; 'ok'"
+        ))
+        .await
+        .expect("the scheme can be set");
         settle().await;
-        assert_eq!(
-            b.text_of(&format!(
-                "String(document.getElementById('{shown}').classList.contains('hidden'))"
-            ))
-            .await
-            .unwrap(),
-            "false",
-            "clicking `{opener}` did not open `{shown}`, so sweeping `{label}` proved nothing"
-        );
+        let tag = |where_: &str| format!("{scheme}/{where_}");
+
         sweep(
             b.text_of(&contrast_sweep()).await.expect("a sweep"),
-            label,
+            &tag("workspace"),
             &mut looked,
             &mut bad,
         );
-        b.text_of(
-            "document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); 'ok'",
-        )
+
+        for (label, opener, shown) in SURFACES {
+            b.text_of(&format!("{opener}; 'ok'"))
+                .await
+                .unwrap_or_else(|e| panic!("`{label}` could not be opened by `{opener}`: {e}"));
+            settle().await;
+            assert_eq!(
+                b.text_of(&format!(
+                    "String(document.getElementById('{shown}').classList.contains('hidden'))"
+                ))
+                .await
+                .unwrap(),
+                "false",
+                "clicking `{opener}` did not open `{shown}`, so sweeping `{label}` proved nothing"
+            );
+            sweep(
+                b.text_of(&contrast_sweep()).await.expect("a sweep"),
+                &tag(label),
+                &mut looked,
+                &mut bad,
+            );
+            b.text_of(
+                "document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); 'ok'",
+            )
+            .await
+            .unwrap();
+            settle().await;
+        }
+
+        // The approval box last: it is the one Escape will not close.
+        b.text_of(&format!(
+            "window.__fire('permission-request', {}); 'ok'",
+            ask("a1", "s1", "fs.write")
+        ))
+        .await
+        .expect("an ask");
+        settle().await;
+        sweep(
+            b.text_of(&contrast_sweep()).await.expect("a sweep"),
+            &tag("approval"),
+            &mut looked,
+            &mut bad,
+        );
+
+        // Leave the page as the next pass expects it: the approval answered,
+        // and the computer panel closed, since its opener is a toggle and a
+        // second click would close rather than open it.
+        b.text_of(concat!(
+            "document.querySelector('#dialog-options button')?.click(); ",
+            "document.getElementById('close-computer').click(); 'ok'"
+        ))
         .await
         .unwrap();
         settle().await;
     }
-
-    // The approval box last: it is the one Escape will not close.
-    b.text_of(&format!(
-        "window.__fire('permission-request', {}); 'ok'",
-        ask("a1", "s1", "fs.write")
-    ))
-    .await
-    .expect("an ask");
-    settle().await;
-    sweep(
-        b.text_of(&contrast_sweep()).await.expect("a sweep"),
-        "approval",
-        &mut looked,
-        &mut bad,
-    );
+    b.text_of("document.documentElement.style.colorScheme = ''; 'ok'")
+        .await
+        .unwrap();
 
     assert!(
-        looked >= 150,
+        looked >= 300,
         "only {looked} text elements across every surface; this swept far less than it claims"
     );
     assert!(
