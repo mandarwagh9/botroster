@@ -12,3 +12,11 @@ Thumbs.db
 
 # Tauri regenerates these at build time.
 crates/openbot-app/gen/
+
+# The overnight UX loop. Competitor reference captures and iteration shots stay
+# local: origin is public, and this project's position is that it contains none
+# of their material. The loop's text artefacts are committed; its images are not.
+.claude/ux-loop/reference/
+.claude/ux-loop/shots/
+.claude/ux-loop/node_modules/
+.claude/ux-loop/.baseline-bytes

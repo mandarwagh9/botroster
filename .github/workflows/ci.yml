@@ -268,7 +268,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          fail_on_unmatched_files: true
+          # Each runner produces only its own formats, so most of the patterns
+          # below match nothing on any given leg: macOS has no `.msi`, Windows
+          # no `.dmg`. Failing on that would fail every leg. The guard that
+          # matters is in the checksum step above, which fails when the
+          # bundler produced no installer at all on THIS runner.
+          fail_on_unmatched_files: false
           files: |
             target/release/bundle/**/*.msi
             target/release/bundle/**/*.exe
