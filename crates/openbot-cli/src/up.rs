@@ -609,13 +609,16 @@ mod tests {
     /// this test keeps the two copies from drifting.
     #[test]
     fn the_guests_copy_of_the_default_home_name_still_matches_ours() {
+        let ours = crate::DEFAULT_HOME.as_str();
+        let name = Path::new(ours)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_owned();
         assert!(
-            Path::new(crate::DEFAULT_HOME)
-                .file_name()
-                .is_some_and(|n| n == openbot_guest::DEFAULT_HOME_DIR),
-            "`{}` no longer ends with `{}`, so the guest's guard looks in a directory nothing uses",
-            crate::DEFAULT_HOME,
-            openbot_guest::DEFAULT_HOME_DIR
+            openbot_guest::DEFAULT_HOME_DIRS.contains(&name.as_str()),
+            "`{ours}` ends with `{name}`, which the guest does not know, so its guard looks in directories nothing uses: {:?}",
+            openbot_guest::DEFAULT_HOME_DIRS
         );
     }
 

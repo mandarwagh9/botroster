@@ -138,6 +138,12 @@ jobs:
   bundle:
     if: startsWith(github.ref, 'refs/tags/v')
     name: bundle (${{ matrix.os }})
+    # An installer built from code whose tests failed is worse than no
+    # installer: it is a download that carries a known-broken build to
+    # somebody who will not be reading the CI log.
+    needs: [test, msrv]
+    permissions:
+      contents: write
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -177,4 +183,48 @@ jobs:
             target/release/bundle/**/*.dmg
             target/release/bundle/**/*.deb
             target/release/bundle/**/*.AppImage
+            target/release/bundle/**/*.sha256
+            target/release/bundle/**/*.sha256
           if-no-files-found: error
+
+      # An unsigned installer asks a person to click past a warning, so give
+      # them something to check it against. One `.sha256` beside each file,
+      # written by the job that built it.
+      # An unsigned installer asks a person to click past a warning, so give
+      # them something to check it against: one `.sha256` beside each file,
+      # written by the job that built it.
+      #
+      # macOS ships `shasum` and not `sha256sum`, so pick whichever is here
+      # rather than assuming the GNU name and failing on one leg of the matrix.
+      - name: checksum every installer
+        shell: bash
+        run: |
+          set -eu
+          if command -v sha256sum >/dev/null; then
+            sum() { sha256sum "$1"; }
+          else
+            sum() { shasum -a 256 "$1"; }
+          fi
+          found=0
+          while IFS= read -r f; do
+            found=1
+            dir=$(dirname "$f")
+            base=$(basename "$f")
+            (cd "$dir" && sum "$base" > "$base.sha256")
+            echo "checksummed $base"
+          done < <(find target/release/bundle -type f                      \( -name '*.msi' -o -name '*.exe' -o -name '*.dmg'                         -o -name '*.deb' -o -name '*.AppImage' \))
+          test "$found" = 1 || { echo "the bundler produced no installer"; exit 1; }
+
+      # A workflow artifact is a zip behind a login that expires in 90 days,
+      # which is not a download link. The installers go on the release itself.
+      - name: attach the installers to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          fail_on_unmatched_files: true
+          files: |
+            target/release/bundle/**/*.msi
+            target/release/bundle/**/*.exe
+            target/release/bundle/**/*.dmg
+            target/release/bundle/**/*.deb
+            target/release/bundle/**/*.AppImage

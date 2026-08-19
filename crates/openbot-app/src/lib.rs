@@ -133,6 +133,11 @@ pub struct AppState {
     /// viewer, so closing the panel closes the port instead of leaving
     /// something that can drive a signed-in computer listening.
     computer: Mutex<Option<viewer::Viewer>>,
+    /// A computer this window started, when there was none to connect to.
+    /// `None` when one was already running: that one belongs to whoever
+    /// started it, and disconnecting must not take it away from them.
+    /// Dropping this kills the child, which is how it stops.
+    started: Mutex<Option<hub::Started>>,
     /// Updates drained from the engine's one stream, kept per session so no
     /// conversation can eat another's.
     inbox: Mutex<Inbox>,
@@ -157,6 +162,7 @@ impl AppState {
             pending: Mutex::new(HashMap::new()),
             where_: Mutex::new(None),
             computer: Mutex::new(None),
+            started: Mutex::new(None),
             inbox: Mutex::new(Inbox::default()),
             mode,
         }
@@ -411,6 +417,34 @@ async fn connect(
     let reach = hub::reach(&here.openbot, &here.hub)
         .await
         .unwrap_or_else(|e| hub::Reach::Unreachable(e.to_string()));
+
+    // Nothing there: start one. A window whose answer to "no computer" is
+    // "open a terminal" is not an application, and the person who installed it
+    // may not have a terminal open or know what to type in it.
+    //
+    // Only when this window started it does it own it. A hub that was already
+    // serving belongs to whoever started it, and `started` stays `None` so
+    // disconnecting leaves it running.
+    let reach = match reach {
+        serving @ hub::Reach::Serving(_) => serving,
+        hub::Reach::Unreachable(first) => {
+            match hub::start(&here.openbot, &here.home, &here.hub, STARTUP_PATIENCE).await {
+                Ok(child) => {
+                    *state.started.lock().await = Some(child);
+                    hub::reach(&here.openbot, &here.hub)
+                        .await
+                        .unwrap_or_else(|e| hub::Reach::Unreachable(e.to_string()))
+                }
+                // Report why starting one failed, not the original refusal:
+                // "connection refused" is what a person expects to see before
+                // anything is running, and it says nothing about why the
+                // attempt to run it did not work. The refusal is kept as the
+                // tail so a wrong hub URL is still visible.
+                Err(e) => hub::Reach::Unreachable(format!("{e} (before that: {first})")),
+            }
+        }
+    };
+
     *state.where_.lock().await = Some(here);
     Ok(match reach {
         hub::Reach::Serving(tools) => Connected {
@@ -425,6 +459,14 @@ async fn connect(
         },
     })
 }
+
+/// How long the window waits for a computer it started to answer.
+///
+/// A first run creates the workspace and starts a browser, which is slower
+/// than every run after it. Long enough for a cold start on a slow disk, short
+/// enough that a computer which will never answer is reported rather than left
+/// spinning.
+const STARTUP_PATIENCE: Duration = Duration::from_secs(30);
 
 /// What connecting found: an agent, and whether there is a computer behind it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -457,6 +499,10 @@ async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     // The viewer does not outlive the connection. A disconnected window with
     // a live port behind it is a port nobody is watching.
     *state.computer.lock().await = None;
+    // And a computer this window started. Dropping it kills the child. One it
+    // did not start is `None` here and is left running, because disconnecting
+    // a window is not a reason to stop a computer somebody else is using.
+    *state.started.lock().await = None;
     // And the backlog: updates held for sessions that can no longer be
     // addressed.
     state.inbox.lock().await.clear();
@@ -1006,32 +1052,28 @@ fn sidecar() -> Option<PathBuf> {
 ///
 /// The field is filled with a real, expanded path, the way the runtime field
 /// is filled by [`default_openbot`]. A literal `~/.openbot` must not be used:
-/// nothing expands a tilde on the way to a subprocess, so openbot would take it
-/// literally and create a directory called `~` beside wherever OPENBOT was
+/// nothing expands a tilde on the way to a subprocess, so openbot would take
+/// it literally and create a directory called `~` beside wherever OPENBOT was
 /// launched from.
 ///
-/// openbot's own default is `./openbot-data`, relative to wherever it was run.
-/// That is right for a terminal and wrong for a window: an installed
-/// application's working directory is not a place a person chose.
+/// The value comes from [`openbot_proto::default_home`], which the runtime
+/// uses for its own default too. One definition on purpose: this window
+/// offered `~/.openbot` while the runtime defaulted to `./openbot-data`, so
+/// connecting a window to a computer started in a terminal read each from a
+/// different home. Nothing errored; the roster was just empty. Held by
+/// `the_window_and_the_binary_default_to_the_same_home`.
 #[tauri::command]
 fn default_home() -> String {
-    home_dir().map_or_else(
-        // No home directory at all is close to impossible; `openbot-data`
-        // beside the app is at least a real relative path rather than a
-        // tilde nothing expands.
-        || "openbot-data".to_owned(),
-        |h| h.join(".openbot").display().to_string(),
-    )
+    connect_panel_home()
 }
 
-/// This user's home directory, without taking a dependency for it.
-fn home_dir() -> Option<PathBuf> {
-    // `USERPROFILE` on Windows, `HOME` everywhere else: what the shell means
-    // by `~`.
-    let key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
-    std::env::var_os(key)
-        .map(PathBuf::from)
-        .filter(|p| !p.as_os_str().is_empty())
+/// The home the connect panel offers, reachable from a test.
+///
+/// Separate from the command above because `#[tauri::command]` generates
+/// same-named macros that collide when the function it decorates is public.
+#[must_use]
+pub fn connect_panel_home() -> String {
+    openbot_proto::default_home().display().to_string()
 }
 
 /// A native folder picker; the window has no file access of its own.

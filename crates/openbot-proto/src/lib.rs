@@ -789,3 +789,74 @@ mod tests {
         assert_eq!(e.data.unwrap()["reason"], "idle_timeout");
     }
 }
+
+/// Where a person's Bots, secrets and connectors live by default.
+///
+/// One definition, because two would drift and did: the command line
+/// defaulted to `./openbot-data` and the desktop window to `~/.openbot`, so
+/// starting a computer in a terminal and opening the window pointed each at a
+/// different home. Nothing failed loudly. The window connected to a hub that
+/// was serving Bots it could not see, which reads as an empty install.
+///
+/// Absolute, not relative. A home is long-lived and a relative one moves with
+/// whatever directory a person happened to be in, so `openbot bot ls` in two
+/// terminals would list two different sets of Bots. `~/.openbot` follows the
+/// same convention as the other per-user tool directories.
+#[must_use]
+pub fn default_home() -> std::path::PathBuf {
+    // `USERPROFILE` on Windows and `HOME` everywhere else: what a shell means
+    // by `~`.
+    let key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    home_under(std::env::var_os(key).as_deref())
+}
+
+/// The default home for a given value of the home-directory variable.
+///
+/// Split from [`default_home`] so it can be tested without setting an
+/// environment variable, which is `unsafe` in this edition and racy across
+/// threads besides.
+///
+/// An empty or absent value falls back to `openbot-data` in the working
+/// directory: joining onto an empty string yields a bare relative `.openbot`
+/// that looks like a real answer and is not one. A machine with no home
+/// directory is close to impossible, and this is still better than a tilde
+/// nothing expands.
+fn home_under(raw: Option<&std::ffi::OsStr>) -> std::path::PathBuf {
+    raw.filter(|v| !v.is_empty()).map_or_else(
+        || std::path::PathBuf::from("openbot-data"),
+        |h| std::path::Path::new(h).join(".openbot"),
+    )
+}
+
+#[cfg(test)]
+mod home_tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    /// The default is absolute, which is the whole point: a relative home
+    /// moves with the shell, so `openbot bot ls` in two directories would list
+    /// two different sets of Bots.
+    #[test]
+    fn the_default_home_does_not_move_with_the_working_directory() {
+        let under = home_under(Some(OsStr::new(if cfg!(windows) {
+            r"C:\Users\someone"
+        } else {
+            "/home/someone"
+        })));
+        assert!(
+            under.is_absolute(),
+            "a relative default home moves with the shell: {}",
+            under.display()
+        );
+        assert!(under.ends_with(".openbot"), "{}", under.display());
+    }
+
+    #[test]
+    fn an_empty_home_variable_is_no_home_at_all() {
+        assert_eq!(
+            home_under(Some(OsStr::new(""))),
+            std::path::PathBuf::from("openbot-data")
+        );
+        assert_eq!(home_under(None), std::path::PathBuf::from("openbot-data"));
+    }
+}

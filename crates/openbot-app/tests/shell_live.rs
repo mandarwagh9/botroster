@@ -1092,9 +1092,44 @@ fn connecting_says_whether_there_is_a_computer_behind_the_hub() {
     );
     assert_eq!(found["why"], serde_json::Value::Null);
 
-    // A hub that is not there: still connects (the roster reads without one
-    // and a mistyped URL has to be fixable from inside the window) but it
-    // does not claim a computer.
+    // Nothing at the hub: the window starts a computer rather than reporting
+    // its absence, because an installed application whose answer is "open a
+    // terminal and type `openbot up`" is not one. Held end to end by
+    // `openbot-desktop`'s `start_live`.
+    let quiet = Shell::build(Mode::Reply);
+    let free = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("a free port")
+        .local_addr()
+        .expect("its address")
+        .port();
+    let started_home = tempfile::tempdir().expect("a home to start one in");
+    let found = quiet
+        .call(
+            "connect",
+            json!({
+                "openbot": common::up::openbot().to_str().unwrap(),
+                "home": started_home.path().to_str().unwrap(),
+                "hub": format!("ws://127.0.0.1:{free}/v1/tools"),
+            }),
+        )
+        .expect("connect");
+    assert_eq!(
+        found["computer"], true,
+        "nothing was serving, so the window should have started one: {found}"
+    );
+    // Disconnect stops what it started; leaving it would hold the port and the
+    // workspace lock for every later test in this file.
+    quiet.call("disconnect", json!({})).expect("disconnect");
+
+    // A computer that cannot be started: still connects (the roster reads
+    // without one and a mistyped URL has to be fixable from inside the
+    // window) but it does not claim a computer, and it says why.
+    //
+    // The port is held open by this test, so the daemon cannot bind it and
+    // exits while starting. That is the realistic failure: something else on
+    // the machine is already using the port the window was pointed at.
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").expect("a port to hold");
+    let held = taken.local_addr().expect("its address").port();
     let orphan = Shell::build(Mode::Reply);
     let found = orphan
         .call(
@@ -1102,13 +1137,13 @@ fn connecting_says_whether_there_is_a_computer_behind_the_hub() {
             json!({
                 "openbot": common::up::openbot().to_str().unwrap(),
                 "home": home.path().to_str().unwrap(),
-                "hub": "ws://127.0.0.1:59999/v1/tools",
+                "hub": format!("ws://127.0.0.1:{held}/v1/tools"),
             }),
         )
-        .expect("connecting to a dead hub is not a failure to connect");
+        .expect("connecting without a computer is not a failure to connect");
     assert_eq!(
         found["computer"], false,
-        "a hub that refused the connection was reported as serving: {found}"
+        "a computer that could not be started was reported as serving: {found}"
     );
     assert!(
         found["why"]

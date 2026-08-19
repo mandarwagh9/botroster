@@ -2619,6 +2619,7 @@ dependencies = [
  "agent-client-protocol",
  "openbot-desktop",
  "openbot-guest",
+ "openbot-proto",
  "rfd",
  "serde",
  "serde_json",

@@ -318,3 +318,63 @@ fn a_tool_update_that_is_not_a_result_renders_nothing() {
     );
     assert!(with(v1::ToolCallStatus::Pending).is_none());
 }
+
+/// The window and the binary agree on where a person's Bots live.
+///
+/// They did not. The binary defaulted to `./openbot-data`, relative to
+/// whatever directory the shell was in; the window defaulted to `~/.openbot`.
+/// Start a computer in a terminal, open the window, press Connect, and the
+/// window attached to a hub serving Bots from a different home than the one it
+/// was reading. Nothing errored. The roster was simply empty, which reads as a
+/// broken install.
+///
+/// Asked of the shipped binary's own help rather than of a shared constant: a
+/// constant compared against itself agrees forever, and what a person gets is
+/// what `--help` prints.
+#[test]
+fn the_window_and_the_binary_default_to_the_same_home() {
+    let openbot = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("target")
+        .join(if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        })
+        .join(if cfg!(windows) {
+            "openbot.exe"
+        } else {
+            "openbot"
+        });
+    let out = Command::new(&openbot)
+        .args(["bot", "ls", "--help"])
+        .env("NO_COLOR", "1")
+        .env_remove("OPENBOT_HOME")
+        .output()
+        .unwrap_or_else(|e| panic!("could not run {}: {e}", openbot.display()));
+    let text = String::from_utf8_lossy(&out.stdout);
+    let at = text
+        .find("[default: ")
+        .unwrap_or_else(|| panic!("`openbot bot ls --help` prints no default:\n{text}"));
+    let rest = &text[at + "[default: ".len()..];
+    let theirs = rest[..rest.find(']').expect("a closing bracket")].trim();
+
+    let ours = openbot_app::connect_panel_home();
+    assert_eq!(
+        theirs, ours,
+        "the window would read a different home than the computer it starts"
+    );
+}
+
+/// The shared default is absolute, so it means the same thing from every
+/// working directory. A relative home would make `openbot bot ls` in two
+/// directories list two different sets of Bots.
+#[test]
+fn the_default_home_is_absolute() {
+    let home = openbot_app::connect_panel_home();
+    assert!(
+        std::path::Path::new(&home).is_absolute(),
+        "a relative home moves with the shell: {home}"
+    );
+}

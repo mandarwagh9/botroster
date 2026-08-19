@@ -137,16 +137,17 @@ fn refuse_control_plane_home(root: &Path) -> std::io::Result<()> {
     //
     // A guest is told its workspace and nothing else, so it cannot know where
     // `--home` points; only `openbot up` knows both, and it refuses the overlap.
-    // What the guest can check without walking the tree is the default:
-    // `--home` is `./openbot-data`, so `--workspace .` lands the token store
-    // exactly one level down, where a root-only check would miss it.
+    // What the guest can check without walking the tree is a home one level
+    // down: `--workspace .` next to a home in the same directory lands the
+    // token store where a root-only check would miss it.
     //
     // This is intentionally not a scan. A model can write `notes/secrets.json`
     // into its own workspace, and a guest that refused to start over any file
-    // the model named would be one the model can switch off. This is one
-    // extra path, and the name is openbot's own default rather than anything a
-    // person chose.
-    let candidates = [root.to_path_buf(), root.join(crate::DEFAULT_HOME_DIR)];
+    // the model named would be one the model can switch off. These are a
+    // couple of extra paths, and the names are openbot's own defaults rather
+    // than anything a person chose.
+    let mut candidates = vec![root.to_path_buf()];
+    candidates.extend(crate::DEFAULT_HOME_DIRS.iter().map(|d| root.join(d)));
     for dir in &candidates {
         for marker in ["secrets.json", "connectors.json"] {
             if dir.join(marker).exists() {

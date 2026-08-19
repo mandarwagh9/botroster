@@ -26,7 +26,14 @@ use crate::approve::ApproveMode;
 use crate::render::Renderer;
 
 /// Where Bots, secrets and connectors live.
-pub const DEFAULT_HOME: &str = "./openbot-data";
+/// Where Bots live unless told otherwise.
+///
+/// Resolved once, from [`openbot_proto::default_home`], so this binary and the
+/// desktop window cannot disagree about where a person's Bots are. They did:
+/// this was `./openbot-data`, relative to whatever directory the shell was in,
+/// while the window used `~/.openbot`.
+pub static DEFAULT_HOME: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| openbot_proto::default_home().display().to_string());
 /// The computer's files. Never the same directory as the home; see `up::Paths`.
 pub const DEFAULT_WORKSPACE: &str = "./workspace";
 
@@ -67,7 +74,7 @@ enum Command {
         bind: String,
 
         /// Where Bots, secrets and connectors live.
-        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME, global = true)]
+        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME.as_str(), global = true)]
         home: std::path::PathBuf,
 
         /// The computer's files. Defaults to the durable volume inside --home,
@@ -134,7 +141,7 @@ enum Command {
         bot: Option<String>,
 
         /// Where bot profiles and conversations live.
-        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME, global = true)]
+        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME.as_str(), global = true)]
         home: std::path::PathBuf,
 
         /// Most recent messages to carry into the run.
@@ -174,7 +181,7 @@ enum Command {
         bot: Option<String>,
 
         /// Where bot profiles and conversations live.
-        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME, global = true)]
+        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME.as_str(), global = true)]
         home: std::path::PathBuf,
 
         /// Serve without a model: every prompt gets one scripted reply.
@@ -270,7 +277,7 @@ enum Command {
     /// prompts, never reduce safety.
     Permission {
         /// Where the config lives. Must match the hub's `--home`.
-        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME, global = true)]
+        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME.as_str(), global = true)]
         home: std::path::PathBuf,
 
         #[command(subcommand)]
@@ -279,7 +286,7 @@ enum Command {
 
     Secret {
         /// Where secrets live. Must match the hub's `--home`.
-        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME, global = true)]
+        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME.as_str(), global = true)]
         home: std::path::PathBuf,
 
         #[command(subcommand)]
@@ -289,7 +296,7 @@ enum Command {
     /// Procedures a Bot can look up when it needs them.
     Skill {
         /// Where skills live. Must match the hub's `--home`.
-        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME, global = true)]
+        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME.as_str(), global = true)]
         home: std::path::PathBuf,
 
         #[command(subcommand)]
@@ -299,7 +306,7 @@ enum Command {
     /// Remote MCP servers the hub calls on a Bot's behalf.
     Connector {
         /// Where connector definitions live. Must match the hub's `--home`.
-        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME, global = true)]
+        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME.as_str(), global = true)]
         home: std::path::PathBuf,
 
         #[command(subcommand)]
@@ -326,7 +333,7 @@ enum Command {
     Search {
         /// What to look for. Matched without regard to case.
         query: Vec<String>,
-        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME)]
+        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME.as_str())]
         home: std::path::PathBuf,
         /// Include hidden Bots.
         #[arg(long)]
@@ -338,7 +345,7 @@ enum Command {
 
     /// Is anything wrong? One screen: hub, computer, model, routines.
     Status {
-        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME, global = true)]
+        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME.as_str(), global = true)]
         home: std::path::PathBuf,
     },
 
@@ -348,7 +355,7 @@ enum Command {
     /// Create and manage Bots.
     Bot {
         /// Where bot profiles and conversations live.
-        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME, global = true)]
+        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME.as_str(), global = true)]
         home: std::path::PathBuf,
 
         #[command(subcommand)]
@@ -358,7 +365,7 @@ enum Command {
     /// Put several Bots on one thread.
     Group {
         /// Where bot profiles, groups and conversations live.
-        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME, global = true)]
+        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME.as_str(), global = true)]
         home: std::path::PathBuf,
 
         #[command(subcommand)]
@@ -367,7 +374,7 @@ enum Command {
 
     /// Deliver an event, running any routine that matches it.
     Event {
-        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME, global = true)]
+        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME.as_str(), global = true)]
         home: std::path::PathBuf,
 
         #[command(subcommand)]
@@ -376,7 +383,7 @@ enum Command {
 
     /// Read or change the settings in config.toml.
     Config {
-        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME, global = true)]
+        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME.as_str(), global = true)]
         home: std::path::PathBuf,
 
         #[command(subcommand)]
@@ -386,7 +393,7 @@ enum Command {
     /// Recurring work a Bot does on a schedule.
     Routine {
         /// Where bot profiles, routines and conversations live.
-        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME, global = true)]
+        #[arg(long, env = "OPENBOT_HOME", default_value = DEFAULT_HOME.as_str(), global = true)]
         home: std::path::PathBuf,
 
         #[command(subcommand)]
@@ -401,7 +408,7 @@ enum Command {
     /// deployment must not expose it to members; see SPEC 6.0.
     Computer {
         /// Store root.
-        #[arg(long, env = "OPENBOT_STORE", default_value = DEFAULT_HOME, global = true)]
+        #[arg(long, env = "OPENBOT_STORE", default_value = DEFAULT_HOME.as_str(), global = true)]
         store: std::path::PathBuf,
 
         /// Volume to operate on.

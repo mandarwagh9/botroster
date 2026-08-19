@@ -26,14 +26,30 @@ does not, and comes back when it needs your approval.
 OPENBOT is an independent, self-hostable implementation of the shape xAI shipped as Grok Bot. It is
 not affiliated with xAI and contains none of their code. See [Provenance](#provenance).
 
-## Try it
+## Install
 
-Two terminals. No API key is needed for the demo.
+Download it, open it, and press Connect. The window starts its own computer, so there is no
+second thing to run and no terminal involved.
+
+**[Download the latest release][latest]** — `.exe` installer for Windows, `.dmg` for macOS,
+`.AppImage` or `.deb` for Linux.
+
+[latest]: https://github.com/mandarwagh9/openbot/releases/latest
+
+The builds are **not code-signed**, so the first launch shows a warning: on Windows,
+*More info → Run anyway*; on macOS, right-click the app → *Open*. Signing needs a paid certificate
+from Microsoft and Apple. Building from source (below) avoids the warning entirely, and every
+file on the [release page][latest] has a `.sha256` beside it so you can check what you downloaded.
+
+The demo needs no API key. To point a Bot at a real model, open **Settings**, or see
+[Configuration](#configuration).
+
+## Or from source
 
 ```sh
 cargo install --path crates/openbot-cli        # once
-openbot up                                     # 1. a hub and a computer
-openbot run --demo --approve auto "prove it"   # 2. a scripted run against real tools
+openbot up                                     # a hub and a computer
+openbot run --demo --approve auto "prove it"   # a scripted run against real tools
 ```
 
 To open the desktop client against the same hub:
@@ -46,6 +62,9 @@ cargo run -p openbot-app -- --demo-tools
 Ctrl-C stops everything. It runs the hub and one guest in a single process, which is right for
 trying it and wrong for anything else; `openbotd` and `openbot-guest` run separately when the guest
 belongs somewhere other than your machine.
+
+Everything lives in `~/.openbot` by default, and the window and the command line read the same
+one, so a Bot you make in either shows up in the other.
 
 ## What you get
 

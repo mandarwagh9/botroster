@@ -6,16 +6,22 @@
 
 #![forbid(unsafe_code)]
 
-/// The directory name `openbot --home` defaults to.
+/// Directory names a home is likely to have, for the guard in `tools.rs`.
 ///
 /// Duplicated from `openbot-cli` rather than shared, because the dependency
 /// runs the other way: the CLI knows about the guest, not the reverse. The
-/// guard in `tools.rs` uses it to catch the one overlap a guest can detect on
-/// its own: a workspace with the default home directory inside it.
+/// guard uses these to catch the one overlap a guest can detect on its own: a
+/// workspace with a home directory inside it.
 ///
-/// `openbot-cli` has a test asserting its own default still ends with this, so
-/// the copy cannot drift from the value it mirrors.
-pub const DEFAULT_HOME_DIR: &str = "openbot-data";
+/// Two entries. `.openbot` is what `--home` defaults to now. `openbot-data` is
+/// what it defaulted to before, and is still what somebody who followed older
+/// instructions will have passed explicitly. A guard that only knew the
+/// current default would stop protecting the people most likely to have the
+/// overlapping layout.
+///
+/// `openbot-cli` has a test asserting its own default is one of these, so the
+/// copy cannot drift from the value it mirrors.
+pub const DEFAULT_HOME_DIRS: &[&str] = &[".openbot", "openbot-data"];
 
 /// Location of the browser profile for a plain workspace: beside it, never
 /// inside it.
