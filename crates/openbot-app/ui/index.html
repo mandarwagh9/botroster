@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OPENBOT</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+<main id="app">
+  <!-- Connect. The whole first screen until there is an agent behind it,
+       because every other surface here is a lie without one. -->
+  <section id="connect" class="panel">
+    <!-- The product says its own name on the first screen. The roster header
+         has the mark and the wordmark; without them here, the very first
+         thing a new install shows is three unexplained path fields in an
+         otherwise empty window. -->
+    <header class="connect-head">
+      <span class="mark" aria-hidden="true">O</span>
+      <h1>OPENBOT</h1>
+    </header>
+    <p class="connect-lede">
+      Your Bots live in a <strong>openbot</strong> you run yourself. Point this
+      window at one — the defaults match <code>openbot up</code> on this machine.
+    </p>
+    <div class="fields">
+      <label for="openbot-path">openbot binary</label>
+      <input id="openbot-path" spellcheck="false" placeholder="openbot" />
+      <button id="pick-openbot" title="Choose the openbot binary">…</button>
+      <label for="home-path">agent home</label>
+      <!-- Filled at load by `default_home`. The placeholder is only what
+           shows if that fails; it must not be a tilde, which openbot would take
+           literally and turn into a folder called `~`. -->
+      <input id="home-path" spellcheck="false"
+             placeholder="a folder for your Bots" />
+      <button id="pick-home" title="Choose a folder">…</button>
+      <label for="hub-url">hub</label>
+      <!-- openbot's own default, and it has to stay that way: this is the value
+           every first Connect uses, and a wrong scheme or port here means the
+           first thing a new person sees is "no computer". `tests/defaults.rs`
+           pins it against the binary. -->
+      <input id="hub-url" class="wide" spellcheck="false"
+             value="ws://127.0.0.1:8443/v1/tools" />
+    </div>
+    <p id="connect-error" class="error"></p>
+    <div class="actions">
+      <button id="connect-btn" class="primary">Connect</button>
+    </div>
+  </section>
+
+  <!-- The workspace: a roster on the left, one conversation on the right. -->
+  <div id="workspace" class="workspace hidden">
+    <nav class="roster" aria-label="Bots">
+      <header class="roster-head">
+        <span class="mark" aria-hidden="true">O</span>
+        <h1>OPENBOT</h1>
+      </header>
+
+      <button id="new-bot" class="new-bot">
+        <span aria-hidden="true">+</span> New Bot
+      </button>
+
+      <!-- Directly under the button it is talking about. Both roster lists
+           carry `flex: 1`, so an empty list still takes the whole sidebar and
+           a note placed after them sits pinned above the footer: the one
+           sentence explaining what a Bot is, hundreds of pixels from
+           "+ New Bot". -->
+      <p id="roster-empty" class="roster-empty hidden">
+        No Bots yet. A Bot is a teammate with one job — “Talent Scout”,
+        “Expense Manager” — and its own conversation that survives.
+      </p>
+
+      <ul id="bots" class="bots"></ul>
+      <h3 id="groups-head" class="roster-section hidden">Groups</h3>
+      <ul id="groups" class="bots"></ul>
+      <p id="roster-error" class="error hidden"></p>
+
+      <footer class="roster-foot">
+        <button id="toggle-hidden" class="link">Show hidden chats</button>
+        <button id="rules-btn" class="link">Settings</button>
+        <button id="credentials" class="link">Credentials</button>
+        <button id="disconnect" class="link">Disconnect</button>
+      </footer>
+    </nav>
+
+    <section class="conversation">
+      <header class="convo-head">
+        <div class="who">
+          <!-- Filled by `markEl`, from the same function the roster uses, so
+               the two surfaces cannot disagree about how a Bot looks. -->
+          <span id="bot-mark"></span>
+          <h2 id="bot-name"></h2>
+          <p id="bot-title" class="bot-title"></p>
+        </div>
+        <!-- Beside the name it edits, which is where somebody looks for it.
+             Hidden when no conversation is open: there is nothing to edit
+             then, and a live button over a blank name does nothing when
+             clicked. Starts hidden, and `enterWorkspace` calls
+             `closeConversation` as well; `closeConversation` and `openBot`
+             alone hold the invariant after any transition but not on the
+             screen a new install opens on. -->
+        <button id="edit-bot" class="link hidden">Edit</button>
+        <button id="computer" class="link computer-btn">Agent Computer</button>
+        <span id="status" class="status">connected</span>
+      </header>
+
+      <!-- The agent is running and there is no computer behind it. Said here
+           rather than only in the status pill, because it is the reason
+           nothing a person tries next will work. -->
+      <div id="no-computer" class="no-computer hidden" role="status">
+        <div>
+          <strong>No computer.</strong> The agent is running, but nothing
+          answered at the hub, so a Bot has nothing to work on. Start one with
+          <code>openbot up</code>, then reconnect.
+          <span id="no-computer-why" class="why"></span>
+        </div>
+        <button id="no-computer-dismiss" class="link">Dismiss</button>
+      </div>
+
+      <div id="log" class="log hidden" aria-live="polite"></div>
+
+      <p id="no-bot" class="no-bot">
+        Choose a Bot on the left, or make one.
+      </p>
+
+      <!-- The Agent Computer. An iframe onto the shipped viewer rather than a
+           second implementation of it, so the takeover lock a person relies on
+           is the one the hub already enforces and already has tests. -->
+      <section id="computer-panel" class="computer-panel hidden">
+        <header class="computer-head">
+          <h3>Agent Computer</h3>
+          <p class="hint">
+            Take control here for a password, a 2FA code or a CAPTCHA — never
+            in chat. While you hold it the Bot is locked out of this computer.
+          </p>
+          <button id="close-computer" class="link">Close</button>
+        </header>
+        <p id="computer-error" class="error"></p>
+        <iframe id="computer-frame" title="Agent Computer"></iframe>
+      </section>
+
+      <form id="composer" class="composer hidden">
+        <!-- `@` names a teammate, a routine or a connected app; `/` names a
+             saved skill. Above the box rather than below it, so it never
+             covers what is being typed. -->
+        <div id="mentions" class="mentions hidden">
+          <ul id="mentions-list" class="mentions-list" role="listbox"
+              aria-label="Insert a name"></ul>
+          <p id="mentions-note" class="mentions-note hidden"></p>
+        </div>
+        <!-- What is attached to the next message. Above the box for the same
+             reason the mention menu is: it must never cover what is being
+             typed. Each chip removes itself, because attaching the wrong file
+             is the ordinary mistake and the only alternative would be sending
+             it. -->
+        <ul id="attached" class="attached hidden" aria-label="Attached files"></ul>
+        <textarea id="input" rows="2" placeholder="Ask the Bot…"></textarea>
+        <div class="composer-actions">
+          <button type="button" id="attach" class="link" title="Attach a file">
+            Attach
+          </button>
+          <span class="spacer"></span>
+          <button type="button" id="cancel" class="hidden">Stop</button>
+          <button type="submit" id="send" class="primary">Send</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <!-- Approval. Above everything, because nothing else on screen matters
+       while a Bot is waiting to be told whether it may act. -->
+  <!-- `tabindex="-1"` so the box itself can take focus when it opens: not
+       reachable by Tab, but focusable by script. Focus goes here rather than
+       to a button so that no single keystroke can answer; see
+       `applyModality`. -->
+  <div id="dialog" class="dialog hidden" role="dialog" aria-modal="true"
+       tabindex="-1" aria-labelledby="dialog-heading">
+    <div class="dialog-card">
+      <h2 id="dialog-heading">Approval needed</h2>
+      <p id="dialog-tool" class="dialog-tool"></p>
+      <dl id="dialog-fields" class="dialog-fields"></dl>
+      <!-- Shown only when the Bot is asking for a credential rather than for
+           permission to act. `type=password` because a window can mask what a
+           terminal cannot, and the note says what happens to the value: the
+           whole argument of the broker is that the Bot can use a credential
+           and never read one, and nobody should have to already know that. -->
+      <div id="dialog-secret" class="dialog-secret hidden">
+        <!-- The Bot's own reason, as prose. The approval dialog renders its
+             arguments in monospace because they are literal values a person is
+             checking character by character; a sentence is not, and setting it
+             in monospace makes a reason look like data. -->
+        <p id="dialog-secret-why" class="dialog-secret-why"></p>
+        <label for="dialog-secret-value" id="dialog-secret-label">Value</label>
+        <input id="dialog-secret-value" type="password" autocomplete="off"
+               spellcheck="false" autocapitalize="off" />
+        <p class="dialog-secret-note">
+          Stored for the Bot to use — it is never shown the value.
+        </p>
+      </div>
+      <div id="dialog-options" class="dialog-options"></div>
+      <p id="dialog-error" class="error hidden"></p>
+      <p id="dialog-queue" class="dialog-queue"></p>
+    </div>
+  </div>
+
+  <!-- The command palette. Ctrl/Cmd+K. Switching between teammates is the
+       most frequent thing a person does here, and reaching for the mouse to
+       do it is the thing a palette removes. -->
+  <div id="palette" class="dialog hidden" role="dialog" aria-modal="true"
+       aria-label="Go to">
+    <div class="dialog-card palette-card">
+      <input id="palette-input" spellcheck="false" autocomplete="off"
+             placeholder="Go to a Bot, a group, or an action…" />
+      <ul id="palette-results" class="palette-results"></ul>
+      <p id="palette-empty" class="hint hidden">Nothing matches.</p>
+    </div>
+  </div>
+
+  <!-- Permission rules. deny beats ask beats allow, which is the engine's
+       ordering and not this page's to change. -->
+  <div id="rules-dialog" class="dialog hidden" role="dialog" aria-modal="true"
+       tabindex="-1"
+       aria-labelledby="rules-heading">
+    <div class="dialog-card">
+      <h2 id="rules-heading">Settings</h2>
+      <!-- One contiguous section: the Rules heading, the list and the form
+           that adds to it, before Connected apps and Runs on a schedule. A
+           heading placed after the other sections would meet the reader four
+           sections after the content it names, and leave the list itself
+           unlabelled. -->
+      <h2 class="section first">Rules</h2>
+      <p class="hint">
+        <strong>Refuse beats ask beats allow.</strong> A permissive rule can
+        never widen a restrictive one, so adding an allow can only reduce
+        prompts — never reduce safety. Read when the hub starts:
+        <strong>restart <code>openbot up</code> for a change to take effect.</strong>
+      </p>
+      <dl id="rules-list" class="dialog-fields"></dl>
+      <p id="rules-empty" class="hint hidden">
+        No rules. The shipped default applies: reading is free, changing asks.
+      </p>
+      <form id="rule-form" class="rule-form">
+        <select id="rule-action">
+          <option value="deny">Refuse</option>
+          <option value="require_approval">Ask</option>
+          <option value="allow">Allow</option>
+        </select>
+        <input id="rule-tool" spellcheck="false" placeholder="shell.exec or fs.*" />
+        <input id="rule-reason" spellcheck="false" placeholder="why (shown to the person)" />
+        <button type="submit" class="primary">Add</button>
+      </form>
+      <p id="rule-error" class="error"></p>
+      <h2 class="section">Connected apps</h2>
+      <dl id="connectors-list" class="dialog-fields"></dl>
+      <p id="connectors-empty" class="hint hidden">
+        Nothing connected. Add one with <code>openbot connector add</code>; it
+        needs a browser sign-in, which is not a form.
+      </p>
+
+      <h2 class="section">Runs on a schedule</h2>
+      <dl id="routines-list" class="dialog-fields"></dl>
+      <p id="routines-empty" class="hint hidden">
+        Nothing scheduled. A routine is the run nobody watches, so it is worth
+        seeing one listed here even when it is working.
+      </p>
+
+      <div class="dialog-options">
+        <button type="button" id="rules-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Credentials. The value is typed here and goes straight to the hub's
+       store; nothing ever reads one back, so this list shows names and
+       fingerprints only. -->
+  <div id="secrets-dialog" class="dialog hidden" role="dialog" aria-modal="true"
+       tabindex="-1"
+       aria-labelledby="secrets-heading">
+    <div class="dialog-card">
+      <h2 id="secrets-heading">Credentials</h2>
+      <p class="hint">
+        Held by the hub and substituted into a connector's request at the
+        moment of the call. Never shown to a Bot, never in a transcript, and
+        never readable again — a fingerprint is enough to tell two apart.
+      </p>
+      <dl id="secrets-list" class="dialog-fields"></dl>
+      <p id="secrets-empty" class="hint hidden">Nothing stored yet.</p>
+      <form id="secret-form" class="secret-form">
+        <input id="secret-name" spellcheck="false" placeholder="linear-token" />
+        <input id="secret-value" type="password" spellcheck="false"
+               placeholder="value" autocomplete="off" />
+        <button type="submit" class="primary">Store</button>
+      </form>
+      <p id="secret-error" class="error"></p>
+      <div class="dialog-options">
+        <button type="button" id="secrets-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Naming a new Bot. A prompt() would block the webview and the docs are
+       explicit that a Bot is created and then edited, so this asks for the
+       one thing it needs. -->
+  <div id="name-dialog" class="dialog hidden" role="dialog" aria-modal="true"
+       tabindex="-1"
+       aria-labelledby="name-heading">
+    <div class="dialog-card">
+      <h2 id="name-heading">Name the Bot</h2>
+      <p class="hint">
+        Give it one job. “Account Health” reuses its context; “General
+        Helper” has less to go on every time.
+      </p>
+      <form id="name-form">
+        <input id="new-name" spellcheck="false" placeholder="Talent Scout" />
+        <p id="name-error" class="error"></p>
+        <div class="dialog-options">
+          <button type="button" id="name-cancel">Cancel</button>
+          <button type="submit" class="primary">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Edit a Bot: what it is called, what it does, what it is for. The docs'
+       three fields, and no more: an avatar has nowhere to go and a fourth
+       box nobody asked for is a fourth thing to get wrong. -->
+  <div id="edit-dialog" class="dialog hidden" role="dialog" aria-modal="true"
+       tabindex="-1"
+       aria-labelledby="edit-heading">
+    <div class="dialog-card">
+      <h2 id="edit-heading">Edit Bot</h2>
+      <p class="hint">
+        Renaming keeps the Bot: its conversation, its place in any group and
+        anything it has scheduled all stay where they are.
+      </p>
+      <form id="edit-form">
+        <label class="field">
+          <span>Name</span>
+          <input id="edit-name" spellcheck="false" />
+        </label>
+        <label class="field">
+          <span>Title</span>
+          <input id="edit-title" spellcheck="false"
+                 placeholder="what it does, in a few words" />
+        </label>
+        <label class="field">
+          <span>Description</span>
+          <textarea id="edit-description" rows="3"
+                    placeholder="what it is for"></textarea>
+        </label>
+        <p id="edit-error" class="error"></p>
+        <div class="dialog-options">
+          <button type="button" id="edit-cancel">Cancel</button>
+          <button type="submit" class="primary">Save</button>
+        </div>
+      </form>
+
+      <!-- Copying a Bot is a different act from editing one, so it is below
+           the form rather than a fourth field in it, and it says what it
+           does not copy, which is the part people are surprised by. -->
+      <h2 class="section">Duplicate</h2>
+      <p class="hint">
+        Copies the name, title and description as a starting point.
+        <strong>The conversation is not copied</strong> — a copy made to cover
+        something else should not answer with the original's history.
+      </p>
+      <form id="dup-form" class="dup-form">
+        <input id="dup-name" spellcheck="false" placeholder="Talent Scout (EMEA)" />
+        <button type="submit">Duplicate</button>
+      </form>
+      <p id="dup-error" class="error"></p>
+
+      <!-- Hide. Between editing and deleting because that is what it is: a
+           smaller act than deleting and a larger one than renaming. The
+           warning is not decoration: a hidden Bot goes on running. -->
+      <h2 class="section">Sidebar</h2>
+      <p id="hide-what" class="hint"></p>
+      <div class="dialog-options">
+        <button type="button" id="hide-bot">Hide from sidebar</button>
+      </div>
+      <p id="hide-error" class="error"></p>
+
+      <!-- Delete. Last, styled as the refusal colour, and behind a confirm
+           that names what goes: "are you sure?" tells somebody nothing they
+           did not already know, and the surprise here is the routine. -->
+      <h2 class="section">Delete</h2>
+      <div id="del-ask">
+        <p class="hint">
+          A Bot is the thing that remembers. Deleting one destroys its
+          conversation and anything it has scheduled.
+        </p>
+        <button type="button" id="del-start" class="danger">Delete this Bot</button>
+      </div>
+      <div id="del-confirm" class="hidden">
+        <p id="del-what" class="hint"></p>
+        <div class="dialog-options">
+          <button type="button" id="del-cancel">Keep it</button>
+          <button type="button" id="del-go" class="danger">Delete</button>
+        </div>
+      </div>
+      <p id="del-error" class="error"></p>
+    </div>
+  </div>
+</main>
+  <script src="main.js"></script>
+  </body>
+</html>

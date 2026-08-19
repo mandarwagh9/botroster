@@ -1,0 +1,161 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Fail rather than skip if the browser is missing. The browser suite skips
+  # politely on a laptop without Chromium, which on a bare runner would mean a
+  # green badge over ~15 unexercised tests: including every assertion about
+  # synthetic clicks and keystrokes. A skip that reads as a pass is worse than
+  # a failure.
+  OPENBOT_REQUIRE_BROWSER: "1"
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linux is where a guest actually runs; macOS catches the
+        # unix-permissions path that Windows development never exercises.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # OPENBOT is a Tauri app, and its webview backend links against
+      # webkit2gtk on Linux: the guest crate is pure Rust, the window is
+      # not. Without these, every job below fails at the first `tauri`
+      # compile with pkg-config errors, so install them once per job.
+      - name: install tauri linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential \
+            curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+        # Ubuntu images ship no browser, so Linux downloads Chromium. macOS
+        # gets nothing: the hosted image already has real Google Chrome, and
+        # the Chromium-for-Testing arm64 build setup-chrome installs there
+        # never answers Page.enable over CDP: every headless/GPU flag
+        # combination hangs (probed 2026-08-14), while real Chrome answers
+        # every one. Real Chrome is also the browser a Mac user actually has.
+        if: runner.os == 'Linux'
+        with:
+          chrome-version: stable
+
+      # The guest finds a browser by looking in the usual install locations,
+      # which a runner-provided browser is not in.
+      - name: point the guest at a browser
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            echo "OPENBOT_BROWSER=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" >> "$GITHUB_ENV"
+          else
+            echo "OPENBOT_BROWSER=${{ steps.chrome.outputs.chrome-path }}" >> "$GITHUB_ENV"
+          fi
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: test
+        run: cargo test --workspace
+
+  # A separate job so a broken build on Windows is visible without holding up
+  # the real suite. Development happens here, so it must at least compile.
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --all-targets
+
+  # `rust-version` in Cargo.toml is a promise to anyone on an older toolchain,
+  # and nothing was keeping it. It said 1.82 while the code needed 1.89 for
+  # `File::try_lock`: a claim that had quietly become false, which is exactly
+  # what an unchecked claim does. Pin the floor and build against it.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install tauri linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential \
+            curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev
+      - uses: dtolnay/rust-toolchain@1.89
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets
+
+  # Packaging, on tags only. A full bundle on three platforms takes about ten
+  # minutes each, and running that on every push would buy one bit of
+  # information: "the installer still builds": for most of the CI budget.
+  # `windows-build` above already catches anything that breaks compilation.
+  #
+  # **Unsigned.** Signing needs a certificate and an identity, which is a
+  # decision for whoever ships this rather than a setting this file can
+  # default. Windows will show SmartScreen and macOS will refuse to open it
+  # without a right-click → Open; `README.md` says so where a person
+  # downloading one would read it.
+  bundle:
+    if: startsWith(github.ref, 'refs/tags/v')
+    name: bundle (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install tauri linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential             curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev             librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: install the tauri cli
+        run: cargo install tauri-cli --version "^2" --locked
+
+      # The runtime goes into the bundle with the app. An installer shipping
+      # only the client leaves whoever runs it with nothing to connect to,
+      # which is what shipped before anybody tried installing it.
+      - name: stage the runtime as a sidecar
+        run: sh scripts/sidecar.sh
+
+      - name: bundle
+        working-directory: crates/openbot-app
+        run: cargo tauri build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openbot-${{ matrix.os }}
+          path: |
+            target/release/bundle/**/*.msi
+            target/release/bundle/**/*.exe
+            target/release/bundle/**/*.dmg
+            target/release/bundle/**/*.deb
+            target/release/bundle/**/*.AppImage
+          if-no-files-found: error

@@ -1,0 +1,29 @@
+[package]
+name = "openbot-bots"
+version = "0.0.1"
+description = "OPENBOT Bots: named teammates with a standing brief and a conversation that survives"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+openbot-agent = { workspace = true }
+chrono = { workspace = true }
+chrono-tz = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+openbotd = { path = "../openbotd" }
+openbot-guest = { path = "../openbot-guest" }
+openbot-proto = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

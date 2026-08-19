@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/openbot-proto",
+    "crates/openbotd",
+    "crates/openbot-guest",
+    "crates/openbot-agent",
+    "crates/openbot-cli",
+    "crates/openbot-store",
+    "crates/openbot-bots",
+    "crates/openbot-desktop",
+    "crates/openbot-app",
+]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/mandarwagh9/openbot"
+rust-version = "1.89"
+
+[workspace.dependencies]
+openbot-proto = { path = "crates/openbot-proto" }
+openbot-agent = { path = "crates/openbot-agent" }
+openbot-store = { path = "crates/openbot-store" }
+openbot-bots = { path = "crates/openbot-bots" }
+
+anyhow = "1"
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync", "process", "io-util"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
+futures-util = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+url = "2"
+toml = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tempfile = "3"
+sha2 = "0.10"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = { version = "0.10", features = ["serde"] }
+# The published Agent Client Protocol SDK (Apache-2.0). Its wire types are
+# adopted rather than reimplemented — a hand-rolled copy of somebody else's
+# protocol is a copy that drifts. See docs/SPEC.md §9.
+agent-client-protocol = "2.0.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

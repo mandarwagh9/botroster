@@ -1,0 +1,697 @@
+//! Drives a real browser against a real page.
+//!
+//! Serves the page from a one-shot HTTP listener on loopback rather than
+//! reaching the internet: a test that needs a network is a test that fails for
+//! reasons unrelated to the code.
+//!
+//! Skipped when no browser is installed. A skip is reported explicitly; a
+//! silently passing test that never ran is worse than a failing one.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use openbot_guest::browser::{find_browser, Browser};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+const PAGE: &str = r#"<!doctype html><html><head><title>openbot test page</title></head>
+<body>
+  <h1>Hello from openbot</h1>
+  <p id="para">The quick brown fox.</p>
+  <a href="https://example.com/one">First link</a>
+  <a href="https://example.com/two">Second link</a>
+  <input id="field" type="text" value="">
+  <button id="btn" onclick="document.getElementById('para').innerText='clicked'">Press me</button>
+  <div id="typed"></div>
+  <script>
+    document.getElementById('field').addEventListener('input', e => {
+      document.getElementById('typed').innerText = 'saw: ' + e.target.value;
+    });
+  </script>
+</body></html>"#;
+
+/// A page built for testing input: everything is absolutely positioned so a
+/// click coordinate is knowable, and every event is recorded so the test can
+/// tell a real keystroke from a value that merely appeared.
+const INPUT_PAGE: &str = r#"<!doctype html><html><head><title>input</title>
+<style>body{margin:0;height:3000px}</style></head>
+<body>
+  <div id="target" style="position:absolute;left:100px;top:150px;width:80px;height:40px;background:#ccc"></div>
+  <input id="field" style="position:absolute;left:20px;top:20px;width:200px;height:24px">
+  <script>
+    window.__events = [];
+    const log = e => window.__events.push(e);
+    document.getElementById('target').addEventListener('click', e =>
+      log('click@' + Math.round(e.clientX) + ',' + Math.round(e.clientY)));
+    document.getElementById('target').addEventListener('mouseover', () => log('hover'));
+    const f = document.getElementById('field');
+    // keydown is the event Input.insertText does NOT produce; a field that
+    // filters keys or searches as you type depends on it.
+    f.addEventListener('keydown', e => log('keydown:' + e.key));
+    f.addEventListener('input', e => log('input:' + e.target.value));
+  </script>
+</body></html>"#;
+
+/// Serve `PAGE` on loopback until the returned handle is dropped.
+async fn serve() -> String {
+    serve_page(PAGE).await
+}
+
+async fn serve_page(page: &'static str) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                let _ = sock.read(&mut buf).await;
+                let body = page.as_bytes();
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = sock.write_all(head.as_bytes()).await;
+                let _ = sock.write_all(body).await;
+                let _ = sock.flush().await;
+            });
+        }
+    });
+    format!("http://{addr}/")
+}
+
+/// Chrome is heavy, and `cargo test` runs these concurrently by default.
+/// Launching one per test at once starves the machine and the suite looks
+/// hung rather than slow. Capping here keeps the default invocation working
+/// instead of relying on a `--test-threads` flag.
+static LAUNCHES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(3);
+
+/// A launched browser, holding its place in the concurrency cap until dropped.
+struct Session {
+    _dir: tempfile::TempDir,
+    _permit: tokio::sync::SemaphorePermit<'static>,
+    browser: Arc<Browser>,
+}
+
+impl std::ops::Deref for Session {
+    type Target = Browser;
+    fn deref(&self) -> &Browser {
+        &self.browser
+    }
+}
+
+/// Launch a browser, or explain why the test is being skipped.
+async fn browser() -> Option<Session> {
+    // A skip that reads as a pass is the worst outcome: on a bare CI runner
+    // the whole suite would go green having exercised nothing, including
+    // every assertion about synthetic clicks and keystrokes. CI sets this so
+    // a missing browser is a failure there and a skip on a developer machine.
+    let required = std::env::var_os("OPENBOT_REQUIRE_BROWSER").is_some();
+    if find_browser().is_none() {
+        assert!(
+            !required,
+            "OPENBOT_REQUIRE_BROWSER is set but no Chromium-family browser was found"
+        );
+        eprintln!("SKIP: no Chromium-family browser installed");
+        return None;
+    }
+    let permit = LAUNCHES.acquire().await.expect("semaphore is never closed");
+    let dir = tempfile::tempdir().unwrap();
+    match Browser::launch(&dir.path().join("profile")).await {
+        Ok(b) => Some(Session {
+            _dir: dir,
+            _permit: permit,
+            browser: Arc::new(b),
+        }),
+        Err(e) => {
+            assert!(
+                !required,
+                "OPENBOT_REQUIRE_BROWSER is set but launching failed: {e}"
+            );
+            eprintln!("SKIP: browser failed to launch: {e}");
+            None
+        }
+    }
+}
+
+#[tokio::test]
+async fn it_navigates_and_reads_a_real_page() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve().await;
+
+    let info = b.navigate(&url).await.expect("navigate");
+    assert_eq!(info.title, "openbot test page");
+    assert!(info.url.starts_with("http://127.0.0.1"));
+
+    let text = b.text().await.expect("text");
+    assert!(text.contains("Hello from openbot"), "got: {text}");
+    assert!(text.contains("The quick brown fox"));
+    // innerText, not innerHTML: the model should see what a person sees.
+    assert!(
+        !text.contains("<h1>"),
+        "markup leaked into the text: {text}"
+    );
+
+    b.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_lists_links_with_resolved_hrefs() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve().await;
+    b.navigate(&url).await.expect("navigate");
+
+    let links = b.links().await.expect("links");
+    let arr = links.as_array().expect("an array");
+    assert_eq!(arr.len(), 2);
+    assert_eq!(arr[0]["text"], "First link");
+    assert_eq!(arr[0]["href"], "https://example.com/one");
+
+    b.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_clicks_and_the_page_reacts() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve().await;
+    b.navigate(&url).await.expect("navigate");
+
+    b.click("#btn").await.expect("click");
+    let text = b.text().await.expect("text");
+    assert!(
+        text.contains("clicked"),
+        "the click did not run the page's handler: {text}"
+    );
+
+    b.shutdown().await;
+}
+
+#[tokio::test]
+async fn filling_a_field_fires_the_events_a_framework_listens_for() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve().await;
+    b.navigate(&url).await.expect("navigate");
+
+    b.fill("#field", "hello there").await.expect("fill");
+    let text = b.text().await.expect("text");
+    // Setting .value alone would leave this empty; the input event is what
+    // frameworks listen to.
+    assert!(
+        text.contains("saw: hello there"),
+        "no input event was dispatched: {text}"
+    );
+
+    b.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_missing_selector_is_reported_not_silently_ignored() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve().await;
+    b.navigate(&url).await.expect("navigate");
+
+    let err = b.click("#does-not-exist").await;
+    assert!(err.is_err(), "clicking nothing reported success");
+    let err = b.fill("#also-missing", "x").await;
+    assert!(err.is_err());
+
+    b.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_hostile_selector_cannot_execute_script() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve().await;
+    b.navigate(&url).await.expect("navigate");
+
+    // Selectors are model-supplied and spliced into evaluated source. This one
+    // tries to close the string and run its own statement; it must be treated
+    // as a (nonsensical) selector, not as code.
+    let hostile = r#"x");document.title="pwned";//"#;
+    let _ = b.click(hostile).await; // fails as "no such element", which is expected
+    let info = b.info().await.expect("info");
+    assert_eq!(
+        info.title, "openbot test page",
+        "a selector escaped its quotes and ran"
+    );
+
+    b.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_captures_a_png_screenshot() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve().await;
+    b.navigate(&url).await.expect("navigate");
+
+    let png = b.screenshot().await.expect("screenshot");
+    assert!(png.len() > 1000, "suspiciously small: {} bytes", png.len());
+    assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
+
+    b.shutdown().await;
+}
+
+#[tokio::test]
+async fn cookies_survive_a_browser_restart_in_the_same_profile() {
+    if find_browser().is_none() {
+        eprintln!("SKIP: no Chromium-family browser installed");
+        return;
+    }
+    // This is the property "sign in once" rests on: the profile is durable, so
+    // a rebuilt guest keeps its sessions.
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("profile");
+    let url = serve().await;
+
+    let first = match Browser::launch(&profile).await {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("SKIP: {e}");
+            return;
+        }
+    };
+    first.navigate(&url).await.expect("navigate");
+    first
+        .fill("#field", "ignored")
+        .await
+        .expect("fill to prove the page is live");
+    // Set a cookie the way a login would.
+    let _ = first.click("#btn").await;
+    first.shutdown().await;
+
+    // Retry rather than sleeping a guessed amount. Chrome releases the
+    // profile lock on its own schedule, and on a loaded machine (a full
+    // workspace run with a dozen browsers competing for the CPU) that is
+    // longer than any fixed number. A test that only fails when the machine
+    // is busy is a test people learn to re-run rather than believe.
+    let mut second = None;
+    for _ in 0..40 {
+        match Browser::launch(&profile).await {
+            Ok(b) => {
+                second = Some(b);
+                break;
+            }
+            Err(_) => tokio::time::sleep(Duration::from_millis(250)).await,
+        }
+    }
+    let second = second.expect("the profile never became available again");
+    let info = second.navigate(&url).await.expect("navigate again");
+    assert_eq!(info.title, "openbot test page");
+    second.shutdown().await;
+}
+
+// Input: what a person does when they take the computer back.
+
+/// Read the event log the page keeps.
+async fn events(b: &Browser) -> Vec<String> {
+    let raw = b
+        .text_of("JSON.stringify(window.__events||[])")
+        .await
+        .unwrap_or_default();
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+#[tokio::test]
+async fn a_click_lands_where_it_was_aimed() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve_page(INPUT_PAGE).await;
+    b.navigate(&url).await.unwrap();
+
+    // The target is 80x40 at (100,150), so its centre is (140,170).
+    b.click_at(140.0, 170.0).await.unwrap();
+
+    let log = events(&b).await;
+    assert!(
+        log.iter().any(|e| e.starts_with("click@")),
+        "no click reached the page: {log:?}"
+    );
+    // CDP delivers mouse events that produce no `click` at all if clickCount
+    // is missing, so check the coordinates arrived intact too.
+    assert!(
+        log.iter().any(|e| e == "click@140,170"),
+        "the click landed somewhere else: {log:?}"
+    );
+    // And the hover that precedes it, which is what opens most menus.
+    assert!(log.iter().any(|e| e == "hover"), "no mouseover: {log:?}");
+}
+
+#[tokio::test]
+async fn a_click_outside_the_target_does_not_hit_it() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve_page(INPUT_PAGE).await;
+    b.navigate(&url).await.unwrap();
+
+    // Just past the target's right edge. If this "passes" it means the events
+    // are being delivered to the page rather than the coordinates.
+    b.click_at(400.0, 170.0).await.unwrap();
+    let log = events(&b).await;
+    assert!(
+        !log.iter().any(|e| e.starts_with("click@")),
+        "a click 220px away still hit the target: {log:?}"
+    );
+}
+
+#[tokio::test]
+async fn typing_produces_real_keystrokes_not_just_a_value() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve_page(INPUT_PAGE).await;
+    b.navigate(&url).await.unwrap();
+
+    // Focus the way a person would: click into the field.
+    b.click_at(120.0, 32.0).await.unwrap();
+    b.type_text("hey").await.unwrap();
+
+    let log = events(&b).await;
+    // The distinction that matters. `Input.insertText` would leave the value
+    // correct and every one of these missing, and the failure would only show
+    // up on a site that searches as you type.
+    for k in ["keydown:h", "keydown:e", "keydown:y"] {
+        assert!(log.contains(&k.to_string()), "missing {k}: {log:?}");
+    }
+    assert!(
+        log.contains(&"input:hey".to_string()),
+        "the field never reached the full value: {log:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_named_key_reaches_the_page() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve_page(INPUT_PAGE).await;
+    b.navigate(&url).await.unwrap();
+    b.click_at(120.0, 32.0).await.unwrap();
+
+    b.key("Enter").await.unwrap();
+    b.key("ArrowDown").await.unwrap();
+    let log = events(&b).await;
+    assert!(log.contains(&"keydown:Enter".to_string()), "{log:?}");
+    // Navigation keys need rawKeyDown; sent as keyDown with no text Chrome
+    // swallows them, and the page sees nothing.
+    assert!(log.contains(&"keydown:ArrowDown".to_string()), "{log:?}");
+
+    assert!(
+        b.key("NotAKey").await.is_err(),
+        "an unknown key was accepted"
+    );
+}
+
+#[tokio::test]
+async fn scrolling_moves_the_page() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve_page(INPUT_PAGE).await;
+    b.navigate(&url).await.unwrap();
+
+    assert_eq!(b.text_of("String(window.scrollY)").await.unwrap(), "0");
+    b.scroll(200.0, 200.0, 400.0).await.unwrap();
+
+    // The wheel is animated, so give it a moment rather than asserting into a
+    // race.
+    let mut moved = false;
+    for _ in 0..40 {
+        let y: f64 = b
+            .text_of("String(window.scrollY)")
+            .await
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or(0.0);
+        if y > 0.0 {
+            moved = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(moved, "the page never scrolled");
+}
+
+#[tokio::test]
+async fn a_frame_is_a_jpeg_that_matches_the_viewport() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve_page(INPUT_PAGE).await;
+    b.navigate(&url).await.unwrap();
+
+    let f = b.frame(60).await.unwrap();
+    // JPEG's SOI marker. Asserting on real bytes rather than "it returned
+    // something": a viewer fed a PNG labelled JPEG shows a broken image.
+    assert_eq!(
+        &f.jpeg[..3],
+        &[0xFF, 0xD8, 0xFF],
+        "not a JPEG: {:?}",
+        &f.jpeg[..8.min(f.jpeg.len())]
+    );
+    assert!(f.jpeg.len() > 1000, "suspiciously small frame");
+
+    // The viewport travels with the image so a click can be mapped back into
+    // the page; a frame that does not know its own size is unusable for input.
+    assert!(f.width > 0.0 && f.height > 0.0, "no viewport: {f:?}");
+    let w: f64 = b
+        .text_of("String(window.innerWidth)")
+        .await
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(f.width, w);
+}
+
+#[tokio::test]
+async fn the_page_is_not_told_this_is_a_headless_browser() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve().await;
+    b.navigate(&url).await.unwrap();
+
+    // Chrome announces `HeadlessChrome/<version>`, which many sites refuse
+    // outright, while the same browser's client hints say `Google Chrome`.
+    // The header disagrees with itself, and the half that gets pages blocked
+    // is the half nothing else agrees with.
+    let ua = b.text_of("navigator.userAgent").await.unwrap();
+    assert!(
+        !ua.contains("Headless"),
+        "the page is still told this is headless: {ua}"
+    );
+    // Still Chrome, and still the real version, not an invented one, which
+    // would go stale and be a louder signal than the token it replaced.
+    assert!(ua.contains("Chrome/"), "{ua}");
+}
+
+#[tokio::test]
+async fn the_window_is_desktop_sized() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    b.navigate(&serve().await).await.unwrap();
+    let w: f64 = b
+        .text_of("String(window.innerWidth)")
+        .await
+        .unwrap()
+        .parse()
+        .unwrap();
+    // Headless Chrome starts below 1024, which is where most sites decide you
+    // are on a phone and collapse their controls behind menus.
+    assert!(w >= 1024.0, "the browser is phone-sized at {w}px");
+}
+
+#[tokio::test]
+async fn dropping_a_browser_reaps_its_process() {
+    if find_browser().is_none() {
+        eprintln!("SKIP: no Chromium-family browser installed");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("profile");
+
+    // Launch and drop without calling shutdown: a panic, a dropped guest, a
+    // cancelled task. Tokio does not reap a child on drop unless told to;
+    // without `kill_on_drop` this would leave Chrome running with the profile
+    // locked, and the next launch would wait out its full timeout for a port
+    // that never appears.
+    {
+        let b = Browser::launch(&profile).await.unwrap();
+        b.navigate("about:blank").await.unwrap();
+    }
+
+    // The evidence: the same profile can be used again promptly. An orphan
+    // holding it would make this hang rather than fail quickly.
+    let again = tokio::time::timeout(Duration::from_secs(20), Browser::launch(&profile)).await;
+    let b = again
+        .expect("relaunching on the same profile timed out; the first browser was not reaped")
+        .expect("relaunch failed");
+    b.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_browser_that_outlived_its_guest_is_adopted_with_its_page_intact() {
+    // The failure this prevents: start `openbot up`, open a page, `taskkill /F`
+    // it, start it again. Without adoption, every browser tool fails with
+    // "the browser never published a debugging port", forever: the orphan
+    // still holds the profile lock, so the new Chrome exits at once, and
+    // nothing in the error points at the stray process.
+    //
+    // `kill_on_drop` cannot help: it needs destructors to run, and a crash,
+    // an OOM kill or `taskkill /F` runs none.
+    //
+    // Adopting is better than reaping, and this asserts the part that makes
+    // it worthwhile: the surviving browser is still signed into whatever it
+    // was signed into. A relaunch that merely succeeded would pass a weaker
+    // test while silently losing every session on that computer.
+    if find_browser().is_none() {
+        assert!(
+            std::env::var_os("OPENBOT_REQUIRE_BROWSER").is_none(),
+            "OPENBOT_REQUIRE_BROWSER is set but no browser was found"
+        );
+        eprintln!("SKIP: no Chromium-family browser installed");
+        return;
+    }
+    let _permit = LAUNCHES.acquire().await.expect("semaphore is never closed");
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("profile");
+    let url = serve().await;
+
+    let first = Browser::launch(&profile).await.expect("first launch");
+    let info = first.navigate(&url).await.expect("navigate");
+    assert_eq!(info.title, "openbot test page");
+
+    // Exactly what a crash leaves behind: the process still running, no
+    // destructor run, the profile still locked.
+    std::mem::forget(first);
+
+    let second = Browser::launch(&profile)
+        .await
+        .expect("a launch onto a profile a live browser still holds");
+
+    let after = second.info().await.expect("info");
+    assert_eq!(
+        after.title, "openbot test page",
+        "the browser was replaced rather than adopted, losing every session on it"
+    );
+    assert_eq!(after.url, info.url, "adopted a different page");
+
+    // Adopted, so there is no child handle to reap: closing has to go over
+    // CDP or every run of this test leaks a browser.
+    let port = adoption_port(&profile).expect("an adopted browser has a port file");
+    second.shutdown().await;
+    assert!(
+        port_goes_quiet(port).await,
+        "shutdown left the adopted browser on {port}; nothing owns it, so nothing will reap it"
+    );
+}
+
+/// The port the profile advertises, read the way the guest reads it.
+fn adoption_port(profile: &std::path::Path) -> Option<u16> {
+    let raw = std::fs::read_to_string(profile.join("DevToolsActivePort")).ok()?;
+    raw.lines().next()?.trim().parse().ok()
+}
+
+/// Wait for nothing to be listening on `port`.
+///
+/// Intentionally not "can a launch succeed again?": a browser that failed to
+/// close would simply be adopted a second time, and that assertion would pass
+/// while leaking. Whether the socket is gone is the question with only one
+/// answer.
+async fn port_goes_quiet(port: u16) -> bool {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    for _ in 0..40 {
+        let dead = tokio::task::spawn_blocking(move || {
+            std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_err()
+        })
+        .await
+        .unwrap_or(false);
+        if dead {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    false
+}
+
+#[tokio::test]
+async fn a_browser_that_dies_mid_session_is_replaced_rather_than_kept() {
+    // Chrome does not only die when openbot does. A crashed tab, an OOM kill,
+    // or someone closing it by hand kills it underneath a guest that is still
+    // running. Holding the dead handle in a `OnceCell` with no way to put a
+    // live browser back would make every browser tool fail until the guest
+    // itself was restarted.
+    //
+    // The first failure after the death matters as much as recovery: without
+    // the closed flag, a call would take the full call timeout before
+    // reporting "Runtime.evaluate timed out", because the send lands in a
+    // channel whose writer has already broken and nothing wakes the waiter.
+    //
+    // Both halves are asserted here: a dead browser is noticed promptly, and
+    // asking for one again gets a working browser rather than the dead one.
+    if find_browser().is_none() {
+        assert!(
+            std::env::var_os("OPENBOT_REQUIRE_BROWSER").is_none(),
+            "OPENBOT_REQUIRE_BROWSER is set but no browser was found"
+        );
+        eprintln!("SKIP: no Chromium-family browser installed");
+        return;
+    }
+    let _permit = LAUNCHES.acquire().await.expect("semaphore is never closed");
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("profile");
+    let url = serve().await;
+
+    let first = Browser::launch(&profile).await.expect("launch");
+    first.navigate(&url).await.expect("navigate");
+    assert!(first.is_alive(), "a browser in use is not alive");
+    let port = adoption_port(&profile).expect("a launched browser has a port file");
+
+    // Kill it abruptly, from outside.
+    first.shutdown().await;
+    assert!(
+        port_goes_quiet(port).await,
+        "the browser did not go away, so this proves nothing"
+    );
+
+    // Promptly, not after the 60-second call timeout. The generous bound is
+    // still twenty times faster than the timeout.
+    let started = std::time::Instant::now();
+    let err = first.info().await.expect_err("a dead browser answered");
+    let took = started.elapsed();
+    assert!(
+        took < Duration::from_secs(3),
+        "a dead browser took {took:?} to say so; callers hang instead of recovering"
+    );
+    assert!(
+        !first.is_alive(),
+        "a dead browser still reports itself alive: {err}"
+    );
+
+    // Recovery: launching again on the same profile works.
+    let replacement = Browser::launch(&profile).await.expect("relaunch");
+    let info = replacement
+        .navigate(&url)
+        .await
+        .expect("navigate the new one");
+    assert_eq!(info.title, "openbot test page");
+    replacement.shutdown().await;
+}

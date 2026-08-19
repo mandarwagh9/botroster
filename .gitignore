@@ -1,0 +1,14 @@
+/target
+**/*.rs.bk
+
+# Cargo.lock is committed: this workspace ships binaries, and a lockfile is
+# what makes a clone build the same dependency graph as CI.
+
+# Local state from running the binaries in the checkout.
+/openbot-data
+*.log
+.DS_Store
+Thumbs.db
+
+# Tauri regenerates these at build time.
+crates/openbot-app/gen/
