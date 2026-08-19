@@ -47,6 +47,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # The desktop client bundles the runtime as a Tauri sidecar, and Tauri's
+      # build script requires that file to exist before openbot-app compiles.
+      # Stage it the same way the bundle job does, or a build of the workspace
+      # fails at the build script on a fresh checkout.
+      - name: stage the runtime as a sidecar
+        run: sh scripts/sidecar.sh
+
       - uses: browser-actions/setup-chrome@v1
         id: chrome
         # Ubuntu images ship no browser, so Linux downloads Chromium. macOS
@@ -86,6 +93,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # The desktop client bundles the runtime as a Tauri sidecar, and Tauri's
+      # build script requires that file to exist before openbot-app compiles.
+      # Stage it the same way the bundle job does, or a build of the workspace
+      # fails at the build script on a fresh checkout.
+      - name: stage the runtime as a sidecar
+        run: sh scripts/sidecar.sh
       - run: cargo build --workspace --all-targets
 
   # `rust-version` in Cargo.toml is a promise to anyone on an older toolchain,
@@ -104,6 +117,12 @@ jobs:
             librsvg2-dev
       - uses: dtolnay/rust-toolchain@1.89
       - uses: Swatinem/rust-cache@v2
+      # The desktop client bundles the runtime as a Tauri sidecar, and Tauri's
+      # build script requires that file to exist before openbot-app compiles.
+      # Stage it the same way the bundle job does, or a build of the workspace
+      # fails at the build script on a fresh checkout.
+      - name: stage the runtime as a sidecar
+        run: sh scripts/sidecar.sh
       - run: cargo check --workspace --all-targets
 
   # Packaging, on tags only. A full bundle on three platforms takes about ten
