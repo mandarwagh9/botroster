@@ -27,7 +27,7 @@ own baseline had over-scored itself**, which is worth more than the ten points.
 | 001 | `53c6bde` | `.step-state` legible, run log keyboard-reachable, rules `select` named | 4: 2→3 |
 | 002 | `ae0c5f3` | no Bot wears amber; `--coat-4` olive | 18: 0→3, 10: 1→2 |
 | 003 | `12e3b21` | empty conversation says something true and offers the way out | 14: 1→3 |
-| 004 | `e85562c` | transport pill quiet; working state off amber | 3: 1→2, 20: 1→2 |
+| 004 | `f726bf5` | transport pill quiet; working state off amber | 3: 1→2, 20: 1→2 |
 
 Line 9 also moved 0→1: the log taking focus makes a 200-step thread scrollable from the
 keyboard, which is most of the way to "find the last approval" without being a marker.
