@@ -1,6 +1,6 @@
 [package]
 name = "openbot-agent"
-version = "0.0.1"
+version.workspace = true
 description = "OPENBOT agent loop: drives a model against tools reached through the hub"
 edition.workspace = true
 license.workspace = true

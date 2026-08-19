@@ -1,6 +1,6 @@
 [package]
 name = "openbot-cli"
-version = "0.0.1"
+version.workspace = true
 description = "OPENBOT command-line client"
 edition.workspace = true
 license.workspace = true

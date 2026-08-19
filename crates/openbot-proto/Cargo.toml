@@ -1,6 +1,6 @@
 [package]
 name = "openbot-proto"
-version = "0.0.1"
+version.workspace = true
 description = "OPENBOT wire protocol types: JSON-RPC 2.0 over WebSocket, plus approval frames"
 edition.workspace = true
 license.workspace = true

@@ -35,11 +35,26 @@ jobs:
       # compile with pkg-config errors, so install them once per job.
       - name: install tauri linux dependencies
         if: runner.os == 'Linux'
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential \
-            curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev \
-            librsvg2-dev
+          set -eu
+          # The Ubuntu runners' apt mirrors stall often enough to matter: an
+          # unguarded install hung this job three times, holding a leg of the
+          # matrix for hours instead of failing. Each attempt is bounded so a
+          # stalled mirror fails fast, and retried because the next try
+          # usually reaches a different one.
+          pkgs="libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev
+                libssl-dev libayatana-appindicator3-dev librsvg2-dev"
+          for attempt in 1 2 3; do
+            if timeout 300 sudo apt-get update -o Acquire::Retries=3 &&
+               timeout 600 sudo apt-get install -y -o Acquire::Retries=3 $pkgs; then
+              exit 0
+            fi
+            echo "::warning::apt attempt $attempt stalled or failed; retrying"
+            sleep 20
+          done
+          echo "::error::apt did not succeed in three attempts"
+          exit 1
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -110,11 +125,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: install tauri linux dependencies
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential \
-            curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev \
-            librsvg2-dev
+          set -eu
+          # The Ubuntu runners' apt mirrors stall often enough to matter: an
+          # unguarded install hung this job three times, holding a leg of the
+          # matrix for hours instead of failing. Each attempt is bounded so a
+          # stalled mirror fails fast, and retried because the next try
+          # usually reaches a different one.
+          pkgs="libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev
+                libssl-dev libayatana-appindicator3-dev librsvg2-dev"
+          for attempt in 1 2 3; do
+            if timeout 300 sudo apt-get update -o Acquire::Retries=3 &&
+               timeout 600 sudo apt-get install -y -o Acquire::Retries=3 $pkgs; then
+              exit 0
+            fi
+            echo "::warning::apt attempt $attempt stalled or failed; retrying"
+            sleep 20
+          done
+          echo "::error::apt did not succeed in three attempts"
+          exit 1
       - uses: dtolnay/rust-toolchain@1.89
       - uses: Swatinem/rust-cache@v2
       # The desktop client bundles the runtime as a Tauri sidecar, and Tauri's
@@ -154,9 +184,26 @@ jobs:
 
       - name: install tauri linux dependencies
         if: runner.os == 'Linux'
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential             curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev             librsvg2-dev
+          set -eu
+          # The Ubuntu runners' apt mirrors stall often enough to matter: an
+          # unguarded install hung this job three times, holding a leg of the
+          # matrix for hours instead of failing. Each attempt is bounded so a
+          # stalled mirror fails fast, and retried because the next try
+          # usually reaches a different one.
+          pkgs="libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev
+                libssl-dev libayatana-appindicator3-dev librsvg2-dev"
+          for attempt in 1 2 3; do
+            if timeout 300 sudo apt-get update -o Acquire::Retries=3 &&
+               timeout 600 sudo apt-get install -y -o Acquire::Retries=3 $pkgs; then
+              exit 0
+            fi
+            echo "::warning::apt attempt $attempt stalled or failed; retrying"
+            sleep 20
+          done
+          echo "::error::apt did not succeed in three attempts"
+          exit 1
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2

@@ -1,6 +1,6 @@
 [package]
 name = "openbotd"
-version = "0.0.1"
+version.workspace = true
 description = "OPENBOT control plane: hub, policy, approvals, connectors, secrets"
 edition.workspace = true
 license.workspace = true

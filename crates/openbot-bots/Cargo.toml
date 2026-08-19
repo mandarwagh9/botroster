@@ -1,6 +1,6 @@
 [package]
 name = "openbot-bots"
-version = "0.0.1"
+version.workspace = true
 description = "OPENBOT Bots: named teammates with a standing brief and a conversation that survives"
 edition.workspace = true
 license.workspace = true

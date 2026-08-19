@@ -1,6 +1,6 @@
 [package]
 name = "openbot-guest"
-version = "0.0.1"
+version.workspace = true
 description = "OPENBOT guest daemon: runs inside the computer and serves its tools"
 edition.workspace = true
 license.workspace = true
