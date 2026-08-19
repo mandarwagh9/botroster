@@ -4043,3 +4043,169 @@ async fn a_tool_call_and_its_result_are_one_row() {
         "the failure's reason is not in the row: {failed}"
     );
 }
+
+/// A tool call with a long argument still reads as a sentence.
+///
+/// The shell truncates a call's arguments to a readable length for `text`,
+/// which leaves the JSON in it unparseable. The page summarised by parsing
+/// that string, so an `fs.write` carrying a real file printed raw JSON while a
+/// short `fs.read` beside it read as "Read notes.md" — the legibility of a
+/// step depended on how much a Bot happened to be writing. The arguments now
+/// arrive as data, so length has nothing to do with it.
+#[tokio::test]
+async fn a_long_argument_does_not_cost_a_step_its_summary() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    // Longer than the shell's summary limit, so `text` is certainly truncated.
+    let body = "x".repeat(400);
+    let args = serde_json::json!({ "path": "notes.md", "contents": body });
+    let truncated = format!(
+        "fs.write {{\"path\":\"notes.md\",\"contents\":\"{}…",
+        &body[..40]
+    );
+    b.text_of(&format!(
+        "window.__fire('chunk', {{\"session\":\"s1\",\"kind\":\"tool\",\"text\":{},\"args\":{}}}); 'ok'",
+        serde_json::to_string(&truncated).unwrap(),
+        args
+    ))
+    .await
+    .unwrap();
+    settle().await;
+
+    let shown = b
+        .text_of("document.querySelector('#log .msg.tool .step-text')?.textContent")
+        .await
+        .unwrap();
+    assert!(
+        shown.contains("Wrote") && shown.contains("notes.md"),
+        "a long argument cost the step its summary: {shown}"
+    );
+    assert!(
+        !shown.contains('{') && !shown.contains("contents"),
+        "raw JSON leaked into a step that should read as a sentence: {shown}"
+    );
+}
+
+/// A step's detail counts in words that match the number.
+///
+/// A workspace with one file in it is the ordinary case on a first run, so
+/// "1 entries" is visible to everybody who tries the demo, and the root path
+/// renders as a bare full stop that reads as a typo rather than as a place.
+#[tokio::test]
+async fn a_step_counts_in_words_that_match_the_number() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    let step = |tool: &str, args: serde_json::Value, result: &str| {
+        format!(
+            "window.__fire('chunk', {{\"session\":\"s1\",\"kind\":\"tool\",\"text\":{},\"args\":{}}});\
+             window.__fire('chunk', {{\"session\":\"s1\",\"kind\":\"result\",\"text\":{}}}); 'ok'",
+            serde_json::to_string(&format!("{tool} {args}")).unwrap(),
+            args,
+            serde_json::to_string(result).unwrap()
+        )
+    };
+
+    b.text_of(&step(
+        "fs.list",
+        serde_json::json!({ "path": "." }),
+        r#"✓ {"entries":[{"name":"notes.md"}]}"#,
+    ))
+    .await
+    .unwrap();
+    settle().await;
+    let one = b
+        .text_of("document.querySelector('#log .msg.tool .step-text')?.textContent")
+        .await
+        .unwrap();
+    assert!(one.contains("1 entry"), "a count of one is plural: {one}");
+    assert!(
+        !one.contains("1 entries"),
+        "a count of one is plural: {one}"
+    );
+    assert!(
+        one.contains("the workspace"),
+        "the root path renders as a bare full stop: {one}"
+    );
+
+    b.text_of(&step(
+        "fs.write",
+        serde_json::json!({ "path": "a.txt" }),
+        r#"✓ {"bytes_written":1}"#,
+    ))
+    .await
+    .unwrap();
+    settle().await;
+    let bytes = b
+        .text_of("[...document.querySelectorAll('#log .msg.tool .step-text')].pop()?.textContent")
+        .await
+        .unwrap();
+    assert!(bytes.contains("1 byte"), "{bytes}");
+    assert!(!bytes.contains("1 bytes"), "{bytes}");
+}
+
+/// A long thread can still be scrolled back to its first line.
+///
+/// Short threads are pulled down to meet the composer so they do not sit
+/// stranded above a screen of nothing. The obvious way to do that,
+/// `justify-content: flex-end` on the scrolling column, makes the top of an
+/// overflowing thread unreachable: the overflow goes off the top edge and no
+/// amount of scrolling brings it back. An auto top margin on the first line
+/// has the same effect when there is spare room and none when there is not.
+#[tokio::test]
+async fn the_start_of_a_long_thread_is_still_reachable() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    b.text_of(
+        "window.__fire('chunk', {\"session\":\"s1\",\"kind\":\"user\",\"text\":\"FIRST LINE\"}); 'ok'",
+    )
+    .await
+    .unwrap();
+    for i in 0..40 {
+        b.text_of(&format!(
+            "window.__fire('chunk', {{\"session\":\"s1\",\"kind\":\"agent\",\"text\":\"filler {i}\"}}); 'ok'"
+        ))
+        .await
+        .unwrap();
+    }
+    settle().await;
+
+    let state = b
+        .text_of(
+            "(() => { const log = document.getElementById('log');\
+               log.scrollTop = 0;\
+               const first = log.querySelector('.msg');\
+               const l = log.getBoundingClientRect(), f = first.getBoundingClientRect();\
+               return JSON.stringify({\
+                 overflows: log.scrollHeight > log.clientHeight + 4,\
+                 top: Math.round(f.top - l.top),\
+                 text: first.textContent.trim()\
+               }); })()",
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        state.contains("\"overflows\":true"),
+        "the thread did not overflow, so this proves nothing: {state}"
+    );
+    assert!(
+        state.contains("FIRST LINE"),
+        "the first line is not the first message: {state}"
+    );
+    // Scrolled to the very top, the first line has to be inside the box. A
+    // negative offset means it is above the visible area with nowhere to
+    // scroll to reach it.
+    let top: i64 = state
+        .split("\"top\":")
+        .nth(1)
+        .and_then(|t| t.split(',').next())
+        .and_then(|t| t.trim().parse().ok())
+        .unwrap_or(-9999);
+    assert!(
+        top >= -1,
+        "scrolled to the top, the first line still sits {top}px above the thread: {state}"
+    );
+}

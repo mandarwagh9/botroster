@@ -3009,20 +3009,20 @@ fn secret_demo_script() -> Scripted {
 fn demo_script(browse: Option<&str>) -> Scripted {
     let b = Scripted::builder()
         .say_and_call(
-            "Saving a note to the workspace.",
+            "Writing a note into the workspace, so there is something there when you come back.",
             "fs.write",
             serde_json::json!({
                 "path": "openbot-demo.md",
-                "contents": "# openbot\n\nIf you can read this, the whole path works:\nCLI → hub → guest → filesystem.\n"
+                "contents": "# Notes\n\nA Bot wrote this file into the workspace you gave it, read it back, listed what was there, and ran a command.\n\nNo model and no API key were involved, and every step asked you first.\n"
             }),
         )
         .say_and_call(
-            "Reading it back to confirm it landed.",
+            "Reading it back, so the write is confirmed rather than assumed.",
             "fs.read",
             serde_json::json!({ "path": "openbot-demo.md" }),
         )
         .say_and_call(
-            "Listing the workspace.",
+            "Seeing what else is in the workspace.",
             "fs.list",
             serde_json::json!({}),
         )
@@ -3030,7 +3030,7 @@ fn demo_script(browse: Option<&str>) -> Scripted {
         // to include it; otherwise the progress rendering path is never
         // exercised by the one command people run to check a deployment.
         .say_and_call(
-            "Running a command to check the shell path.",
+            "And running a command, the last of the four things a computer gives a Bot.",
             "shell.exec",
             serde_json::json!({ "command": "echo openbot-ok" }),
         )
@@ -3054,8 +3054,10 @@ fn demo_script(browse: Option<&str>) -> Scripted {
             ),
         None => b,
     };
-    b.say("Demo complete — the file was written, read back, and listed.")
-        .build()
+    b.say(
+        "That is the loop: a Bot acting on a real computer, asking before each step. Give it a model in Settings and the steps stop being scripted.",
+    )
+    .build()
 }
 
 #[cfg(test)]

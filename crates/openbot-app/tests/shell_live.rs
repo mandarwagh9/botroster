@@ -31,10 +31,10 @@ use common::up::Up;
 /// The script is `say_and_call`, so these words exist on the wire before
 /// the approval the turn then blocks on, which is what makes them a probe
 /// for streaming rather than a probe for the demo working.
-const FIRST_WORDS: &str = "Saving a note to the workspace";
+const FIRST_WORDS: &str = "Writing a note into the workspace";
 
 /// The last thing it says, after every tool has run.
-const LAST_WORDS: &str = "Demo complete";
+const LAST_WORDS: &str = "That is the loop";
 
 /// What the window receives on a `chunk` event.
 ///
@@ -202,7 +202,7 @@ fn connected(mode: Mode, cwd: &str) -> (Up, tempfile::TempDir, Shell, String) {
 
 /// The streaming test.
 ///
-/// The scripted demo says "Saving a note to the workspace." and then calls
+/// The scripted demo says "Writing a note into the workspace…" and then calls
 /// `fs.write`, which the default policy asks about, so the turn blocks with
 /// those words already spoken. If the shell hands the conversation over only
 /// when the turn ends, the window has been told nothing at this moment, and
@@ -275,7 +275,7 @@ fn the_words_reach_the_window_while_the_turn_is_still_running() {
         .find(|f| f.name == "contents")
         .expect("the file contents");
     assert!(
-        contents.long && contents.value.contains("If you can read this"),
+        contents.long && contents.value.contains("A Bot wrote this file"),
         "an approval that hides what it would write is not a decision: {contents:?}"
     );
     assert!(

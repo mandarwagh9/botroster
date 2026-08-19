@@ -234,7 +234,7 @@ async fn approvals_reach_the_engine_and_answers_land() {
     // The tool script ends with a plain say, which must have streamed like
     // the one-reply demo's did.
     assert!(
-        updates.iter().any(|u| carries(u, "Demo complete")),
+        updates.iter().any(|u| carries(u, "That is the loop")),
         "the demo's final reply never reached the engine: {updates:?}"
     );
 }

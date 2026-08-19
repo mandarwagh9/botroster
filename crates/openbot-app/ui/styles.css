@@ -468,7 +468,9 @@ textarea {
 .new-bot span[aria-hidden] {
   font-size: var(--fs-15);
   line-height: 1;
-  color: var(--faint);
+  /* Inherits, rather than a dimmer tier of its own: the glyph is half of the
+     affordance, and a lighter one measured 4.42 against the sidebar in the
+     light theme, under AA for text this size. */
 }
 
 .roster-section {
@@ -731,6 +733,17 @@ textarea {
   gap: 0;
 }
 
+/* A short thread sits against the composer rather than stranded at the top
+   with a screen of nothing under it. `margin-top: auto` on the first line does
+   it without `justify-content: flex-end`, which in a scrolling flex column
+   makes the top of a long thread unreachable. When the thread is long enough
+   to overflow there is no free space, the auto margin resolves to zero, and
+   this has no effect at all. */
+.log > .msg:first-child {
+  /* Beats `.msg.user`'s own top margin, which is why this is not `> *`. */
+  margin-top: auto;
+}
+
 .no-bot {
   flex: 1;
   display: grid;
@@ -796,10 +809,6 @@ textarea {
   padding: 2px 0 2px 16px;
   border-left: 2px solid color-mix(in srgb, var(--coat, var(--line)) 70%, transparent);
   color: var(--muted);
-}
-
-.msg.user:first-child {
-  margin-top: 0;
 }
 
 .msg.agent {

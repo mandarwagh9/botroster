@@ -260,10 +260,29 @@ const SPEAKER = {
 /// phrase ("Wrote notes.md · 93 bytes"); for anything else the raw line stands,
 /// so a new tool is shown rather than hidden. The full text is always on the
 /// row's title, so nothing is lost, only tidied.
+/// `1 entry` rather than `1 entries`. A count of one is common enough in a
+/// workspace that getting it wrong is visible in the ordinary case.
+function plural(n, one, many) {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
 const STEP_SUMMARY = {
-  "fs.write": (a, r) => ["Wrote", a.path, r && r.bytes_written != null ? `${r.bytes_written} bytes` : null],
-  "fs.read": (a, r) => ["Read", a.path, r && r.contents != null ? `${r.contents.length} chars` : null],
-  "fs.list": (a, r) => ["Listed", a.path || ".", r && Array.isArray(r.entries) ? `${r.entries.length} entries` : null],
+  "fs.write": (a, r) => [
+    "Wrote",
+    a.path,
+    r && r.bytes_written != null ? plural(r.bytes_written, "byte", "bytes") : null,
+  ],
+  "fs.read": (a, r) => [
+    "Read",
+    a.path,
+    r && r.contents != null ? plural(r.contents.length, "character", "characters") : null,
+  ],
+  "fs.list": (a, r) => [
+    "Listed",
+    // "." is the workspace root, and a lone full stop reads as a typo.
+    !a.path || a.path === "." ? "the workspace" : a.path,
+    r && Array.isArray(r.entries) ? plural(r.entries.length, "entry", "entries") : null,
+  ],
   "fs.delete": (a) => ["Deleted", a.path, null],
   "shell.exec": (a, r) => ["Ran", a.command, r && r.exit_code != null ? (r.exit_code === 0 ? "ok" : `exit ${r.exit_code}`) : null],
   "browser.open": (a, r) => ["Opened", a.url, r && r.title ? r.title : null],
@@ -319,7 +338,11 @@ function appendChunk(chunk) {
   if (chunk.kind === "tool") {
     const sp = chunk.text.indexOf(" ");
     const name = sp > 0 ? chunk.text.slice(0, sp) : chunk.text;
-    const args = sp > 0 ? jsonTail(chunk.text, sp) : null;
+    // From the shell as data. `text` is truncated to a readable length, so the
+    // JSON inside it does not parse once an argument is long: an `fs.write`
+    // carrying a real file printed raw JSON while a short `fs.read` beside it
+    // read as a sentence. Falling back to the text keeps older chunks working.
+    const args = chunk.args ?? (sp > 0 ? jsonTail(chunk.text, sp) : null);
     el.dataset.tool = name;
     el.dataset.args = args ? JSON.stringify(args) : "";
     el.appendChild(stepMark("running"));

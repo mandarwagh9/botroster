@@ -239,6 +239,17 @@ pub struct Chunk {
     #[serde(serialize_with = "Kind::as_wire")]
     pub kind: Kind,
     pub text: String,
+    /// A tool call's arguments, as data rather than as the display string.
+    ///
+    /// `text` is truncated to a readable length, which leaves the JSON in it
+    /// unparseable: an `fs.write` carrying a real file lost its summary and
+    /// printed raw JSON, while a short `fs.read` beside it read as a sentence.
+    /// The page summarises from this instead, so the length of an argument no
+    /// longer decides whether a step is legible.
+    ///
+    /// `None` for every kind but a tool call.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub args: Option<serde_json::Value>,
 }
 
 /// How a turn ended.
@@ -735,6 +746,8 @@ fn thread_chunks(session: &str, messages: &[ThreadMessage]) -> Vec<Chunk> {
                     Kind::Agent
                 },
                 text: text.clone(),
+                // Replayed prose from a group thread, not a tool call.
+                args: None,
             });
         }
     }
@@ -1448,6 +1461,7 @@ pub fn render(session: &str, update: SessionUpdate) -> Option<Chunk> {
         SessionUpdate::ToolCall(call) => Some(Chunk {
             session: session.to_owned(),
             kind: Kind::Tool,
+            args: call.raw_input.clone(),
             text: match call.raw_input {
                 Some(input) => format!("{} {}", call.title, one_line(&input.to_string())),
                 None => call.title,
@@ -1461,6 +1475,7 @@ pub fn render(session: &str, update: SessionUpdate) -> Option<Chunk> {
                 return Some(Chunk {
                     session: session.to_owned(),
                     kind: Kind::Progress,
+                    args: None,
                     text: stage,
                 });
             }
@@ -1490,6 +1505,7 @@ pub fn render(session: &str, update: SessionUpdate) -> Option<Chunk> {
             Some(Chunk {
                 session: session.to_owned(),
                 kind: Kind::Result,
+                args: None,
                 text: format!("{} {}", if ok { "✓" } else { "✗" }, one_line(&out))
                     .trim_end()
                     .to_owned(),
@@ -1550,6 +1566,8 @@ fn text_chunk(session: &str, kind: Kind, content: ContentBlock) -> Option<Chunk>
             session: session.to_owned(),
             kind,
             text: t.text,
+            // Prose, not a tool call.
+            args: None,
         }),
         _ => None,
     }

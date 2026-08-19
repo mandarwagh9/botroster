@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/openbot-approval.png" alt="The OPENBOT desktop client, showing an approval request: a Bot has asked to write a file, and the window shows the path, the contents, and the choice." width="860">
+  <img src="docs/openbot-thread.png" alt="The OPENBOT desktop client. A sidebar lists four Bots — Talent Scout, Release Notes, Expense Manager, Support Triage — each with the job it does. The open thread shows Talent Scout working through a task: it wrote a file, read it back, listed the workspace and ran a command, each step a single line with a green tick." width="900">
 </p>
 
 <h1 align="center">OPENBOT</h1>
@@ -146,6 +146,10 @@ A rule that cannot be understood stops the hub rather than being skipped: a rule
 dropped is a security failure, not a warning.
 
 ## Design
+
+<p align="center">
+  <img src="docs/openbot-approval.png" alt="An approval request in OPENBOT: a Bot has asked to run a shell command, and the window shows the command with the choices — allow once, allow for the rest of this session, or not this time." width="900">
+</p>
 
 **Approvals fail closed.** A hook that times out, crashes or answers with something unreadable
 denies the call. A hook whose command does not exist counts as a failure. Each hook may opt into
