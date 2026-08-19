@@ -802,16 +802,40 @@ textarea {
   gap: 8px;
 }
 
+/* Two rows, not one. Four controls on one line of a 560px card left each
+   field a fixed share of the width, and a share tuned for one platform's font
+   metrics clipped the placeholder on another: Linux Chromium's default sans
+   is wider than Windows' or macOS', and "why (shown to the person)" needs
+   188px there against 182px of box. A grid that gives a field a ratio cannot
+   hold across fonts; a row per field can. The action and the tool pattern
+   share the first row, the reason takes the second with the Add button, and
+   each field is sized by its content. Held by
+   `no_dialog_field_is_narrower_than_the_placeholder_in_it`, which CI runs on
+   three platforms. */
 .rule-form {
   margin-top: 14px;
   display: grid;
-  /* The reason gets more room than the glob, but not twice: equal columns
-     give each 174px and cut the reason's own placeholder to "why (shown to
-     the perso", and a straight 1:2 clips the `*` off "shell.exec or fs.*"
-     (99px of text in a 95px box). Both placeholders are checked against
-     their boxes in `the_rule_form_shows_its_own_placeholders`. */
-  grid-template-columns: auto 1fr 1.6fr auto;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    "action tool   tool"
+    "reason reason add";
   gap: 8px;
+}
+
+.rule-form select {
+  grid-area: action;
+}
+
+.rule-form #rule-tool {
+  grid-area: tool;
+}
+
+.rule-form #rule-reason {
+  grid-area: reason;
+}
+
+.rule-form button {
+  grid-area: add;
 }
 
 /* The first section heading sits under the dialog title, so it needs none of
