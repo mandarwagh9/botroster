@@ -1,6 +1,6 @@
 # REPORT — overnight UX loop, 2026-08-20
 
-Branch `ux/overnight-2026-08-20`. Phase 0 ran ~02:50–04:15; the loop ran ~04:15–06:00.
+Branch `ux/overnight-2026-08-20`. Phase 0 ran ~02:50–04:15; the loop ran ~04:15–06:05.
 **Five commits, four of them UX changes, all gates green.** Nothing merged.
 
 Read this before the diff. Then run the app for ten minutes before merging anything.
@@ -171,6 +171,42 @@ that needs font files, PROVENANCE.md rows, and a licence check per family.
 3. **Give the roster a status.** It is the first consequence in DIRECTION and it scores 0. The
    window can already derive *open*, *has a pending approval*, and *paused*; *working* needs
    something from the engine. Scoping that is a design decision, not a patch.
+
+---
+
+## Why it stopped at 06:05, not 06:30
+
+Not the clock, and not three flat iterations. **Every remaining open item needs a person.**
+
+- `B01` (roster status), `B07` (routine errors) and rubric 11 (takeover) are blocked on data
+  the window is not given. Fixing them means changing what the runtime reports, which is
+  outside tonight's writable set by design.
+- `B03` (computer as a peer pane) and `B08` (inline approval gates) are both structural
+  layout changes past STEP 3's ~200-line ceiling, and `B08` interacts with the approval queue
+  `page.rs` pins in about a dozen tests.
+- `B02` and `B09` are security-surface decisions that contradict written in-code rationale.
+
+What was left after those was polish worth less than the risk of leaving a half-finished
+change in the tree at handover. The loop had run out of work it could do *safely* unattended
+before it ran out of time, and continuing would have meant manufacturing changes to keep
+busy — which is precisely the failure mode LOOP.md section 5 warns about, where commit count
+rises and the rubric does not.
+
+## One scoring correction, made by checking
+
+Rubric line 16 (*is light theme equal in quality to dark*) was scored 2 in the baseline
+without a single light screenshot being opened — scored from the fact that the stylesheet
+uses `light-dark()` pairs, which is an argument, not evidence.
+
+Checked before publishing this report. It holds: light is a genuine design, not an inversion.
+The coats resolve to darker variants that carry on a light surface, `--muted` and the log
+gutter read correctly, and the quieted transport pill works in both.
+
+One thing that surfaced while checking, not filed as a defect because it is a judgement call
+rather than a violation: `--scrim` in light is `rgba(20,20,23,.4)`, so whenever an approval is
+up the entire light theme goes dark behind it. Approvals are this product's core moment, so a
+light-theme user spends that moment looking at a dark screen. Worth a decision; it is not
+wrong.
 
 ---
 
