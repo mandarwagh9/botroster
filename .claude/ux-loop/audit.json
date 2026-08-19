@@ -1,0 +1,22 @@
+{
+  "seconds": 27.7,
+  "axe": {
+    "serious": 4,
+    "critical": 2,
+    "moderate": 0,
+    "minor": 0
+  },
+  "contrastFailures": 2,
+  "worstContrast": 2.79,
+  "failures": [
+    "contrast 2.95:1 (needs 4.5) in s05/dark on span.step-state — \"running\"",
+    "axe serious in s08/dark: scrollable-region-focusable (1 node(s)) — Scrollable region must have keyboard access",
+    "axe serious in s10/dark: scrollable-region-focusable (1 node(s)) — Scrollable region must have keyboard access",
+    "axe critical in s12/dark: select-name (1 node(s)) — Select element must have an accessible name",
+    "contrast 2.79:1 (needs 4.5) in s05/light on span.step-state — \"running\"",
+    "axe serious in s08/light: scrollable-region-focusable (1 node(s)) — Scrollable region must have keyboard access",
+    "axe serious in s10/light: scrollable-region-focusable (1 node(s)) — Scrollable region must have keyboard access",
+    "axe critical in s12/light: select-name (1 node(s)) — Select element must have an accessible name"
+  ],
+  "notes": []
+}

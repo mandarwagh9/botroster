@@ -124,7 +124,8 @@ budget cannot be enforced and OPENBOT says so.
 
 ### Configuration
 
-Settings live in `$OPENBOT_HOME/config.toml` (default `./openbot-data`). Flags override the file for
+Settings live in `$OPENBOT_HOME/config.toml` (default `~/.openbot`, `%USERPROFILE%\.openbot` on
+Windows). Flags override the file for
 one invocation. The API key is never in the file; the file names an environment variable to read
 it from.
 

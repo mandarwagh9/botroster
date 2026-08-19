@@ -1,0 +1,15 @@
+{
+  "name": "openbot-ux-loop",
+  "private": true,
+  "type": "module",
+  "description": "Screenshot and gate harness for the overnight UX loop. Deliberately outside crates/openbot-app/ui, which stays npm-free and has no build step.",
+  "scripts": {
+    "dev:fixture": "node fixture/serve.mjs",
+    "shots": "node ../../scripts/ux-shots.mjs",
+    "verify": "sh ../../scripts/ux-verify.sh"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
+    "playwright": "^1.47.0"
+  }
+}

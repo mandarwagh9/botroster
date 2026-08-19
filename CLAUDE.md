@@ -75,8 +75,7 @@ therefore fail `cargo test`.** It checks commands, not prose — which is how th
 - The default home is `~/.openbot` (`%USERPROFILE%\.openbot` on Windows), resolved once in
   `openbot_proto::default_home` so the CLI and the window cannot disagree about where a person's
   Bots are. They did once. It falls back to `./openbot-data` only when `HOME`/`USERPROFILE` is
-  absent or empty. Note that `README.md`'s Configuration section still says the default is
-  `./openbot-data`; the code is the authority.
+  absent or empty.
 - `$OPENBOT_HOME` overrides it. Runtime knobs are `OPENBOT_*` environment variables throughout.
 
 ## Provenance

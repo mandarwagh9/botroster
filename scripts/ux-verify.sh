@@ -1,0 +1,121 @@
+#!/usr/bin/env sh
+# The gates. Exit non-zero on any failure; print a machine-readable summary last.
+#
+# A change that fails one of these gets reverted, not argued with. Two of the
+# gates in LOOP.md needed translating rather than inventing, and the honest
+# translation is recorded here:
+#
+#   "frontend typecheck and production build" — there is no TypeScript and no
+#   bundler. `crates/openbot-app/ui/` is three hand-written files served
+#   verbatim by Tauri. The real equivalent is a syntax check on the shipped
+#   script plus `cargo test -p openbot-app --test page`, which drives that
+#   exact file in a real browser and is where the behaviour is actually pinned.
+#
+#   "bundle size" — the byte size of ui/*.{html,js,css} plus any vendored
+#   fonts. Baseline in .claude/ux-loop/.baseline-bytes, fail on >15% growth.
+set -eu
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+LOOP=".claude/ux-loop"
+fails=0
+note() { printf '%s\n' "$*"; }
+step() { printf '\n== %s\n' "$*"; }
+
+# A held binary makes `cargo check` fail with "Access is denied" and the tests
+# then run against a stale build, which looks like a pass. Catch it here rather
+# than five iterations later.
+step "preflight"
+if command -v tasklist >/dev/null 2>&1; then
+  if tasklist 2>/dev/null | grep -qi 'openbot.*\.exe'; then
+    note "FAIL preflight: an openbot binary is running and will hold the build"
+    exit 1
+  fi
+fi
+if [ ! -e crates/openbot-app/binaries/openbot-x86_64-pc-windows-msvc.exe ] \
+   && [ -z "$(ls crates/openbot-app/binaries/ 2>/dev/null)" ]; then
+  note "FAIL preflight: no sidecar staged; run sh scripts/sidecar.sh"
+  exit 1
+fi
+note "ok preflight"
+
+step "rust: check + clippy"
+if cargo check -p openbot-app -p openbot-desktop --tests >/dev/null 2>"$LOOP/.check.log"; then
+  note "ok cargo check"
+else
+  note "FAIL cargo check"; tail -30 "$LOOP/.check.log"; fails=$((fails+1))
+fi
+if cargo clippy -p openbot-app -p openbot-desktop --all-targets -- -D warnings >/dev/null 2>"$LOOP/.clippy.log"; then
+  note "ok clippy"
+else
+  note "FAIL clippy"; tail -30 "$LOOP/.clippy.log"; fails=$((fails+1))
+fi
+
+step "rust: fmt"
+if cargo fmt --all -- --check >/dev/null 2>&1; then
+  note "ok fmt"
+else
+  note "FAIL fmt (run cargo fmt --all)"; fails=$((fails+1))
+fi
+
+step "frontend: syntax + the shipped-JS browser suite"
+if node --check crates/openbot-app/ui/main.js >/dev/null 2>&1; then
+  note "ok main.js parses"
+else
+  note "FAIL main.js does not parse"; fails=$((fails+1))
+fi
+if node --check "$LOOP/fixture/scenarios.js" >/dev/null 2>&1; then
+  note "ok scenarios.js parses"
+else
+  note "FAIL scenarios.js does not parse"; fails=$((fails+1))
+fi
+# The page suite is the only thing pinning main.js's approval queue, refusal
+# mapping and credential handling. The loop edits that file, so this runs every
+# iteration despite the cost.
+if cargo test -p openbot-app --test page >"$LOOP/.page.log" 2>&1; then
+  note "ok page suite ($(grep -oE '[0-9]+ passed' "$LOOP/.page.log" | tail -1))"
+else
+  note "FAIL page suite"; grep -E "^(test |failures:|---- )" "$LOOP/.page.log" | tail -25; fails=$((fails+1))
+fi
+
+step "browser gates: axe, contrast, keyboard, reduced motion, approval invariants"
+if node scripts/ux-audit.mjs >"$LOOP/.audit.log" 2>&1; then
+  note "ok browser gates"
+else
+  note "FAIL browser gates"; grep "FAIL " "$LOOP/.audit.log" | head -40; fails=$((fails+1))
+fi
+
+step "bundle size"
+bytes=$(cat crates/openbot-app/ui/index.html crates/openbot-app/ui/main.js crates/openbot-app/ui/styles.css 2>/dev/null | wc -c)
+fontbytes=0
+if [ -d crates/openbot-app/ui/fonts ]; then
+  fontbytes=$(find crates/openbot-app/ui/fonts -type f -exec cat {} + 2>/dev/null | wc -c)
+fi
+total=$((bytes + fontbytes))
+if [ -f "$LOOP/.baseline-bytes" ]; then
+  base=$(cat "$LOOP/.baseline-bytes")
+  limit=$((base * 115 / 100))
+  if [ "$total" -gt "$limit" ]; then
+    note "FAIL bundle grew to $total bytes, over the 15% ceiling of $limit (baseline $base)"
+    fails=$((fails+1))
+  else
+    note "ok bundle $total bytes (baseline $base, ceiling $limit)"
+  fi
+else
+  echo "$total" > "$LOOP/.baseline-bytes"
+  note "ok bundle $total bytes (baseline recorded)"
+fi
+
+step "summary"
+audit_json="$LOOP/audit.json"
+printf 'GATES total_failures=%s bundle_bytes=%s' "$fails" "$total"
+if [ -f "$audit_json" ]; then
+  printf ' %s' "$(node -e "const a=require('./$audit_json');process.stdout.write('axe_serious='+(a.axe.serious||0)+' axe_critical='+(a.axe.critical||0)+' contrast_failures='+a.contrastFailures+' worst_contrast='+(a.worstContrast===null?'none':a.worstContrast))" 2>/dev/null || echo '')"
+fi
+printf '\n'
+
+if [ "$fails" -gt 0 ]; then
+  note "RESULT fail ($fails gate(s))"
+  exit 1
+fi
+note "RESULT pass"
