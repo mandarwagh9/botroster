@@ -27,14 +27,25 @@ messages}`. Presentation can render a status it is given, but something has to g
 what the window can already know (open session, pending approval count, routine paused) and
 file the rest.
 
-### B02 — the approval dialog makes the consequential choice the loudest thing
-`open` · rubric 7 · invariant 2 · `shots/000/s06-1280-dark.png`
+### B02 — the approval dialog makes the grant the loudest thing
+`NEEDS REVIEW` · rubric 7 · `shots/001/s06-1280-dark.png`
 
-"Allow once" is the filled primary button — the highest-contrast object in the dialog. "Not
-this time" is the quietest. The safe choice should be the loud one. LOOP.md invariant 2 says
-the session-scoped option is never primary (it is not — it carries a danger outline, which is
-correct), but nothing says the *approve* action gets to be primary either, and rubric 7 asks
-whether the consequential choice is visually subordinate to the safe one. It is not.
+**The 000 screenshot this was first raised from was wrong** — the fixture had `danger` on the
+session grant instead of on the refusal, so it painted a dialog the product never renders.
+Corrected in `shots/001/`. The true state: "Allow once" is the accent fill (loudest), "Allow
+for the rest of this session" is a quiet outline, "Not this time" is a red outline.
+
+Invariant 2 holds: the session option is not primary and is visually distinct. What does not
+hold is rubric 7's stronger question — is the *consequential* choice subordinate to the safe
+one? No: the grant carries the only accent fill in the dialog.
+
+**Not changed unattended, and this is deliberate.** `renderDialog` in `main.js` carries an
+explicit rationale for the current arrangement: one accent per dialog, the shell orders
+options narrowest-grant-first, and the first non-refusing option gets the accent because it
+is the smallest grant — positional on purpose, so an unclassifiable `kind` ACP adds later
+cannot be dressed in the accent. Inverting the emphasis on a security dialog, against a
+written in-code decision, is exactly the change LOOP.md says goes to the operator rather than
+into a 4am commit. **Operator decision.**
 
 ### B03 — the computer is behind a button, not a peer pane
 `open` · rubric 6 · `shots/000/s04-1280-dark.png`, `s05-1280-dark.png`

@@ -945,10 +945,15 @@ textarea {
   font-size: var(--fs-12);
 }
 
+/* The word that says a step is in flight — "running" — is the answer to "what
+   is the Bot doing right now", so it cannot be the least legible text on the
+   screen. It was `--ghost`, which the system reserves for placeholders and
+   disabled text and which does not clear AA: measured 2.95:1 dark and 2.79:1
+   light against the thread background. `--muted` clears it with headroom. */
 .step-state {
   font-family: var(--mono);
   font-size: var(--fs-11);
-  color: var(--ghost);
+  color: var(--muted);
 }
 
 .step-state:empty {

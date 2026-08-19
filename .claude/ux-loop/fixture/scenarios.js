@@ -29,10 +29,15 @@ function ask(id, tool, fields, options) {
     session: "s1",
     tool,
     fields: fields,
+    // `danger` marks the REFUSALS, not the large grant — `renderDialog` in
+    // main.js reads it that way and styles on it. Getting this backwards makes
+    // the fixture paint "allow for the session" in the refusal styling and the
+    // refusal in the quiet styling, which is a screenshot of a dialog the
+    // product never renders. The shell orders options narrowest grant first.
     options: options || [
       { id: "allow-once", name: "Allow once", kind: "allow_once", danger: false },
-      { id: "allow-session", name: "Allow for the rest of this session", kind: "allow_always", danger: true },
-      { id: "reject-once", name: "Not this time", kind: "reject_once", danger: false },
+      { id: "allow-session", name: "Allow for the rest of this session", kind: "allow_always", danger: false },
+      { id: "reject-once", name: "Not this time", kind: "reject_once", danger: true },
     ],
   };
 }

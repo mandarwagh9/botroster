@@ -118,7 +118,12 @@
         <button id="no-computer-dismiss" class="link">Dismiss</button>
       </div>
 
-      <div id="log" class="log hidden" aria-live="polite"></div>
+      <!-- `tabindex="0"` is what makes the run log scrollable from the
+           keyboard. It scrolls, so somebody who cannot use a pointer has to be
+           able to focus it and page back through a long run; without this a
+           200-step thread is unreachable past the last screenful. -->
+      <div id="log" class="log hidden" role="log" tabindex="0"
+           aria-label="Run log" aria-live="polite"></div>
 
       <div id="no-bot" class="no-bot">
         <div class="no-bot-card">
@@ -246,7 +251,11 @@
         No rules. The shipped default applies: reading is free, changing asks.
       </p>
       <form id="rule-form" class="rule-form">
-        <select id="rule-action">
+        <!-- The row reads as a sentence — Refuse / shell.exec / why — so the
+             two inputs get their names from placeholders. A select has no
+             placeholder to borrow, which left it as the one unnamed control in
+             the panel that decides what the hub allows. -->
+        <select id="rule-action" aria-label="what happens when this tool is called">
           <option value="deny">Refuse</option>
           <option value="require_approval">Ask</option>
           <option value="allow">Allow</option>
