@@ -129,8 +129,14 @@
         <div class="no-bot-card">
           <span class="mark" aria-hidden="true">O</span>
           <h2>A teammate, not a chat.</h2>
+          <!-- The second sentence is set by `renderRoster`: with no Bots yet
+               there is nothing on the left to pick, and telling somebody to
+               pick one is the emptiest kind of empty state. The button is the
+               path out of it, in the pane that has the room for one — the
+               sidebar's own `+ New Bot` is a 200px target in the corner. -->
           <p>Each Bot has one job, its own memory, and a computer it works on.
-          Pick one on the left, or make your first.</p>
+          <span id="no-bot-copy">Pick one on the left, or make another.</span></p>
+          <button id="no-bot-new" class="primary">Make your first Bot</button>
         </div>
       </div>
 

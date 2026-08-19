@@ -551,6 +551,17 @@ function renderRoster(bots) {
     botsList.appendChild(li);
   }
   show(rosterEmpty, bots.length === 0 && !showHidden);
+
+  // The empty conversation pane has to say something true. With an empty
+  // roster "pick one on the left" points at nothing, so the copy and the
+  // button both change with the count rather than being written once for the
+  // populated case and left to go wrong in the case a new install actually
+  // starts in.
+  const none = bots.length === 0;
+  $("no-bot-copy").textContent = none
+    ? "There are none yet."
+    : "Pick one on the left, or make another.";
+  $("no-bot-new").textContent = none ? "Make your first Bot" : "New Bot";
 }
 
 /// Groups, under the Bots. Clicking one opens it as a session like a Bot's:
@@ -1141,6 +1152,9 @@ $("new-bot").addEventListener("click", () => {
   show(nameDialog, true);
   newName.focus();
 });
+// The empty pane's button is the same action, not a second implementation of
+// it: one handler, so the two cannot drift into asking for different things.
+$("no-bot-new").addEventListener("click", () => $("new-bot").click());
 $("name-cancel").addEventListener("click", () => show(nameDialog, false));
 $("name-form").addEventListener("submit", async (e) => {
   e.preventDefault();
