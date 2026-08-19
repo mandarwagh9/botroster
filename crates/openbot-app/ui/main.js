@@ -252,8 +252,58 @@ const SPEAKER = {
   result: "Result",
 };
 
+/// What a tool step says about itself, as a sentence a person reads.
+///
+/// The shell sends the tool's name with its raw arguments, and later the
+/// result as `✓ {json}` or `✗ {json}`. A thread that shows both verbatim is
+/// a debug log. For the tools this page knows, the pair is summarised into one
+/// phrase ("Wrote notes.md · 93 bytes"); for anything else the raw line stands,
+/// so a new tool is shown rather than hidden. The full text is always on the
+/// row's title, so nothing is lost, only tidied.
+const STEP_SUMMARY = {
+  "fs.write": (a, r) => ["Wrote", a.path, r && r.bytes_written != null ? `${r.bytes_written} bytes` : null],
+  "fs.read": (a, r) => ["Read", a.path, r && r.contents != null ? `${r.contents.length} chars` : null],
+  "fs.list": (a, r) => ["Listed", a.path || ".", r && Array.isArray(r.entries) ? `${r.entries.length} entries` : null],
+  "fs.delete": (a) => ["Deleted", a.path, null],
+  "shell.exec": (a, r) => ["Ran", a.command, r && r.exit_code != null ? (r.exit_code === 0 ? "ok" : `exit ${r.exit_code}`) : null],
+  "browser.open": (a, r) => ["Opened", a.url, r && r.title ? r.title : null],
+  "browser.read": () => ["Read the page", null, null],
+  "browser.click": (a) => ["Clicked", a.selector || a.text, null],
+  "browser.fill": (a) => ["Filled", a.selector, null],
+  "browser.screenshot": () => ["Took a screenshot", null, null],
+  "bot.send": (a) => ["Handed off to", a.to || a.bot, null],
+  "bot.list": () => ["Listed the team", null, null],
+};
+
+/// Try to parse the JSON half of a tool or result line. `null` when it is not
+/// JSON, which is the ordinary case for a free-text result.
+function jsonTail(text, from) {
+  const t = text.slice(from).trim();
+  if (!t.startsWith("{") && !t.startsWith("[")) return null;
+  try { return JSON.parse(t); } catch { return null; }
+}
+
+/// The tool step currently open: the row the next result should complete.
+let openStep = null;
+
 function appendChunk(chunk) {
   if (!chunk || !chunk.text) return;
+
+  // A result completes the open step in place rather than adding a row.
+  if (chunk.kind === "result" && openStep) {
+    completeStep(openStep, chunk);
+    openStep = null;
+    log.scrollTop = log.scrollHeight;
+    return;
+  }
+  // Progress belongs to the open step and is shown as its state, not as rows.
+  if (chunk.kind === "progress" && openStep) {
+    openStep.dataset.state = chunk.text;
+    const st = openStep.querySelector(".step-state");
+    if (st) st.textContent = chunk.text;
+    return;
+  }
+
   const el = document.createElement("div");
   el.className = "msg " + chunk.kind;
   const who = SPEAKER[chunk.kind];
@@ -265,27 +315,97 @@ function appendChunk(chunk) {
     label.textContent = who + ": ";
     el.appendChild(label);
   }
-  const body = document.createElement("span");
+
   if (chunk.kind === "tool") {
-    // `<name> <args>` from the shell; the name gets its own weight so a
-    // person scanning the thread sees what ran before with what.
     const sp = chunk.text.indexOf(" ");
-    const name = document.createElement("span");
-    name.className = "tool-name";
-    name.textContent = sp > 0 ? chunk.text.slice(0, sp) : chunk.text;
-    body.appendChild(name);
-    if (sp > 0) body.appendChild(document.createTextNode(chunk.text.slice(sp + 1)));
+    const name = sp > 0 ? chunk.text.slice(0, sp) : chunk.text;
+    const args = sp > 0 ? jsonTail(chunk.text, sp) : null;
+    el.dataset.tool = name;
+    el.dataset.args = args ? JSON.stringify(args) : "";
+    el.appendChild(stepMark("running"));
+    const text = document.createElement("span");
+    text.className = "step-text";
+    const summary = STEP_SUMMARY[name];
+    const [verb, object] = summary && args ? summary(args, null) : [null, null];
+    if (verb) {
+      const v = document.createElement("span");
+      v.className = "step-verb";
+      v.textContent = verb;
+      text.appendChild(v);
+      if (object) {
+        const o = document.createElement("span");
+        o.className = "step-object";
+        o.textContent = object;
+        text.appendChild(o);
+      }
+    } else {
+      const v = document.createElement("span");
+      v.className = "tool-name";
+      v.textContent = name;
+      text.appendChild(v);
+      if (sp > 0) text.appendChild(document.createTextNode(" " + chunk.text.slice(sp + 1)));
+    }
+    el.appendChild(text);
+    const state = document.createElement("span");
+    state.className = "step-state";
+    el.appendChild(state);
+    el.title = chunk.text;
+    openStep = el;
   } else {
+    const body = document.createElement("span");
     body.textContent = chunk.text;
+    el.appendChild(body);
+    if (chunk.kind === "result") el.title = chunk.text;
   }
-  el.appendChild(body);
-  // Clipped rows keep the whole thing reachable on hover. Only where the
-  // stylesheet clips: a bubble's text is all on screen already.
-  if (chunk.kind === "tool" || chunk.kind === "result") el.title = chunk.text;
   log.appendChild(el);
   log.scrollTop = log.scrollHeight;
 }
 
+/// The tick or cross at the head of a step row.
+function stepMark(state) {
+  const m = document.createElement("span");
+  m.className = "step-mark";
+  m.dataset.state = state;
+  m.setAttribute("aria-hidden", "true");
+  return m;
+}
+
+/// Fill a step row in with its result: the mark becomes a tick or a cross,
+/// and the summary gains its detail ("· 93 bytes") when the tool is known.
+function completeStep(step, chunk) {
+  const ok = chunk.text.startsWith("✓");
+  const mark = step.querySelector(".step-mark");
+  if (mark) mark.dataset.state = ok ? "ok" : "failed";
+  step.classList.toggle("failed", !ok);
+  const st = step.querySelector(".step-state");
+  if (st) st.textContent = "";
+  const summary = STEP_SUMMARY[step.dataset.tool];
+  let args = null;
+  try { args = step.dataset.args ? JSON.parse(step.dataset.args) : null; } catch { args = null; }
+  const result = jsonTail(chunk.text, 1);
+  if (summary && args && ok) {
+    const [, , detail] = summary(args, result);
+    if (detail) {
+      const d = document.createElement("span");
+      d.className = "step-detail";
+      d.textContent = detail;
+      step.querySelector(".step-text").appendChild(d);
+    }
+  } else if (!ok) {
+    // A failure shows its reason in full; it is the one time the raw record is
+    // the thing a person needs to read.
+    const d = document.createElement("span");
+    d.className = "step-detail";
+    d.textContent = chunk.text.slice(1).trim();
+    step.querySelector(".step-text").appendChild(d);
+  }
+  step.title = `${step.title}\n${chunk.text}`;
+  // Said to a screen reader: the outcome, with the record behind it.
+  const sr = document.createElement("span");
+  sr.className = "sr-only";
+  sr.textContent = (ok ? " Result: " : " Failed: ") + chunk.text.slice(1).trim();
+  step.appendChild(sr);
+}
 // ------------------------------------------------------------------- marks
 
 /// A Bot's mark: one letter on a colour of its own.
@@ -487,6 +607,7 @@ function closeConversation() {
   attached.length = 0;
   renderAttached();
   log.innerHTML = "";
+  openStep = null;
   show(log, false);
   show(composer, false);
   show(noBot, true);
@@ -763,7 +884,13 @@ function renderDialog() {
     // `PermissionOptionKind` is `#[non_exhaustive]`: a prefix match here would
     // dress an unclassifiable option in the accent styling reserved for the
     // permitted choice. `refuses` answers it in Rust and fails closed.
-    btn.className = option.danger ? "danger" : "primary";
+    // One accent button per dialog. The shell orders options narrowest first
+    // and `danger` marks the refusals, so the first non-refusing option is the
+    // smallest grant and gets the accent; any further grant (allow for the
+    // session) is the larger commitment and reads quieter. Positional on
+    // purpose: a kind-string match would have to know every kind ACP may add.
+    const isFirstGrant = !option.danger && !dialogOptions.querySelector(".primary");
+    btn.className = option.danger ? "danger" : isFirstGrant ? "primary" : "quiet";
     btn.textContent = option.name;
     btn.addEventListener("click", () => answerAsk(ask.id, option.id));
     dialogOptions.appendChild(btn);

@@ -3592,8 +3592,14 @@ async fn every_message_kind_says_who_it_is_from() {
     let Some((b, _p)) = page().await else { return };
     open_session(&b, "s1").await;
 
+    // A result or a progress line that arrives while a tool step is open folds
+    // into that step's row (see `appendChunk`), so to measure each kind as its
+    // own row the tool is fired last. Standalone rows are a real case: a
+    // result whose step is not on screen, after a reload of a long thread.
+    let mut order: Vec<openbot_app::Kind> = openbot_app::Kind::ALL.to_vec();
+    order.sort_by_key(|k| k.as_str() == "tool");
     let mut labels: Vec<(String, String)> = Vec::new();
-    for kind in openbot_app::Kind::ALL {
+    for kind in order {
         let name = kind.as_str();
         let body = format!("body-of-{name}");
         b.text_of(&format!(
@@ -3871,7 +3877,11 @@ async fn every_transcript_line_is_at_least_a_line_tall() {
     open_session(&b, "s1").await;
     let long = "x".repeat(400);
     let mut short: Vec<String> = Vec::new();
-    for kind in openbot_app::Kind::ALL {
+    // Tool last, so a following progress or result renders as its own row
+    // rather than folding into the step; see `appendChunk`.
+    let mut order: Vec<openbot_app::Kind> = openbot_app::Kind::ALL.to_vec();
+    order.sort_by_key(|k| k.as_str() == "tool");
+    for kind in order {
         let name = kind.as_str();
         b.text_of(&format!(
             "window.__fire('chunk', {{\"session\":\"s1\",\"kind\":\"{name}\",\"text\":\"{name} {long}\"}}); 'ok'"
@@ -3918,5 +3928,118 @@ async fn every_transcript_line_is_at_least_a_line_tall() {
     assert!(
         short.is_empty(),
         "these transcript rows collapsed and their text is invisible: {short:?}"
+    );
+}
+
+/// A tool call and its result are one row in the thread.
+///
+/// The shell sends the call and the result as two chunks. A thread that drew
+/// both verbatim was a debug log: a mono box of arguments, then a line of
+/// JSON under it, four rows per step. A step is now one row, and for a tool
+/// the page knows the row reads as a sentence ("Wrote notes.md · 93 bytes")
+/// with the raw record on its title. An unknown tool keeps its name and
+/// arguments, so a new tool is shown rather than hidden.
+///
+/// The outcome still reaches a screen reader: the row gains a hidden
+/// "Result:" span when the result lands, so the accessible text carries the
+/// whole step even though the visible text was tidied.
+#[tokio::test]
+async fn a_tool_call_and_its_result_are_one_row() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    let fire = |kind: &str, text: &str| {
+        format!(
+            "window.__fire('chunk', {{\"session\":\"s1\",\"kind\":\"{kind}\",\"text\":{}}}); 'ok'",
+            serde_json::to_string(text).unwrap()
+        )
+    };
+    b.text_of(&fire(
+        "tool",
+        r#"fs.write {"path":"notes.md","contents":"hello"}"#,
+    ))
+    .await
+    .unwrap();
+    settle().await;
+    let running = b
+        .text_of("JSON.stringify({rows: document.querySelectorAll('#log .msg').length, state: document.querySelector('#log .msg.tool .step-mark')?.dataset.state, text: document.querySelector('#log .msg.tool .step-text')?.textContent})")
+        .await
+        .unwrap();
+    assert!(
+        running.contains("\"rows\":1"),
+        "the call did not make one row: {running}"
+    );
+    assert!(
+        running.contains("\"state\":\"running\""),
+        "the step does not show as running: {running}"
+    );
+    assert!(
+        running.contains("Wrote") && running.contains("notes.md"),
+        "the step does not read as a sentence: {running}"
+    );
+
+    b.text_of(&fire("progress", "starting")).await.unwrap();
+    b.text_of(&fire(
+        "result",
+        r#"✓ {"path":"notes.md","bytes_written":93}"#,
+    ))
+    .await
+    .unwrap();
+    settle().await;
+    let done = b
+        .text_of("JSON.stringify({rows: document.querySelectorAll('#log .msg').length, state: document.querySelector('#log .msg.tool .step-mark')?.dataset.state, text: document.querySelector('#log .msg.tool .step-text')?.textContent, sr: [...document.querySelectorAll('#log .msg.tool .sr-only')].map(e => e.textContent).join('|'), title: document.querySelector('#log .msg.tool')?.title})")
+        .await
+        .unwrap();
+    assert!(
+        done.contains("\"rows\":1"),
+        "the result and progress added rows instead of completing the step: {done}"
+    );
+    assert!(
+        done.contains("\"state\":\"ok\""),
+        "the step did not turn to ok: {done}"
+    );
+    assert!(
+        done.contains("93 bytes"),
+        "the result's detail did not reach the row: {done}"
+    );
+    assert!(
+        done.contains("Result:") && done.contains("bytes_written"),
+        "a screen reader is not told the outcome: {done}"
+    );
+    assert!(
+        done.contains("bytes_written\\\":93") || done.contains("bytes_written\":93"),
+        "the raw record is not on the row's title: {done}"
+    );
+
+    // An unknown tool keeps its name and arguments visible.
+    b.text_of(&fire("tool", r#"linear__create_issue {"title":"x"}"#))
+        .await
+        .unwrap();
+    settle().await;
+    let unknown = b
+        .text_of("document.querySelectorAll('#log .msg.tool')[1]?.querySelector('.step-text')?.textContent")
+        .await
+        .unwrap();
+    assert!(
+        unknown.contains("linear__create_issue"),
+        "an unknown tool lost its name: {unknown}"
+    );
+
+    // A failure shows its reason in the row, in the danger ink.
+    b.text_of(&fire("result", r#"✗ {"error":"no such project"}"#))
+        .await
+        .unwrap();
+    settle().await;
+    let failed = b
+        .text_of("JSON.stringify({state: document.querySelectorAll('#log .msg.tool')[1]?.querySelector('.step-mark')?.dataset.state, text: document.querySelectorAll('#log .msg.tool')[1]?.textContent})")
+        .await
+        .unwrap();
+    assert!(
+        failed.contains("\"state\":\"failed\""),
+        "a failed step does not show as failed: {failed}"
+    );
+    assert!(
+        failed.contains("no such project"),
+        "the failure's reason is not in the row: {failed}"
     );
 }

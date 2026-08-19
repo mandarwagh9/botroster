@@ -20,8 +20,8 @@
       <h1>OPENBOT</h1>
     </header>
     <p class="connect-lede">
-      Your Bots live in a <strong>openbot</strong> you run yourself. Point this
-      window at one — the defaults match <code>openbot up</code> on this machine.
+      Your Bots live in a runtime you run yourself. Point this window at one;
+      the defaults match <code>openbot up</code> on this machine.
     </p>
     <div class="fields">
       <label for="openbot-path">openbot binary</label>
@@ -76,10 +76,10 @@
       <p id="roster-error" class="error hidden"></p>
 
       <footer class="roster-foot">
-        <button id="toggle-hidden" class="link">Show hidden chats</button>
-        <button id="rules-btn" class="link">Settings</button>
-        <button id="credentials" class="link">Credentials</button>
-        <button id="disconnect" class="link">Disconnect</button>
+        <button id="toggle-hidden" class="link"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2.2"/></svg><span>Show hidden chats</span></button>
+        <button id="rules-btn" class="link"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1"/></svg><span>Settings</span></button>
+        <button id="credentials" class="link"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg><span>Credentials</span></button>
+        <button id="disconnect" class="link"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 2.5h-3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3M10 11l3-3-3-3M13 8H6.5"/></svg><span>Disconnect</span></button>
       </footer>
     </nav>
 
@@ -100,7 +100,7 @@
              alone hold the invariant after any transition but not on the
              screen a new install opens on. -->
         <button id="edit-bot" class="link hidden">Edit</button>
-        <button id="computer" class="link computer-btn">Agent Computer</button>
+        <button id="computer" class="link computer-btn"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="8.5" rx="1.5"/><path d="M6 13.5h4"/></svg><span>Agent Computer</span></button>
         <span id="status" class="status">connected</span>
       </header>
 
@@ -119,9 +119,14 @@
 
       <div id="log" class="log hidden" aria-live="polite"></div>
 
-      <p id="no-bot" class="no-bot">
-        Choose a Bot on the left, or make one.
-      </p>
+      <div id="no-bot" class="no-bot">
+        <div class="no-bot-card">
+          <span class="mark" aria-hidden="true">O</span>
+          <h2>A teammate, not a chat.</h2>
+          <p>Each Bot has one job, its own memory, and a computer it works on.
+          Pick one on the left, or make your first.</p>
+        </div>
+      </div>
 
       <!-- The Agent Computer. An iframe onto the shipped viewer rather than a
            second implementation of it, so the takeover lock a person relies on
@@ -157,11 +162,11 @@
         <textarea id="input" rows="2" placeholder="Ask the Bot…"></textarea>
         <div class="composer-actions">
           <button type="button" id="attach" class="link" title="Attach a file">
-            Attach
+            <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 5.5l-4.6 4.6a1.6 1.6 0 0 0 2.3 2.3l5-5a3.2 3.2 0 0 0-4.5-4.5l-5 5a4.8 4.8 0 0 0 6.8 6.8l4-4"/></svg><span>Attach</span>
           </button>
           <span class="spacer"></span>
-          <button type="button" id="cancel" class="hidden">Stop</button>
-          <button type="submit" id="send" class="primary">Send</button>
+          <button type="button" id="cancel" class="hidden"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg><span>Stop</span></button>
+          <button type="submit" id="send" class="primary" title="Send"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" style="stroke-width:2"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5"/></svg><span>Send</span></button>
         </div>
       </form>
     </section>

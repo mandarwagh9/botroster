@@ -1,59 +1,59 @@
-/* OPENBOT.
+/* OPENBOT desktop client.
  *
  * Two surfaces: a roster and one conversation. Everything else (the connect
- * panel, the approval dialog, the naming dialog) is transient and sits over
- * them.
+ * panel, the approval dialog, the palette, the settings and credential
+ * panels) is transient and sits over them.
  *
- * The visual language: neutral surfaces with no colour cast, in both themes;
- * a small fixed set of saturated hues that belong to Bots, not to chrome;
- * large soft radii with pills for anything interactive; and an accent spent
- * almost nowhere. A surface where four things are emphasised has emphasised
- * nothing, and in the approval dialog that would mean the "Allow for the rest
- * of the run" and "Not this time" buttons rendered the same.
+ * The system, stated once so every rule below follows it rather than
+ * inventing its own:
  *
- * Every text-on-surface pair below clears WCAG AA in both themes;
- * `no_text_in_any_surface_falls_below_the_contrast_it_needs` keeps that
- * true in the shipped page.
+ *   Type      One sans family, one mono. Seven sizes (11 12 13 14 15 17 24)
+ *             and three weights (400 500 600). Body copy in the thread is 15px
+ *             on a 640px measure, because a conversation is read like a
+ *             document and not like a feed.
+ *   Surfaces  Pure grey, zero chroma, four steps (bg, panel, raise, line) in
+ *             both themes through light-dark(). The thread sits on bg; the
+ *             roster on a step darker so the canvas reads as the room.
+ *   Colour    Eight coats a Bot can wear, and one accent. The accent is a
+ *             fill, never a text colour. A Bot's coat appears exactly three
+ *             places: its mark, the open row, and a hairline on its turns.
+ *   Shape     Pills for controls, 12px for rows and chips, 16px for cards.
+ *   Motion    One duration (160ms) and one curve for everything that moves;
+ *             entrances translate 4px and fade; nothing loops. Honours
+ *             prefers-reduced-motion.
+ *
+ * Every text-on-surface pair clears WCAG AA in both themes and the shipped
+ * page is swept for it.
  */
 
-/* Both themes, from one place. `light-dark()` picks per `color-scheme`, so
-   there is exactly one token per role and no second block to drift. Values
-   are hand-chosen greys with zero chroma: a slate ramp reads as a developer
-   default, and this window is a product.
-
-   Text tiers, as contrast ratios on the lightest surface text sits on
-   (`--raise`): dark 14.8 / 9.9 / 5.1, light 16.0 / 9.4 / 4.7. All three
-   clear AA on every surface in both themes. */
 :root {
   color-scheme: light dark;
 
+  /* surfaces */
   --bg: light-dark(#ffffff, #101014);
   --panel: light-dark(#f7f7f8, #16161a);
   --raise: light-dark(#efeff1, #1e1e23);
   --line: light-dark(#e2e2e6, #2a2a31);
+  --line-soft: light-dark(#ededf0, #1c1c21);
+  --sidebar: light-dark(#f7f7f8, #0c0c0f);
 
+  /* text tiers, measured on --raise: dark 14.8 / 9.9 / 5.1, light 16.0 / 9.4 / 4.7 */
   --ink: light-dark(#141417, #f2f2f2);
   --muted: light-dark(#3d3d44, #c8c8cc);
   --faint: light-dark(#6a6a72, #8e8e95);
+  /* ghost is for placeholders and disabled text only; it does not clear AA
+     and must never carry a label or a value somebody reads. */
+  --ghost: light-dark(#9a9aa3, #5e5e66);
 
-  /* The accent is a fill, never a text colour. Violet on the dark
-     background measures 4.4 as text and 5.0 as a button with white on it, so
-     it does one of those jobs, not both. Links and controls stay in the ink
-     tiers; the accent marks the one thing that commits. */
+  /* the one accent; a fill, never a text colour */
   --accent: light-dark(#6f45e0, #7c4ff0);
   --accent-ink: #ffffff;
   --accent-wash: light-dark(rgba(111, 69, 224, 0.1), rgba(124, 79, 240, 0.16));
 
-  /* Semantic inks sit on a 12% wash of themselves over any surface. Each is
-     chosen so the ink-on-wash pair clears 5.5 on every surface in both themes
-     (worst cases: danger 5.25 dark, danger 5.53 light), which leaves margin
-     for renderers that composite the wash differently. The light values are
-     deeper than the palette's raw hues because a wash over white needs a
-     much darker ink than the same hue over near-black. */
+  /* semantic inks on a 12% wash; each clears 5.5 on every surface, both themes */
   --danger: light-dark(#9e2128, #f67a7e);
   --danger-line: light-dark(rgba(158, 33, 40, 0.45), rgba(246, 122, 126, 0.45));
   --danger-wash: light-dark(rgba(158, 33, 40, 0.12), rgba(246, 122, 126, 0.12));
-
   --ok: light-dark(#1a5f35, #7adc95);
   --ok-wash: light-dark(rgba(26, 95, 53, 0.12), rgba(122, 220, 149, 0.12));
   --warn: light-dark(#7f3a14, #f6b463);
@@ -61,19 +61,34 @@
 
   --scrim: light-dark(rgba(20, 20, 23, 0.4), rgba(0, 0, 0, 0.6));
   --shadow: light-dark(0 20px 50px rgba(20, 20, 23, 0.14), 0 24px 60px rgba(0, 0, 0, 0.5));
+  --shadow-soft: light-dark(0 8px 30px rgba(20, 20, 23, 0.08), 0 12px 40px rgba(0, 0, 0, 0.35));
 
-  /* One radius system, stated. Interactive things are pills; containers are
-     soft; fields sit between so a pill button beside a field does not read
-     as two products. */
+  /* shape */
   --r-pill: 999px;
   --r-card: 16px;
+  --r-row: 12px;
   --r-field: 10px;
+  --r-chip: 8px;
   --radius: var(--r-card);
 
-  /* Eight coats a Bot can wear. Two values per coat because the raw hue does
-     not survive a light surface (yellow is 1.9 on `--raise` in light), so
-     each is tinted toward ink until it clears 4.5, and no further.
-     `every_coat_a_bot_can_wear_is_legible` holds each pair. */
+  /* type */
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-15: 15px;
+  --fs-17: 17px;
+  --fs-24: 24px;
+
+  /* motion */
+  --t: 160ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Eight coats. Two values per coat: the light value is tinted toward ink
+     until it clears 4.5 on the light raised surface. The initial on a coat is
+     --coat-ink, themed the opposite way to --ink. All sixteen pairs clear 4.5. */
   --coat-0: light-dark(#744ed0, #946cf6);
   --coat-1: light-dark(#326f64, #54b9a6);
   --coat-2: light-dark(#c7363b, #ec5358);
@@ -82,10 +97,6 @@
   --coat-5: light-dark(#bc387a, #eb4699);
   --coat-6: light-dark(#377749, #5bc67a);
   --coat-7: light-dark(#3068c5, #3c82f6);
-  /* The initial on a coat. Themed the opposite way to `--ink`: in dark the
-     coats are bright, so the letter is dark; in light they are deep, so it is
-     white. All sixteen pairs clear 4.5, worst 5.17 (dark blue) and 5.22
-     (light red); white on every coat would put yellow at 2.18. */
   --coat-ink: light-dark(#ffffff, #101014);
 }
 
@@ -102,7 +113,8 @@ body {
 body {
   background: var(--bg);
   color: var(--ink);
-  font: 14px/1.55 system-ui, sans-serif;
+  font: var(--fs-14) / 1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
 
@@ -116,21 +128,33 @@ body {
   display: none !important;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 /* ---------------------------------------------------------------- controls */
 
 button {
   background: var(--raise);
-  border: 1px solid var(--line);
+  border: 1px solid transparent;
   border-radius: var(--r-pill);
   color: var(--ink);
-  padding: 8px 16px;
+  padding: 7px 14px;
   font: inherit;
+  font-size: var(--fs-13);
   font-weight: 500;
+  line-height: 1.4;
   cursor: pointer;
   transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    transform 80ms ease;
+    background-color var(--t) var(--ease),
+    border-color var(--t) var(--ease),
+    color var(--t) var(--ease),
+    transform 80ms var(--ease);
 }
 
 button:hover {
@@ -143,14 +167,15 @@ button:active {
 
 button:focus-visible,
 input:focus-visible,
-textarea:focus-visible {
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 button.primary {
   background: var(--accent);
-  border-color: var(--accent);
   color: var(--accent-ink);
   font-weight: 600;
 }
@@ -160,8 +185,18 @@ button.primary:hover {
   filter: brightness(1.08);
 }
 
-/* Declining reads as a decision, not as the thing the dialog wants pressed.
-   An approval dialog whose allow and deny look alike is a trap. */
+/* A grant larger than the one the dialog leads with: offered, not pushed. */
+button.quiet {
+  background: var(--raise);
+  color: var(--muted);
+}
+
+button.quiet:hover {
+  background: var(--line);
+  color: var(--ink);
+}
+
+/* Declining reads as a decision, not as the thing the dialog wants pressed. */
 button.danger {
   background: transparent;
   border-color: var(--danger-line);
@@ -179,34 +214,46 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* A quiet, text-shaped control: roster footer, header actions, dialog links. */
 button.link {
   background: none;
   border: none;
-  color: var(--muted);
-  padding: 4px 0;
-  font-size: 12px;
+  color: var(--faint);
+  padding: 6px 8px;
+  border-radius: var(--r-chip);
+  font-size: var(--fs-13);
+  font-weight: 500;
   text-align: left;
 }
 
 button.link:hover {
   color: var(--ink);
+  background: var(--raise);
 }
 
 input,
-textarea {
+textarea,
+select {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: var(--r-field);
   color: var(--ink);
   padding: 9px 12px;
   font: inherit;
+  font-size: var(--fs-14);
   width: 100%;
-  transition: border-color 120ms ease;
+  transition: border-color var(--t) var(--ease);
 }
 
 input:hover,
-textarea:hover {
+textarea:hover,
+select:hover {
   border-color: var(--faint);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--ghost);
 }
 
 textarea {
@@ -215,403 +262,20 @@ textarea {
 
 .error {
   color: var(--danger);
-  font-size: 12px;
+  font-size: var(--fs-12);
   margin: 8px 0 0;
   min-height: 1em;
 }
 
 .hint {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-12);
   margin: 0 0 14px;
-}
-
-/* ----------------------------------------------------------------- connect */
-
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--r-card);
-  padding: 22px 24px 24px;
-  margin: auto;
-  /* Wide enough for three path rows: a 560px card leaves the end of a real
-     Windows path outside the box. Still capped, since a full-width form in a
-     large window reads as a page rather than a card. */
-  width: min(680px, calc(100% - 32px));
-}
-
-/* The product's name on its first screen, matching the roster header exactly
-   (same mark, same wordmark). A connect form is inherent to a self-hosted
-   tool; an unbranded one is not. */
-.connect-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.connect-head h1 {
-  margin: 0;
-  font-size: 15px;
-  letter-spacing: 0.16em;
-  font-weight: 700;
-}
-
-/* What this window is and what the defaults mean, in one sentence. Three path
-   fields with no explanation assume a person already knows what a openbot is. */
-.connect-lede {
-  margin: 0 0 18px;
-  font-size: 13px;
-  color: var(--muted);
   line-height: 1.5;
 }
 
-.connect-lede code {
-  font-family: ui-monospace, monospace;
-  color: var(--ink);
-  background: var(--raise);
-  padding: 1px 6px;
-  border-radius: 6px;
-}
-
-.panel h2 {
-  margin: 0 0 18px;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--muted);
-}
-
-/* One grid for the panel, not one per row: a row-level grid sizes its own
-   columns, so the field beside the folder button would end short of the
-   others and nothing would line up. */
-.fields {
-  display: grid;
-  grid-template-columns: 92px 1fr auto;
-  gap: 12px 10px;
-  align-items: center;
-}
-
-.fields label {
-  color: var(--muted);
-  text-align: right;
-  white-space: nowrap;
-}
-
-.fields .wide {
-  grid-column: 2 / -1;
-}
-
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 18px;
-}
-
-/* --------------------------------------------------------------- workspace */
-
-.workspace {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 260px 1fr;
-  min-height: 0;
-}
-
-.roster {
-  background: var(--panel);
-  border-right: 1px solid var(--line);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  padding: 14px 12px;
-  gap: 12px;
-}
-
-.roster-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.mark {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  background: var(--accent);
-  border-radius: 50%;
-  font-weight: 700;
-  font-size: 12px;
-  color: var(--accent-ink);
-}
-
-/* Must stay after `.mark`. Both are single-class selectors, so they have
-   equal specificity and source order decides; with this above, every Bot's
-   mark comes out `var(--accent)` while `--mark-hue` is set correctly on each
-   one, and a test that only compared `--mark-hue` would not notice. */
-/* A Bot's own mark: its coat, filled, with its initial on top.
-
-   Filled rather than outlined because a fill carries the coat into the
-   header and the roster at a size an outline cannot. The initial is
-   `--coat-ink`, which flips with the theme; see the token for the numbers.
-
-   `--coat` is set by `markEl` from `--mark-hue`, which is an index into
-   eight coats rather than a degree on a wheel: a 360-hue wheel produces some
-   Bots at 2.09:1, and no roster can show it. Held by
-   `every_coat_a_bot_can_wear_is_legible`. */
-.bot-mark {
-  --coat: var(--coat-0);
-  background: var(--coat);
-  border: 0;
-  color: var(--coat-ink);
-  width: 24px;
-  height: 24px;
-  font-size: 11px;
-  flex: 0 0 auto;
-}
-
-
-.roster-head h1 {
-  margin: 0;
-  font-size: 15px;
-  letter-spacing: 0.14em;
-}
-
-.new-bot {
-  width: 100%;
-  text-align: left;
-}
-
-.bots {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
-}
-
-/* Name and subtitle sit beside the mark rather than under it. */
-.bot {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto auto;
-  column-gap: 10px;
-  align-items: center;
-}
-
-.bot .bot-mark {
-  grid-row: 1 / 3;
-}
-
-/* Everything that is not the mark belongs in the second column, stated as
-   a rule rather than left to auto-placement, which counts children.
-   `grid-template-rows: auto auto` places a mark, a name and a subtitle and
-   then has nowhere for a fourth child, so a hidden Bot's "hidden" tag would
-   drop into row 3 of the mark's column and sit under the circle. The same
-   counting puts a group's name in the mark's column if a group row has no
-   mark. A rule that names the column cannot be broken by adding a child. */
-.bot > :not(.bot-mark) {
-  grid-column: 2;
-}
-
-.bots li {
-  margin-bottom: 4px;
-}
-
-.bot {
-  width: 100%;
-  display: grid;
-  gap: 1px;
-  text-align: left;
-  background: none;
-  border: 0;
-  border-radius: 12px;
-  padding: 8px 10px;
-  font-weight: 400;
-}
-
-.bot:hover {
-  background: var(--raise);
-}
-
-/* The one open conversation wears its own coat, faintly: the same wash the
-   person's bubbles get, so the row and the thread say the same thing. Not
-   the accent: the accent is for the one control that commits, and a
-   selection is not that. `--coat` is set on the row by `markEl`'s parent
-   when it is drawn. */
-.bot.open {
-  background: color-mix(in srgb, var(--coat, var(--faint)) 12%, transparent);
-}
-
-.bot-name {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bot-sub,
-.bot-hidden {
-  color: var(--faint);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bot-hidden {
-  color: var(--muted);
-  font-style: italic;
-}
-
-.roster-section {
-  margin: 10px 0 4px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--faint);
-}
-
-.roster-empty {
-  color: var(--faint);
-  font-size: 12px;
-  margin: 0;
-}
-
-.roster-foot {
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid var(--line);
-  padding-top: 10px;
-}
-
-/* ------------------------------------------------------------ conversation */
-
-.conversation {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.convo-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--line);
-}
-
-/* The header's mark sits beside the name, spanning both its rows. */
-.who {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  column-gap: 10px;
-  align-items: center;
-}
-
-.who #bot-mark {
-  grid-row: 1 / 3;
-}
-
-.who h2 {
-  margin: 0;
-  font-size: 16px;
-}
-
-.bot-title {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.status {
-  margin-left: auto;
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  background: var(--raise);
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.status.connected {
-  background: var(--ok-wash);
-  color: var(--ok);
-}
-
-.status.busy {
-  background: var(--warn-wash);
-  color: var(--warn);
-}
-
-.status.error {
-  background: var(--danger-wash);
-  color: var(--danger);
-}
-
-/* Not an error dialog: nothing has gone wrong that a person did, and the
-   window is still usable (the roster reads, settings open, the URL can be
-   corrected). It states what is missing and gets out of the way. */
-.no-computer {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  margin: 14px 20px 0;
-  padding: 12px 14px;
-  border: 1px solid var(--danger-line);
-  border-radius: var(--radius);
-  background: var(--danger-wash);
-  font-size: 13px;
-}
-
-.no-computer .why {
-  display: block;
-  margin-top: 4px;
-  color: var(--muted);
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-.no-computer button {
-  margin-left: auto;
-  white-space: nowrap;
-}
-
-.log {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-/* Centred in the space the transcript would occupy, not pushed to the floor
-   of it. `margin: auto` in a flex column loses to the log's `flex: 1`, which
-   would put the only instruction on the screen at the very bottom edge. */
-.no-bot {
-  flex: 1;
-  display: grid;
-  place-items: center;
-  margin: 0;
-  padding: 20px;
-  color: var(--faint);
-  text-align: center;
-}
-
-/* Said to a screen reader, drawn to nobody. Used for the speaker on every
-   transcript line, where the sighted cue is alignment and background colour.
-   Not `display: none` or `visibility: hidden`, either of which would take it
-   out of the accessibility tree along with the pixels.
-
-   What holds the "not drawn" half is `width` with `overflow`, and that is
-   what `every_message_kind_says_who_it_is_from` pins: setting `width: auto`
-   fails it at 24px. `clip-path` is belt to those braces; the box is already
-   1px with its overflow hidden, so removing it changes nothing any test here
-   can see. */
+/* Said to a screen reader, drawn to nobody. Width and overflow hold the
+   "not drawn" half; clip-path is belt to that pair of braces. */
 .sr-only {
   position: absolute;
   width: 1px;
@@ -624,194 +288,1129 @@ textarea {
   border: 0;
 }
 
-.msg {
-  max-width: 68ch;
-  padding: 10px 14px;
-  border-radius: 18px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+/* ------------------------------------------------------------------ icons */
+
+.icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ----------------------------------------------------------------- connect */
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  padding: 26px 28px 28px;
+  margin: auto;
+  width: min(680px, calc(100% - 32px));
+  box-shadow: var(--shadow-soft);
+  animation: rise var(--t) var(--ease) both;
+}
+
+.connect-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.connect-head h1 {
+  margin: 0;
+  font-size: var(--fs-13);
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.connect-lede {
+  margin: 0 0 20px;
+  font-size: var(--fs-14);
+  color: var(--muted);
+  line-height: 1.55;
+  max-width: 56ch;
+}
+
+.connect-lede code {
+  font-family: var(--mono);
+  font-size: var(--fs-13);
+  color: var(--ink);
+  background: var(--raise);
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
+.panel h2 {
+  margin: 0 0 18px;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: 96px 1fr auto;
+  gap: 12px 10px;
+  align-items: center;
+}
+
+.fields label {
+  color: var(--faint);
+  font-size: var(--fs-13);
+  text-align: right;
+}
+
+.fields input.wide {
+  grid-column: 2 / 4;
+}
+
+.fields button {
+  padding: 8px 12px;
+  border-radius: var(--r-field);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+/* --------------------------------------------------------------- workspace */
+
+.workspace {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 248px 1fr;
+  min-height: 0;
+}
+
+.roster {
+  background: var(--sidebar);
+  border-right: 1px solid var(--line-soft);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 10px 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.roster-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px 14px;
+}
+
+.roster-head h1 {
+  margin: 0;
+  font-size: var(--fs-13);
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+/* The product mark: a rounded square in the accent. A Bot's mark is a circle
+   in a coat; the two shapes tell the product from its teammates. */
+.mark {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  background: var(--accent);
+  border-radius: 7px;
+  font-weight: 700;
+  font-size: var(--fs-12);
+  color: var(--accent-ink);
+}
+
+/* A Bot's own mark: its coat, filled, with its initial. --coat is set by
+   markEl from the Bot's id, one of eight. Held by
+   every_coat_a_bot_can_wear_is_legible. */
+.bot-mark {
+  --coat: var(--coat-0);
+  background: var(--coat);
+  border: 0;
+  border-radius: 999px;
+  color: var(--coat-ink);
+  width: 24px;
+  height: 24px;
+  font-size: var(--fs-11);
+  flex: 0 0 auto;
+}
+
+.new-bot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  margin-bottom: 14px;
+  border-radius: var(--r-row);
+  background: var(--raise);
+  color: var(--muted);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  text-align: left;
+}
+
+.new-bot:hover {
+  color: var(--ink);
+  background: var(--line);
+}
+
+.new-bot span[aria-hidden] {
+  font-size: var(--fs-15);
+  line-height: 1;
+  color: var(--faint);
+}
+
+.roster-section {
+  margin: 14px 10px 6px;
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.roster-empty {
+  margin: 4px 10px 12px;
+  font-size: var(--fs-13);
+  color: var(--faint);
   line-height: 1.5;
 }
 
-/* The person's bubble wears the open Bot's coat, as a wash. It is the one
-   visible thing that says this conversation belongs to this teammate: the
-   current agent's colour tints what you said to it. `--coat` is set on
-   `#log` by `openBot` from the same coat the mark wears, so the sidebar, the
-   header and the thread agree.
+.bots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
 
-   An 18% wash keeps ink at 11:1 or better over every coat in both themes,
-   so the tint is identity, not a legibility trade. Falls back to the raised
-   surface for a thread with no coat, which is a group. */
+.bots li {
+  margin: 0;
+}
+
+.bot {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  row-gap: 0;
+  align-items: center;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--r-row);
+  padding: 8px 10px;
+  font-weight: 400;
+  transition: background-color var(--t) var(--ease);
+}
+
+.bot .bot-mark {
+  grid-row: 1 / 3;
+  width: 22px;
+  height: 22px;
+}
+
+.bot > :not(.bot-mark) {
+  grid-column: 2;
+}
+
+.bot:hover {
+  background: var(--raise);
+}
+
+/* The open conversation wears its coat, faintly. Not the accent: that is for
+   the one control that commits, and a selection is not that. */
+.bot.open {
+  background: color-mix(in srgb, var(--coat, var(--faint)) 12%, transparent);
+}
+
+.bot-name {
+  font-size: var(--fs-13);
+  font-weight: 500;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.35;
+}
+
+.bot.open .bot-name,
+.bot:hover .bot-name {
+  color: var(--ink);
+}
+
+.bot-sub,
+.bot-hidden {
+  color: var(--faint);
+  font-size: var(--fs-12);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.35;
+}
+
+.roster-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+.roster-foot .link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--r-chip);
+}
+
+.roster-error {
+  margin: 8px 10px 0;
+}
+
+/* ------------------------------------------------------------ conversation */
+
+.conversation {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg);
+}
+
+.convo-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 24px;
+  height: 52px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.who {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.who #bot-mark {
+  display: flex;
+  align-self: center;
+}
+
+.who h2 {
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.bot-title {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.convo-head .link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  font-size: var(--fs-12);
+}
+
+.computer-btn {
+  margin-left: auto;
+}
+
+/* The connection pill. Semantic ink on its wash; the dot carries the state. */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 8px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  background: var(--raise);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.status.connected {
+  background: var(--ok-wash);
+  color: var(--ok);
+}
+
+.status.busy {
+  background: var(--warn-wash);
+  color: var(--warn);
+}
+
+.status.busy::before {
+  animation: pulse 1.2s var(--ease) infinite;
+}
+
+.status.error {
+  background: var(--danger-wash);
+  color: var(--danger);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.no-computer {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 16px 24px 0;
+  padding: 12px 14px;
+  border-radius: var(--r-row);
+  background: var(--warn-wash);
+  color: var(--ink);
+  font-size: var(--fs-13);
+  line-height: 1.5;
+}
+
+.no-computer code {
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+}
+
+.no-computer .why {
+  display: block;
+  color: var(--muted);
+}
+
+.no-computer button {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* The thread. A document, not a feed: one column, a reading measure, and the
+   Bot's words as ordinary body copy. */
+.log {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 32px 24px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.no-bot {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 24px;
+}
+
+/* The first screen on an empty home: one idea and one thing to do. */
+.no-bot-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 380px;
+  text-align: center;
+  animation: rise var(--t) var(--ease) both;
+}
+
+.no-bot-card .mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  font-size: var(--fs-15);
+  margin-bottom: 6px;
+}
+
+.no-bot-card h2 {
+  margin: 0;
+  font-size: var(--fs-17);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.no-bot-card p {
+  margin: 0;
+  font-size: var(--fs-14);
+  color: var(--faint);
+  line-height: 1.55;
+}
+
+.msg {
+  width: min(640px, 100%);
+  font-size: var(--fs-15);
+  line-height: 1.65;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  animation: rise var(--t) var(--ease) both;
+}
+
+/* Entrances move more than they fade: a surface that starts fully transparent
+   reads as slow and is, for a few frames, not there. */
+@keyframes rise {
+  from { opacity: 0.6; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* The person's turn: a quiet block on a hairline in the Bot's coat. It is the
+   one place the coat touches the thread, and it says whose thread this is. */
 .msg.user {
-  align-self: flex-end;
-  background: color-mix(in srgb, var(--coat, var(--raise)) 18%, var(--bg));
-  border-bottom-right-radius: 6px;
+  margin: 20px 0 8px;
+  padding: 2px 0 2px 16px;
+  border-left: 2px solid color-mix(in srgb, var(--coat, var(--line)) 70%, transparent);
+  color: var(--muted);
+}
+
+.msg.user:first-child {
+  margin-top: 0;
 }
 
 .msg.agent {
-  align-self: flex-start;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-bottom-left-radius: 6px;
+  margin: 8px 0;
 }
 
-/* A thought is not speech. It is rendered quieter than the words the Bot
-   actually said, because rendering it the same would put things in its
-   mouth it never told you. */
 .msg.thought {
-  align-self: flex-start;
+  margin: 6px 0;
   color: var(--faint);
+  font-size: var(--fs-14);
   font-style: italic;
-  padding: 0 13px;
 }
 
-/* A tool call is activity, not speech, and it reads as one line: the name,
-   then its arguments faded and clipped. The full arguments are what the
-   approval dialog shows, at the moment they matter; in the transcript they
-   are a record, and a record that runs to ninety lines of file contents
-   buries the two words that say what happened. `white-space: nowrap`
-   intentionally overrides the `pre-wrap` every other bubble has. */
+/* A tool step is one row: a mark that carries its state, a verb phrase, and
+   the detail that arrives with the result. The raw record is on the row's
+   title. Quiet by design: activity is context for the conversation, not the
+   conversation. */
 .msg.tool {
-  align-self: flex-start;
-  /* Inline-flex, so the chip's height is its content's: as a block flex
-     item with `overflow: hidden` its line box collapses to zero and the row
-     renders as an 8px bar of padding. */
   display: inline-flex;
-  align-items: baseline;
-  min-height: 26px;
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
+  align-items: center;
+  gap: 9px;
+  align-self: flex-start;
+  margin: 4px 0 4px calc(50% - 320px);
+  max-width: min(640px, 100%);
+  min-height: 28px;
+  padding: 4px 10px 4px 8px;
+  border-radius: var(--r-chip);
+  background: transparent;
+  border: 1px solid transparent;
+  font-family: var(--sans);
+  font-size: var(--fs-13);
   color: var(--faint);
-  background: var(--raise);
-  border: 0;
-  border-radius: var(--r-pill);
-  padding: 4px 12px;
-  max-width: min(68ch, 100%);
   white-space: nowrap;
   overflow: hidden;
+  animation: rise var(--t) var(--ease) both;
+  transition: background-color var(--t) var(--ease);
 }
 
-.msg.tool > span:not(.sr-only) {
+.msg.tool:hover {
+  background: var(--panel);
+}
+
+.step-mark {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  position: relative;
+}
+
+/* Running: a thin ring, turning. */
+.step-mark[data-state="running"] {
+  border: 1.5px solid var(--line);
+  border-top-color: var(--faint);
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Done: a tick in the ok ink. */
+.step-mark[data-state="ok"] {
+  background: var(--ok-wash);
+}
+
+.step-mark[data-state="ok"]::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 2.5px;
+  width: 3.5px;
+  height: 6.5px;
+  border: solid var(--ok);
+  border-width: 0 1.8px 1.8px 0;
+  transform: rotate(45deg);
+}
+
+/* Failed: a cross in the danger ink. */
+.step-mark[data-state="failed"] {
+  background: var(--danger-wash);
+}
+
+.step-mark[data-state="failed"]::before,
+.step-mark[data-state="failed"]::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 3px;
+  width: 1.8px;
+  height: 8px;
+  background: var(--danger);
+  border-radius: 1px;
+}
+
+.step-mark[data-state="failed"]::before { transform: rotate(45deg); }
+.step-mark[data-state="failed"]::after { transform: rotate(-45deg); }
+
+.step-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
 }
 
+.step-verb {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.step-object {
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.step-detail {
+  color: var(--faint);
+}
+
+.step-detail::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--ghost);
+}
+
+.msg.tool.failed .step-detail {
+  color: var(--danger);
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+}
+
+.step-state {
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  color: var(--ghost);
+}
+
+.step-state:empty {
+  display: none;
+}
+
+/* The unknown-tool fallback keeps the name in mono. */
 .msg.tool .tool-name {
+  font-family: var(--mono);
+  font-size: var(--fs-12);
   color: var(--ink);
   font-weight: 600;
-  margin-right: 8px;
 }
 
-/* What the machine is doing while it does it. Indented under the tool row it
-   belongs to and quieter than it, because it is a running commentary that will
-   be replaced by a result in a moment. */
-.msg.progress {
-  align-self: flex-start;
-  margin-left: 18px;
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
-  color: var(--muted);
-  background: none;
-  padding: 2px 10px;
-}
-
-/* How the call ended. Same indent as the progress it follows; the tick or the
-   cross carries the outcome, so the row does not need a colour of its own
-   except when it failed. */
-/* One line, clipped. The tick or the cross is the outcome; the payload is a
-   record, and a record that wraps to four lines per call turns a thread of
-   ten calls into a page of JSON with the conversation hidden between. The
-   full result is still in the transcript file, and in the row's title. */
+/* A progress or result line that arrived with no open step to join: shown
+   as a quiet mono line so nothing is lost. */
+.msg.progress,
 .msg.result {
-  align-self: flex-start;
-  /* Same shape as the tool chip, for the same reason: `nowrap` +
-     `overflow: hidden` on a block flex item collapses the line box, and the
-     row draws as 8px of padding. Inline-flex takes its height from content. */
   display: inline-flex;
   align-items: baseline;
+  align-self: flex-start;
+  margin: 0 0 4px calc(50% - 300px);
   min-height: 22px;
-  margin-left: 18px;
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
+  max-width: min(600px, 100%);
+  padding: 2px 8px;
+  font-family: var(--mono);
+  font-size: var(--fs-12);
   color: var(--faint);
-  background: none;
-  padding: 2px 10px;
-  max-width: min(68ch, 100%);
   white-space: nowrap;
   overflow: hidden;
 }
 
-.msg.result > span:not(.sr-only) {
+.msg.result > span:not(.sr-only),
+.msg.progress > span:not(.sr-only) {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+}
+
+/* Below a reading measure the tool rows hug the left edge like everything. */
+@media (max-width: 720px) {
+  .msg.tool,
+  .msg.progress,
+  .msg.result {
+    margin-left: 0;
+  }
+}
+
+/* ---------------------------------------------------------------- composer */
+
+/* The composer is the focal object on the screen: a raised card with the
+   field and its actions inside one surface. */
+.composer {
+  display: flex;
+  flex-direction: column;
+  align-self: center;
+  width: min(640px, calc(100% - 48px));
+  margin: 8px 0 24px;
+  padding: 10px 10px 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-soft);
+  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
+}
+
+.composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  box-shadow: var(--shadow-soft), 0 0 0 3px var(--accent-wash);
+}
+
+.composer textarea {
+  background: transparent;
+  border: 0;
+  padding: 6px 8px 4px;
+  font-size: var(--fs-15);
+  line-height: 1.5;
+  min-height: 44px;
+  max-height: 40vh;
+}
+
+.composer textarea:focus-visible {
+  outline: none;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.composer-actions .spacer {
+  flex: 1;
+}
+
+.composer-actions .link {
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.composer-actions .primary {
+  padding: 7px 14px;
+}
+
+.mentions {
+  position: relative;
+  padding: 0 0 8px;
+}
+
+.mentions-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-row);
+  box-shadow: var(--shadow-soft);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.mentions-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--r-chip);
+  font-size: var(--fs-13);
+  cursor: pointer;
+}
+
+.mentions-item.at,
+.mentions-item:hover {
+  background: var(--raise);
+}
+
+.mentions-what {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mentions-kind {
+  font-size: var(--fs-11);
+  color: var(--faint);
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--raise);
+}
+
+.mentions-note {
+  margin: 6px 4px 0;
+  font-size: var(--fs-12);
+  color: var(--faint);
+}
+
+.attached {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attached li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 10px;
+  border-radius: var(--r-pill);
+  background: var(--raise);
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+.attached button {
+  background: none;
+  border: 0;
+  color: var(--faint);
+  cursor: pointer;
+  font-size: var(--fs-14);
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.attached button:hover {
+  color: var(--ink);
+}
+
+/* --------------------------------------------------------- computer panel */
+
+.computer-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 420px;
+  margin: 12px 24px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--panel);
+  animation: rise var(--t) var(--ease) both;
+}
+
+.computer-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.computer-head h3 {
+  margin: 0;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.computer-head .hint {
+  margin: 0;
+  flex: 1;
+  font-size: var(--fs-12);
+}
+
+#computer-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: #000;
+}
+
+/* ----------------------------------------------------------------- dialogs */
+
+.dialog {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--scrim);
+  z-index: 10;
+  animation: fade var(--t) var(--ease) both;
+}
+
+@keyframes fade {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}
+
+/* An approval outranks a panel somebody opened themselves. */
+#dialog {
+  z-index: 20;
+}
+
+.dialog-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  padding: 22px 24px;
+  width: min(560px, calc(100% - 32px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  box-shadow: var(--shadow);
+  animation: rise var(--t) var(--ease) both;
+}
+
+.dialog-card h2 {
+  margin: 0 0 6px;
+  font-size: var(--fs-17);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
 }
 
 .dialog-card h2.section {
-  margin: 22px 0 10px;
-  font-size: 11px;
+  margin: 22px 0 8px;
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
 }
 
-/* The palette sits high rather than centred: the eye is already at the top of
-   a list it is about to filter, and a box that jumps with the result count is
-   a box people mis-click. */
+.section.first {
+  margin-top: 0;
+}
+
+/* A sentence, set as one: the tool's name is data and gets code, the reason is
+   prose and gets prose. */
+.dialog-tool {
+  margin: 0 0 14px;
+  font-size: var(--fs-13);
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.dialog-tool code {
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+  color: var(--ink);
+  background: var(--raise);
+  padding: 1px 7px;
+  border-radius: 6px;
+}
+
+.dialog-fields {
+  margin: 14px 0 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 12px;
+  align-items: baseline;
+  font-size: var(--fs-13);
+}
+
+.dialog-fields dt {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.dialog-fields dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-13);
+  overflow-wrap: anywhere;
+}
+
+.dialog-fields dd.long {
+  grid-column: 1 / -1;
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: var(--r-chip);
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+  white-space: pre-wrap;
+  font-size: var(--fs-12);
+  line-height: 1.5;
+}
+
+.dialog-fields dt:has(+ dd.long) {
+  grid-column: 1 / -1;
+  text-align: left;
+}
+
+.dialog-fields .forget {
+  margin-left: 10px;
+  padding: 2px 9px;
+  font-size: var(--fs-11);
+}
+
+.dialog-secret {
+  margin: 4px 0 0;
+}
+
+.dialog-secret-why {
+  margin: 0 0 14px;
+  font-size: var(--fs-14);
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.dialog-secret label {
+  display: block;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  color: var(--faint);
+  margin-bottom: 6px;
+}
+
+.dialog-secret input {
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+}
+
+.dialog-secret-note {
+  margin: 8px 0 0;
+  font-size: var(--fs-12);
+  color: var(--faint);
+}
+
+.dialog-options {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.dialog-queue:not(:empty) {
+  margin: 12px 0 0;
+  font-size: var(--fs-12);
+  color: var(--faint);
+}
+
+.dialog-queue:empty {
+  display: none;
+}
+
+/* The palette sits high rather than centred: the eye is already at the top
+   of a list it is about to filter. */
 .palette-card {
   align-self: start;
   margin-top: 12vh;
-  padding: 14px;
+  padding: 10px;
+}
+
+.palette-card input {
+  border: 0;
+  background: transparent;
+  font-size: var(--fs-15);
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  border-radius: 0;
+}
+
+.palette-card input:focus-visible {
+  outline: none;
 }
 
 .palette-results {
   list-style: none;
-  margin: 12px 0 0;
+  margin: 6px 0 0;
   padding: 0;
-  max-height: 320px;
+  max-height: 50vh;
   overflow-y: auto;
 }
 
 .palette-item {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
-  padding: 7px 10px;
-  border-radius: 6px;
+  padding: 8px 10px;
+  border-radius: var(--r-chip);
+  font-size: var(--fs-13);
   cursor: pointer;
 }
 
-.palette-item.at {
+.palette-item.at,
+.palette-item:hover {
   background: var(--raise);
-  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .palette-kind {
   margin-left: auto;
+  font-size: var(--fs-11);
   color: var(--faint);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--raise);
 }
 
-/* A name and the button that uses it. Its own grid rather than `.rule-form`'s,
-   which has four columns for the rules editor and would leave this input a
-   quarter of the width for no reason. */
-.dup-form {
+.palette-card .hint {
+  margin: 8px 10px 4px;
+}
+
+.dup-form,
+.secret-form {
   margin-top: 10px;
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
 }
 
-/* Two rows, not one. Four controls on one line of a 560px card left each
-   field a fixed share of the width, and a share tuned for one platform's font
-   metrics clipped the placeholder on another: Linux Chromium's default sans
-   is wider than Windows' or macOS', and "why (shown to the person)" needs
-   188px there against 182px of box. A grid that gives a field a ratio cannot
-   hold across fonts; a row per field can. The action and the tool pattern
-   share the first row, the reason takes the second with the Add button, and
-   each field is sized by its content. Held by
-   `no_dialog_field_is_narrower_than_the_placeholder_in_it`, which CI runs on
-   three platforms. */
 .rule-form {
   margin-top: 14px;
   display: grid;
@@ -824,6 +1423,7 @@ textarea {
 
 .rule-form select {
   grid-area: action;
+  width: auto;
 }
 
 .rule-form #rule-tool {
@@ -838,25 +1438,9 @@ textarea {
   grid-area: add;
 }
 
-/* The first section heading sits under the dialog title, so it needs none of
-   the space that separates the later ones from the content above them. */
-.section.first {
-  margin-top: 0;
-}
-
-select {
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: var(--r-field);
-  color: var(--ink);
-  padding: 8px 10px;
-  font: inherit;
-}
-
-/* Allow and stop must not read alike in a list of security rules, for the
-   same reason the approval dialog's buttons must not. */
 .rule-allow {
-  color: var(--muted);
+  color: var(--ok);
+  font-weight: 600;
 }
 
 .rule-stop {
@@ -868,380 +1452,14 @@ select {
   color: var(--faint);
 }
 
-.secret-form {
-  margin-top: 14px;
-  display: grid;
-  grid-template-columns: 1fr 1fr auto;
-  gap: 8px;
-}
-
-.dialog-fields .forget {
-  margin-left: 10px;
-  padding: 1px 8px;
-  font-size: 11px;
-}
-
-/* The Agent Computer, between the transcript and the composer: you watch it
-   while you are talking about it, and the composer stays reachable so the Bot
-   can be told to continue. */
-.computer-panel {
-  border-top: 1px solid var(--line);
-  display: flex;
-  flex-direction: column;
-  flex: 1.2;
-  /* The viewer needs a floor, and `flex` alone gives it none. With
-     `min-height: 0` the panel takes whatever the transcript leaves: 288px in
-     a 760px window, of which the iframe gets 209, and the viewer cannot
-     render its own empty state in that, so "Nothing open yet" is cut through
-     the descenders.
-
-     The number comes from the viewer as rendered, not from reading its
-     stylesheet: `watch.html` reports header 58, footer 35, `#empty` 206 and
-     `main` padding 32, so 331px for the iframe before a single pixel of page
-     is shown, and this panel adds 80px of its own chrome above it. Hence
-     420, which clears that and leaves a little for a live frame.
-
-     The transcript yields instead, because it already scrolls and because
-     somebody who just opened the Agent Computer opened it to look at it. */
-  min-height: 420px;
-}
-
-.computer-head {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 10px 20px 8px;
-}
-
-.computer-head h3 {
-  margin: 0;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.computer-head .hint {
-  margin: 0;
-  flex: 1;
-}
-
-.computer-btn {
-  margin-left: auto;
-  white-space: nowrap;
-}
-
-#computer-frame {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-  border: 0;
-  background: #000;
-}
-
-.composer {
-  border-top: 1px solid var(--line);
-  padding: 14px 20px;
-  display: grid;
-  gap: 10px;
-}
-
-/* The `@` / `/` menu. Sits in the composer's grid above the box, so it pushes
-   the text area down instead of covering the words being typed: the list is
-   there to help finish a sentence, not to hide it. */
-.mentions {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--raise);
-  max-height: 220px;
-  overflow-y: auto;
-}
-
-.mentions-list {
-  list-style: none;
-  margin: 0;
-  padding: 4px;
-}
-
-.mentions-item {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 6px 9px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.mentions-item.at {
-  background: var(--bg);
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-
-/* The sentence a person picks on. Truncated rather than wrapped: a menu whose
-   rows change height as you arrow through it is a menu you misclick. */
-.mentions-what {
-  color: var(--faint);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mentions-kind {
-  margin-left: auto;
-  color: var(--faint);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-/* What could not be loaded. Not styled as an error: nothing is
-   broken now; something a person wrote is being ignored, and they are the
-   only one who can fix it. */
-.mentions-note {
-  margin: 0;
-  padding: 6px 10px;
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 12px;
-}
-
-/* Attached files, as chips above the box. Named for the file rather than for
-   the path it landed at: `attachments/notes-2.md` is what the Bot is told and
-   is not what somebody picked. */
-.attached {
-  list-style: none;
-  margin: 0 0 8px;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.attached li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  font-size: 12px;
-}
-
-.attached button {
-  background: none;
-  border: 0;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-  padding: 0;
-}
-
-.attached button:hover {
-  color: var(--red);
-}
-
-.composer-actions .spacer {
-  flex: 1;
-}
-
-.composer-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-/* A labelled form row. A label in a placeholder vanishes the moment somebody
-   types: fine for one box, useless for three where the answer to "which
-   field is this" is the whole question. */
 .field {
   display: grid;
-  gap: 4px;
-  margin-bottom: 10px;
+  gap: 6px;
+  margin-top: 12px;
 }
 
 .field > span {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-/* ---------------------------------------------------------------- dialogs */
-
-.dialog {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  background: var(--scrim);
-  z-index: 10;
-}
-
-/* An approval outranks a panel somebody opened themselves. It cannot be
-   dismissed and a Bot is blocked until it is answered, while Settings is
-   something a person can come back to.
-
-   With every dialog at `z-index: 10`, paint order falls to document order
-   and the approval, declared first, goes underneath: a 560×188 approval card
-   under a 560×514 settings card is covered completely. Not dimmed behind the
-   scrim; gone. Both cards are `place-items: center` at the same width, so
-   any two of them overlap completely and order decides everything; there is
-   no geometry that rescues this. */
-#dialog {
-  z-index: 20;
-}
-
-.dialog-card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--r-card);
-  padding: 22px 24px;
-  width: min(560px, calc(100% - 32px));
-  box-shadow: var(--shadow);
-}
-
-.dialog-card h2 {
-  margin: 0 0 6px;
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-}
-
-/* A sentence, set as one: the tool's name is data and gets `code`; the
-   reason it wants to run is prose and gets prose. */
-.dialog-tool {
-  margin: 0 0 14px;
-  font-size: 13px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.dialog-tool code {
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
-  color: var(--ink);
-  background: var(--raise);
-  padding: 1px 7px;
-  border-radius: 6px;
-}
-
-/* The proposed action, as fields. Name on the left so a column of them can be
-   scanned for the one that matters: which file, which command. */
-.dialog-fields {
-  margin: 14px 0 0;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 6px 12px;
-  align-items: baseline;
-  font-size: 13px;
-}
-
-.dialog-fields dt {
-  color: var(--muted);
-  font-family: ui-monospace, monospace;
-  text-align: right;
-  white-space: nowrap;
-}
-
-.dialog-fields dd {
-  margin: 0;
-  font-family: ui-monospace, monospace;
-  overflow-wrap: anywhere;
-}
-
-/* A long value gets its own block, spanning both columns so it is not squeezed
-   into the value gutter. Scrollable rather than clipped: nothing in an
-   approval may be out of reach of the person approving it. */
-.dialog-fields dd.long {
-  grid-column: 1 / -1;
-  padding: 10px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  font-size: 12px;
-  max-height: 240px;
-  overflow: auto;
-  white-space: pre-wrap;
-}
-
-/* Its name still leads it, on its own line. */
-.dialog-fields dt:has(+ dd.long) {
-  grid-column: 1 / -1;
-  text-align: left;
-}
-
-/* The credential prompt. Unlike the fields above it by design: those are
-   read, this one is typed into, and a text box that looked like a value row
-   would be missed. The masking is real (`type=password`), which is the one
-   thing this surface can do that the terminal prompt cannot, and it is why
-   the note beside it does not have to apologise for echoing. */
-.dialog-secret {
-  margin-top: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-/* The Bot's reason, in prose. Not monospace: the argument rows above are
-   literal values a person checks character by character, and a sentence set in
-   the same face reads as data rather than as something somebody is telling
-   you. */
-.dialog-secret-why {
-  margin: 0;
-  font-size: 13px;
-  color: var(--fg);
-}
-
-.dialog-secret label {
-  font-family: ui-monospace, monospace;
-  font-size: 13px;
-  color: var(--accent);
-}
-
-.dialog-secret input {
-  padding: 9px 10px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  color: var(--fg);
-  font-family: ui-monospace, monospace;
-  font-size: 13px;
-}
-
-.dialog-secret input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-/* What happens to the value. The broker's whole argument is that the Bot can
-   use a credential and never read one; a prompt that did not say so would be
-   asking somebody to trust a mechanism nobody has told them about. */
-.dialog-secret-note {
-  margin: 0;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.dialog-options {
-  margin-top: 16px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-/* How many approvals are stacked behind this one. Collapses when there are
-   none, rather than saying "0 more waiting". */
-.dialog-queue:not(:empty) {
-  margin: 12px 0 0;
-  text-align: right;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.dialog-queue:empty {
-  display: none;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  color: var(--faint);
 }
