@@ -675,14 +675,27 @@ textarea {
   background: currentColor;
 }
 
+/* Being connected is the least interesting fact on the screen, and it was
+   wearing a filled wash in the corner of every surface — competing for the eye
+   with whatever the Bot was actually doing. It keeps its dot, because "am I
+   connected" still has to be answerable at a glance, and gives up the fill. */
 .status.connected {
-  background: var(--ok-wash);
-  color: var(--ok);
+  background: transparent;
+  color: var(--faint);
 }
 
+.status.connected::before {
+  background: var(--ok);
+}
+
+/* A Bot working is a live state, not a request for a person. This was amber,
+   which is the one colour reserved for "somebody is blocking progress", so a
+   Bot quietly getting on with its job raised the same signal as a Bot stuck
+   waiting on you — and it pulsed, which made it the loudest thing on the
+   screen. Now it reads as live, and amber is left to mean one thing. */
 .status.busy {
-  background: var(--warn-wash);
-  color: var(--warn);
+  background: var(--ok-wash);
+  color: var(--ok);
 }
 
 .status.busy::before {

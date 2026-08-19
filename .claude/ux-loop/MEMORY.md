@@ -59,5 +59,70 @@ exist, or worse, fake the fixture to make a rubric line pass.
 
 ## Iterations
 
-<!-- Append one block per iteration: what was tried, whether it held, the generalisable
-     lesson. A revert is more valuable here than a success, so write those first. -->
+### 001 — cleared every gate the baseline failed · held · `53c6bde`
+
+`.step-state` `--ghost` → `--muted`; `#log` given `tabindex="0"` and `role="log"`; the rules
+`select` given a label. axe serious 4→0, critical 2→0, contrast 2→0.
+
+**The lesson is the fixture bug, not the fix.** The first backlog item (B02, "the approval
+dialog makes the grant the loudest thing") was raised off a screenshot of a dialog the product
+never renders: the fixture had `danger: true` on the session grant, and `renderDialog` styles
+on that flag, so the harness painted the large grant in refusal styling and the refusal in
+quiet styling. It was caught by reading the option-construction loop in `main.js` before
+patching — not by looking harder at the picture.
+
+**Generalisable: before filing a defect against a rendered state, read the code that renders
+it.** A fixture is an assertion about what the shell sends, and a wrong one produces a
+confident, well-evidenced, entirely fictional defect. The screenshot is not the ground truth;
+it is only as true as the fixture behind it.
+
+### 002 — no Bot wears amber · held · `ae0c5f3`
+
+`--coat-4` `#f19d38` → olive. Two faults: amber is reserved for "a person is blocking
+progress", so an idle Bot wearing it raised the waiting-on-you signal for nothing; and it sat
+at roughly `--coat-3`'s hue, so two Bots read as the same orange.
+
+**Generalisable: a semantic palette is violated from the identity layer, not just the status
+layer.** The baseline scored rubric 18 as clean because it looked for stray amber in the
+chrome. The violation was in the set of colours a Bot can be *assigned*. When a token means
+something, audit every palette that can produce it, not just the places that mean it on
+purpose.
+
+**Also: run the narrow test first.** `every_coat_a_bot_can_wear_is_legible` answered in 0.85s
+what the full gate would have answered in eight minutes. On a token change with a dedicated
+test, that test is the fast reject.
+
+### 003 — the empty conversation says something true · held · `12e3b21`
+
+`#no-bot` copy now comes from the roster count, and the card carries the action. It read "Pick
+one on the left, or make your first" in the one case a new install actually starts in — zero
+Bots, nothing on the left.
+
+**Generalisable: empty-state copy is usually written for the populated case and then left.**
+Check every string that describes the rest of the UI against the state where the rest of the
+UI is absent.
+
+### 004 — transport is quiet, working is not amber · held (see below)
+
+`.status.connected` gives up its filled wash and keeps a dot; `.status.busy` moves off
+`--warn`. Same class of fault as 002: a *working* Bot was painted in the "needs a human"
+colour, and it pulsed, which made the least interesting fact on the screen the loudest thing
+on it.
+
+**Generalisable: the second instance of a fault is worth looking for immediately.** Having
+found amber misused once (002), grepping the stylesheet for every other use of `--warn` found
+this one in about a minute. One misuse of a semantic token predicts others.
+
+---
+
+## Process notes for whoever runs this next
+
+- **The gate cycle is ~8 minutes and it dominates everything.** Shots are 4-5s. `cargo check`
+  + `clippy` + the 57-test page suite is the whole cost. Batch a patch, start the gate in the
+  background, and do the next iteration's reading while it runs.
+- **This branch has another writer.** Commit `104dc9a` is not from this loop; it fixed
+  README's stale `./openbot-data` default and swept in the `page.rs`/stub extraction. Because
+  of that, **do not use blanket `git checkout .` to revert** — it would discard somebody
+  else's in-flight work. Revert the specific files the iteration touched.
+- **`sh scripts/ux-verify.sh | tail` hides the exit code** (you get `tail`'s). Redirect to a
+  file and check `$?`, which is what the `.gate-NNN.log` files do.
