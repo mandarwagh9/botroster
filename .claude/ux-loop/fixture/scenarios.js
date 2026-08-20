@@ -358,6 +358,11 @@ S.s11 = {
     }
     document.getElementById("send").click();
     await until(() => !openStepStillRunning());
+    // The problem banner is raised by the real failure path. Opened here
+    // because the point of this scenario is whether the record is reachable
+    // and readable, and a closed <details> shows nothing about that.
+    const pd = document.getElementById("problem-details");
+    if (pd) pd.open = true;
     // The window's own "no computer" banner, which is the surface the product
     // actually shows when the guest goes away.
     const banner = document.getElementById("no-computer");

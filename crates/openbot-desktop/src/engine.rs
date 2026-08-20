@@ -54,6 +54,15 @@ pub struct Config {
     /// `--bot`: pin every session this agent serves to one Bot, whatever a
     /// client asks for. An operator's decision, above the client's.
     pub bot: Option<String>,
+    /// The model's API key, as `(variable name, value)`, handed to the agent
+    /// process in its environment.
+    ///
+    /// The runtime reads the key with `std::env::var` under whatever name
+    /// `api_key_env` gives, and `config.toml` deliberately holds that name and
+    /// never the key. So a window that collects a key has exactly one place to
+    /// put it: the environment of the process it spawns. It is not written to
+    /// disk by this crate, and it lives no longer than the connection.
+    pub api_key: Option<(String, String)>,
 }
 
 impl Config {
@@ -67,6 +76,7 @@ impl Config {
             demo_tools: false,
             demo_secret: false,
             bot: None,
+            api_key: None,
         }
     }
 }
@@ -488,6 +498,11 @@ impl Engine {
                 .arg(cfg.home.to_str().expect("a utf-8 home path"))
                 .env("OPENBOT_HUB_URL", &cfg.hub)
                 .env("NO_COLOR", "1")
+                // The key, when the window collected one. `Option` is an
+                // iterator of at most one pair, so an absent key adds nothing
+                // rather than an empty variable — which the runtime would read
+                // as a key that is set and blank.
+                .envs(cfg.api_key.clone())
                 .args(if cfg.demo {
                     vec!["--demo".to_owned()]
                 } else if cfg.demo_tools {

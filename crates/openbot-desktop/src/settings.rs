@@ -147,6 +147,73 @@ async fn read<T: serde::de::DeserializeOwned>(
         .map_err(|e| anyhow::anyhow!("`openbot {group} ls --json` answered something else: {e}"))
 }
 
+/// Write the model settings a connect needs, using the runtime's own
+/// `config set`.
+///
+/// Shelling out rather than writing `config.toml` from here: the file's shape,
+/// its defaults and its merge order are the runtime's, and a second writer
+/// would be a second definition of them, free to drift the first time either
+/// side gained a field.
+///
+/// The API key is deliberately not among the arguments. `config.toml` names an
+/// environment variable to read the key from and never holds the key itself —
+/// a key in a config file ends up in a backup, a screen share or a repository —
+/// so the window passes it to the agent process instead. See
+/// [`crate::engine::Config::api_key`].
+///
+/// `None` leaves a field alone, so a person who fills in only the model keeps
+/// whatever dialect and base URL were already there.
+///
+/// # Errors
+/// If the binary cannot be run, or `config set` fails.
+pub async fn save_model(
+    openbot: &Path,
+    home: &Path,
+    model: &str,
+    dialect: Option<&str>,
+    base_url: Option<&str>,
+    api_key_env: Option<&str>,
+) -> anyhow::Result<()> {
+    let mut cmd = tokio::process::Command::new(openbot);
+    cmd.arg("config")
+        .arg("set")
+        .arg("--home")
+        .arg(home)
+        .arg("--model")
+        .arg(model);
+    for (flag, value) in [
+        ("--dialect", dialect),
+        ("--base-url", base_url),
+        ("--api-key-env", api_key_env),
+    ] {
+        if let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) {
+            cmd.arg(flag).arg(value);
+        }
+    }
+    cmd.env("NO_COLOR", "1")
+        .env_remove("OPENBOT_HOME")
+        .env_remove("OPENBOT_HUB_URL");
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = cmd
+        .output()
+        .await
+        .map_err(|e| anyhow::anyhow!("could not run {}: {e}", openbot.display()))?;
+    if !out.status.success() {
+        return Err(anyhow::anyhow!(
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+                .trim()
+                .trim_start_matches("Error:")
+                .trim()
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

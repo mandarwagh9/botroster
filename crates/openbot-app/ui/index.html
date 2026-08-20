@@ -42,6 +42,52 @@
       <input id="hub-url" class="wide" spellcheck="false"
              value="ws://127.0.0.1:8443/v1/tools" />
     </div>
+
+    <!-- The model, on the only screen that exists before there is a connection.
+         Without this a fresh install could not reach a model at all without a
+         terminal: `Settings` lives inside the workspace, and the workspace is
+         hidden until the connect that needs a model succeeds. Folded away,
+         because somebody whose runtime is already configured should not have to
+         look at it — and opened automatically when a connect fails for want of
+         a model or a key. -->
+    <details id="model-setup">
+      <summary>Model</summary>
+      <div class="fields">
+        <label for="model-id">model</label>
+        <input id="model-id" class="wide" spellcheck="false"
+               placeholder="grok-4-5 — leave empty to keep what is configured" />
+
+        <label for="model-key">API key</label>
+        <input id="model-key" class="wide" type="password" spellcheck="false"
+               placeholder="kept for this window only, never written to a file" />
+
+        <label for="model-key-env">key variable</label>
+        <!-- Sent explicitly rather than defaulted on the other side: the window
+             has to set the environment variable the runtime will read, so both
+             ends must mean the same name. -->
+        <input id="model-key-env" class="wide" spellcheck="false"
+               value="XAI_API_KEY" />
+
+        <label for="model-dialect">dialect</label>
+        <select id="model-dialect" class="wide"
+                aria-label="which API shape the model speaks">
+          <option value="">keep what is configured</option>
+          <option value="openai">openai</option>
+          <option value="anthropic">anthropic</option>
+        </select>
+
+        <label for="model-base">base URL</label>
+        <input id="model-base" class="wide" spellcheck="false"
+               placeholder="https://api.x.ai/v1" />
+      </div>
+      <p class="hint model-hint">
+        The key goes to the runtime this window starts, and nowhere else.
+        <code>config.toml</code> records the variable's name, never its value,
+        so a key cannot end up in a backup or a screen share. Set
+        <code id="model-key-env-echo">XAI_API_KEY</code> in your environment to
+        have it survive a restart.
+      </p>
+    </details>
     <!-- A failed connect is the most likely first experience this product
          has, so it gets a structure rather than a string: what happened, why,
          what state the machine is in, and one thing to do about it. The
@@ -132,6 +178,22 @@
           <span id="no-computer-why" class="why"></span>
         </div>
         <button id="no-computer-dismiss" class="link">Dismiss</button>
+      </div>
+
+      <!-- Anything that failed, said once and properly. The status pill used to
+           carry `String(err)` in nine places, which put a whole sentence in the
+           chrome with no way to read the rest of it and no way to copy it. The
+           pill now says what failed; the record lives here, expandable and
+           selectable, which is what the raw text is actually for. -->
+      <div id="problem" class="no-computer hidden" role="alert">
+        <div>
+          <strong id="problem-what"></strong>
+          <details id="problem-details">
+            <summary>What OPENBOT was told</summary>
+            <pre id="problem-raw" tabindex="0"></pre>
+          </details>
+        </div>
+        <button id="problem-dismiss" class="link">Dismiss</button>
       </div>
 
       <!-- `tabindex="0"` is what makes the run log scrollable from the

@@ -320,7 +320,18 @@ textarea {
   font-size: var(--fs-12);
 }
 
-#connect-error-raw {
+#problem-details {
+  margin-top: 6px;
+}
+
+#problem-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: var(--fs-12);
+}
+
+#connect-error-raw,
+#problem-raw {
   margin: 7px 0 0;
   padding: 9px 10px;
   max-height: 168px;
@@ -379,6 +390,12 @@ textarea {
   width: min(680px, calc(100% - 32px));
   box-shadow: var(--shadow-soft);
   animation: rise var(--t) var(--ease) both;
+  /* With the Model section open and a failure showing, the panel is taller
+     than a 800px window. It has to scroll rather than run off the bottom
+     edge — the buttons are down there, and a person who cannot reach Connect
+     is stuck on the first screen. */
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
 }
 
 .connect-head {
@@ -434,7 +451,11 @@ textarea {
   text-align: right;
 }
 
-.fields input.wide {
+/* `select` as well as `input`: the rule matched only inputs, so a wide select
+   left column 3 free and the *next* field's label flowed up into it, landing
+   "base URL" beside the dialect box. */
+.fields input.wide,
+.fields select.wide {
   grid-column: 2 / 4;
 }
 
@@ -1565,4 +1586,25 @@ textarea {
   font-size: var(--fs-12);
   font-weight: 500;
   color: var(--faint);
+}
+
+/* The Model disclosure. Quiet by default: most connects do not need it, and it
+   is only opened by hand or by a failure that it can fix. */
+#model-setup {
+  margin-top: 14px;
+}
+
+#model-setup > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: var(--fs-13);
+  margin-bottom: 12px;
+}
+
+#model-setup[open] > summary {
+  color: var(--ink);
+}
+
+.model-hint {
+  margin-top: 12px;
 }

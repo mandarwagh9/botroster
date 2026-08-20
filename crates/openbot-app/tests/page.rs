@@ -856,7 +856,8 @@ async fn a_conversation_that_fails_to_open_leaves_nothing_behind() {
                  header: document.getElementById('bot-name').textContent,
                  composer: !document.getElementById('composer').classList.contains('hidden'),
                  noBot: !document.getElementById('no-bot').classList.contains('hidden'),
-                 status: document.getElementById('status').textContent })"#,
+                 status: document.getElementById('status').textContent,
+                 problem: document.getElementById('problem-raw').textContent })"#,
         )
         .await
         .unwrap();
@@ -872,9 +873,18 @@ async fn a_conversation_that_fails_to_open_leaves_nothing_behind() {
         state.contains(r#""noBot":true"#),
         "the window should say to choose a Bot: {state}"
     );
+    // The reason moved out of the status pill and into the problem banner,
+    // deliberately: the pill is two words of chrome, and a whole sentence in it
+    // was unreadable past its width and impossible to copy. Both halves are
+    // asserted, because "on screen" is not the same claim as "readable" — the
+    // pill has to say something happened, and the record has to be reachable.
+    assert!(
+        state.contains("could not open that Bot"),
+        "the pill should say what failed: {state}"
+    );
     assert!(
         state.contains("no such Bot"),
-        "the failure should be on screen: {state}"
+        "the reason should be reachable in the problem banner: {state}"
     );
 }
 
@@ -2151,6 +2161,12 @@ async fn no_dialog_field_is_narrower_than_the_placeholder_in_it() {
             "}",
             "const bad = [];",
             "for (const e of p.querySelectorAll('input')) {",
+            // A password field is the one place the rule inverts. The tooltip
+            // is what makes a long value readable, and a readable secret is
+            // the failure, not the fix: it would sit in a hover for anybody
+            // standing behind you. `a_credential_is_never_left_in_the_window`
+            // holds the other half of this.
+            "  if (e.type === 'password') continue;",
             "  const t = e.value || e.placeholder || ''; if (!t) continue;",
             "  c.font = getComputedStyle(e).font;",
             "  const need = Math.ceil(c.measureText(t).width);",
@@ -4177,5 +4193,49 @@ async fn the_start_of_a_long_thread_is_still_reachable() {
     assert!(
         top >= -1,
         "scrolled to the top, the first line still sits {top}px above the thread: {state}"
+    );
+}
+
+/// A key typed on the connect panel does not stay in the page.
+///
+/// It has been handed to the runtime by the time the workspace opens, so
+/// nothing needs it in the DOM after that, and a password field that keeps its
+/// value keeps it for anything that can read the page. The credential dialog
+/// holds the same rule in `a_credential_is_never_left_in_the_window`; this is
+/// the other field in this window that ever holds a secret.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_model_key_is_not_left_in_the_connect_panel() {
+    const VALUE: &str = "xai-not-a-real-key-9f2a";
+    let Some((b, _p)) = page().await else { return };
+
+    b.text_of(&format!(
+        r#"(() => {{ window.__replies.connect = {{ computer: true, tools: 3 }};
+             window.__replies.open_bot = null;
+             window.__replies.roster = [];
+             document.getElementById('model-id').value = 'grok-4-5';
+             document.getElementById('model-key').value = {VALUE:?};
+             document.getElementById('connect-btn').click();
+             return 'ok'; }})()"#
+    ))
+    .await
+    .expect("connect with a key");
+    settle().await;
+
+    // It reached the shell exactly once, as the value of the connect call.
+    let sent = b
+        .text_of("JSON.stringify(window.__sent('connect').map(c => c.args.model && c.args.model.apiKey))")
+        .await
+        .unwrap();
+    assert!(
+        sent.contains(VALUE),
+        "the key should have been handed to the shell: {sent}"
+    );
+
+    assert_eq!(
+        b.text_of("document.getElementById('model-key').value")
+            .await
+            .unwrap(),
+        "",
+        "the key is still sitting in the connect panel after connecting"
     );
 }

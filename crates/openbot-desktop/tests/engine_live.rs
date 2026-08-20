@@ -29,6 +29,7 @@ async fn the_engine_opens_a_session_and_hears_a_whole_turn() {
         demo_tools: false,
         demo_secret: false,
         bot: None,
+        api_key: None,
     })
     .await
     .expect("the engine could not connect");
@@ -80,6 +81,7 @@ async fn a_session_created_through_the_engine_lands_on_a_bot() {
         demo_tools: false,
         demo_secret: false,
         bot: None,
+        api_key: None,
     })
     .await
     .expect("the engine could not connect");
@@ -119,6 +121,7 @@ async fn cancel_reaches_the_agent_without_error() {
         demo_tools: false,
         demo_secret: false,
         bot: None,
+        api_key: None,
     })
     .await
     .expect("the engine could not connect");
@@ -152,6 +155,7 @@ async fn approvals_reach_the_engine_and_answers_land() {
         demo_tools: true,
         demo_secret: false,
         bot: None,
+        api_key: None,
     })
     .await
     .expect("the engine could not connect");
@@ -256,6 +260,7 @@ async fn a_refused_approval_answers_cancelled_and_the_turn_still_ends() {
         demo_tools: true,
         demo_secret: false,
         bot: None,
+        api_key: None,
     })
     .await
     .expect("the engine could not connect");
@@ -328,6 +333,7 @@ async fn a_reconnecting_client_is_shown_the_conversation_it_missed() {
             demo_tools: false,
             demo_secret: false,
             bot: None,
+            api_key: None,
         })
         .await
         .expect("the engine could not connect");
@@ -350,6 +356,7 @@ async fn a_reconnecting_client_is_shown_the_conversation_it_missed() {
         demo_tools: false,
         demo_secret: false,
         bot: None,
+        api_key: None,
     })
     .await
     .expect("the engine could not reconnect");
@@ -411,6 +418,7 @@ async fn loading_a_conversation_that_never_happened_is_not_an_error() {
         demo_tools: false,
         demo_secret: false,
         bot: None,
+        api_key: None,
     })
     .await
     .expect("the engine could not connect");
@@ -454,6 +462,7 @@ async fn a_client_can_open_a_bot_by_name_and_come_back_to_it() {
         demo_tools: false,
         demo_secret: false,
         bot: None,
+        api_key: None,
     })
     .await
     .expect("the engine could not connect");
@@ -521,6 +530,7 @@ async fn a_pinned_agent_ignores_a_client_asking_for_someone_else() {
         demo_tools: false,
         demo_secret: false,
         bot: Some("Pinned".to_owned()),
+        api_key: None,
     })
     .await
     .expect("the engine could not connect");
@@ -590,6 +600,7 @@ async fn a_client_can_open_a_group_and_the_turn_lands_in_its_thread() {
         demo_tools: false,
         demo_secret: false,
         bot: None,
+        api_key: None,
     })
     .await
     .expect("connect");
@@ -651,6 +662,7 @@ async fn opening_a_group_that_does_not_exist_is_refused() {
         demo_tools: false,
         demo_secret: false,
         bot: None,
+        api_key: None,
     })
     .await
     .expect("connect");
@@ -721,6 +733,7 @@ async fn a_credential_request_reaches_the_client_and_the_value_is_stored() {
         demo_tools: false,
         demo_secret: true,
         bot: None,
+        api_key: None,
     })
     .await
     .expect("the engine could not connect");
@@ -850,6 +863,7 @@ async fn a_home_with_no_model_says_so_instead_of_blaming_the_handshake() {
         demo_tools: false,
         demo_secret: false,
         bot: None,
+        api_key: None,
     })
     .await
     {
@@ -869,5 +883,77 @@ async fn a_home_with_no_model_says_so_instead_of_blaming_the_handshake() {
     assert!(
         !text.contains("ended before the handshake"),
         "a missing model is not a protocol problem: {text}"
+    );
+}
+
+/// A key typed into the window reaches the agent, and does not end up on disk.
+///
+/// The runtime reads the key with `std::env::var` under the name `config.toml`
+/// records, and that file holds the name and never the value — a key in a
+/// config file ends up in a backup, a screen share or a repository. So the only
+/// place a window that collects a key can put it is the environment of the
+/// process it spawns, and this checks all three halves of that: without the key
+/// the agent refuses and names the variable, with it the agent starts, and the
+/// file it wrote never contains the value.
+///
+/// The variable is deliberately one nothing sets, so a key leaking in from the
+/// developer's own environment cannot make this pass.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_from_the_window_reaches_the_agent_and_is_never_written_down() {
+    const VAR: &str = "OPENBOT_TEST_KEY_THAT_NOTHING_SETS";
+    const VALUE: &str = "not-a-real-key-9f2a";
+    assert!(
+        std::env::var(VAR).is_err(),
+        "{VAR} is set in this environment, so this test would pass without proving anything"
+    );
+
+    let home = tempfile::tempdir().expect("a home");
+    openbot_desktop::settings::save_model(
+        &common::up::openbot(),
+        home.path(),
+        "grok-4-5",
+        Some("openai"),
+        Some("https://api.x.ai/v1"),
+        Some(VAR),
+    )
+    .await
+    .expect("config set");
+
+    let cfg = |api_key: Option<(String, String)>| Config {
+        openbot: common::up::openbot(),
+        home: home.path().to_path_buf(),
+        hub: "ws://127.0.0.1:8443/v1/tools".to_owned(),
+        demo: false,
+        demo_tools: false,
+        demo_secret: false,
+        bot: None,
+        api_key,
+    };
+
+    // Without it, the agent refuses and says which variable it wanted.
+    let err = match Engine::connect(cfg(None)).await {
+        Ok(_) => panic!("an unset key should not produce a working agent"),
+        Err(e) => format!("{e:#}"),
+    };
+    assert!(
+        err.contains(VAR),
+        "the refusal should name the variable it looked for: {err}"
+    );
+
+    // With it, the agent starts.
+    let engine = Engine::connect(cfg(Some((VAR.to_owned(), VALUE.to_owned()))))
+        .await
+        .expect("the key the window collected should have reached the agent");
+    drop(engine);
+
+    // And the file records the name, never the value.
+    let toml = std::fs::read_to_string(home.path().join("config.toml")).expect("config.toml");
+    assert!(
+        !toml.contains(VALUE),
+        "the key must never be written to config.toml, found it in:\n{toml}"
+    );
+    assert!(
+        toml.contains(VAR),
+        "the file should record the variable's name:\n{toml}"
     );
 }

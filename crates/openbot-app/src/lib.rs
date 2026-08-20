@@ -395,6 +395,33 @@ pub fn refuses(kind: PermissionOptionKind) -> bool {
     }
 }
 
+/// Model settings collected on the connect panel.
+///
+/// The window is the only surface that exists before a connection, so it is the
+/// only place these can be set by somebody who has just installed this. Before
+/// this, a fresh install could not reach a model at all without a terminal:
+/// `Settings` lives inside the workspace, which is hidden until the connect
+/// that needs a model succeeds.
+///
+/// `api_key` is not written anywhere. It goes into the agent process's
+/// environment under `api_key_env`, which is where the runtime reads it from,
+/// and `config.toml` keeps the name and never the value.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelInput {
+    /// The model id, e.g. `grok-4-5`. Empty leaves the stored settings alone.
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    dialect: Option<String>,
+    #[serde(default)]
+    base_url: Option<String>,
+    #[serde(default)]
+    api_key_env: Option<String>,
+    #[serde(default)]
+    api_key: Option<String>,
+}
+
 /// Connect to a `openbot acp` agent. The engine verifies the handshake before
 /// the window is told it worked.
 ///
@@ -410,6 +437,7 @@ async fn connect(
     home: String,
     hub: String,
     demo: Option<bool>,
+    model: Option<ModelInput>,
 ) -> Result<Connected, String> {
     let mut engine = state.engine.lock().await;
     if engine.is_some() {
@@ -428,6 +456,40 @@ async fn connect(
     // second one, free to drift.
     if demo.unwrap_or(false) {
         Mode::Tools.apply(&mut cfg);
+    }
+
+    // Settings the person just typed, before anything tries to use them. The
+    // id and the key are handled separately on purpose: somebody whose model is
+    // already configured and who only needs to supply a key should not have to
+    // retype the model to do it.
+    if let Some(model) = &model {
+        let id = model.id.trim();
+        if !id.is_empty() {
+            settings::save_model(
+                &here.openbot,
+                &here.home,
+                id,
+                model.dialect.as_deref(),
+                model.base_url.as_deref(),
+                model.api_key_env.as_deref(),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+        if let Some(key) = model
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+        {
+            let var = model
+                .api_key_env
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .unwrap_or("XAI_API_KEY");
+            cfg.api_key = Some((var.to_owned(), key.to_owned()));
+        }
     }
     let connected = Engine::connect(cfg).await.map_err(|e| e.to_string())?;
     *engine = Some(connected);

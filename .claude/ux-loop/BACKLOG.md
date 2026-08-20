@@ -368,3 +368,48 @@ the connect-panel pattern.
 The banner is written for the connect-time case ("starting a computer did not work") and is
 reused for a mid-run disconnect, where it is wrong: the computer did start, and then went
 away. Its one action is "Dismiss", which resolves nothing.
+
+### B15 — the status pill showed a raw error string as the whole message
+`done` (this iteration) · J7 · rubric 3, 12
+
+`setStatus(String(err), "error")` appeared in **nine** places, so this was a pattern and not a
+line. The pill now says what failed in a few words; the record goes to a shared problem
+banner behind a disclosure, where it can be read in full and selected.
+
+Each of the nine got its own short WHAT rather than a generic one — "the run stopped", "your
+answer did not reach the Bot", "the credential did not reach the Bot", "could not open that
+Bot", and so on — because "error" in a corner is not a statement about anything.
+
+### B18 — the model could not be set from the window at all
+`done` (this iteration) · J1, J2 · the headline number
+
+The connect panel is the only surface that exists before a connection, so it is the only
+place a fresh install can set a model. `Settings` is inside `#workspace`, which is hidden
+until the connect that needs a model succeeds — the deadlock behind "launch to first work is
+not a number".
+
+A folded **Model** section on the connect panel: model id, API key, key variable, dialect,
+base URL. It opens by itself when a connect fails for want of a model or a key, so the fields
+are in front of the person being told they are missing.
+
+The non-secret settings are written by the runtime's own `config set` rather than by this
+crate writing `config.toml` — the file's shape, defaults and merge order belong to the
+runtime, and a second writer is a second definition free to drift.
+
+**The key is not written anywhere.** `config.toml` records the *name* of an environment
+variable and never the value, so the window puts the key into the environment of the agent
+process it spawns, and it lives no longer than the connection. The hint names the variable
+the person actually typed, so they know what to set for it to survive a restart.
+
+Two layout bugs found by the screenshot and fixed: `.fields input.wide` did not match a
+`select`, so the dialect box left column 3 free and the next field's label flowed up beside
+it; and the panel could grow taller than an 800px window with no way to scroll to the
+buttons.
+
+### B19 — the connect panel's buttons fall below the fold at 1280x800
+`open` · P2 · J2 · `shots/015/s13-1280-dark.png`
+
+With the Model section open and a failure showing, Connect and the demo button are off-screen
+until the panel is scrolled. The panel scrolls now, so nothing is unreachable, but the
+resolving action should not need scrolling to find. Consider pinning the actions to the
+panel's bottom edge.

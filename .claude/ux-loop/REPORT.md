@@ -21,19 +21,37 @@ not exist.
 Counted honestly, the old path was **10 actions, 4 of them outside the application, 2 of them
 in a terminal**, requiring prior knowledge of a command the app never mentions.
 
-**After: 2 actions, no key, no terminal.**
+**After — the demo path: 2 actions, no key, no terminal.**
 
 | | Action | Elapsed |
 |---|---|---|
 | 1 | Connect | ~2s, fails, and now says why |
 | 2 | **Watch the demo instead** | a Bot runs real tools against a real workspace |
 
-Well inside the 90-second target. The demo needs no model and no key, which the onboarding
-doctrine calls the strongest asset in the product; it was reachable only from a CLI flag.
+The demo needs no model and no key, which the onboarding doctrine calls the strongest asset
+in the product; it was reachable only from a CLI flag.
 
-**The real-model path is unchanged at 10 actions.** No model surface was added — that is a
-new surface, and it is item 2 of the next-six-hours list. What changed is that the dead end
-now explains itself and offers a way to see the product work.
+**After — the real-model path: 4 actions, and the terminal is gone.**
+
+| | Action |
+|---|---|
+| 1 | Connect — fails, and opens the Model section it needs |
+| 2 | type the model id |
+| 3 | type the API key |
+| 4 | Connect |
+
+**From 10 actions with 4 outside the application and 2 in a terminal, to 4 inside the
+window.** Both paths are now inside the 5-action and 90-second targets.
+
+The Model section sits on the connect panel because that is the only surface that exists
+before a connection: `Settings` lives inside `#workspace`, which is hidden until the connect
+that needs a model succeeds. That circularity *was* the deadlock.
+
+The key is not written anywhere. `config.toml` records the *name* of an environment variable
+and never the value, so the window passes the key to the agent process it spawns and it lives
+no longer than the connection. `a_key_from_the_window_reaches_the_agent_and_is_never_written_down`
+checks all three parts: without it the agent refuses and names the variable, with it the
+agent starts, and the file never contains the value.
 
 ---
 

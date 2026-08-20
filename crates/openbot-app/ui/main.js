@@ -81,6 +81,24 @@ function setStatus(text, kind) {
   status.className = "status" + (kind ? " " + kind : "");
 }
 
+/// Report something that failed, once, in two places that each do their job.
+///
+/// The pill says *what* failed, in a few words, because it is two words of
+/// chrome and always visible. The record — whatever the runtime, the hub or the
+/// agent actually said — goes in the problem banner behind a disclosure, where
+/// it can be read in full and selected to paste into an issue.
+///
+/// This replaces the old `setStatus(String(err), …)`, which appeared in nine
+/// places and put an entire sentence into the pill: unreadable past its width,
+/// uncopyable, and with no indication there was more to it.
+function reportProblem(err, what) {
+  setStatus(what, "error");
+  $("problem-what").textContent = what;
+  $("problem-raw").textContent = String(err);
+  show($("problem"), true);
+}
+
+
 /// Every modal in the window, and the one that outranks the rest.
 ///
 /// An explicit list, not a query for `[role="dialog"]`. A query would tie
@@ -219,7 +237,7 @@ attachBtn.addEventListener("click", async () => {
   } catch (err) {
     // Dismissing the picker is not a failure and must not raise a message.
     if (String(err).includes("cancelled")) return;
-    setStatus(String(err), "error");
+    reportProblem(err, "could not attach that file");
   }
 });
 
@@ -699,7 +717,7 @@ async function openGroup(name) {
     input.focus();
   } catch (err) {
     closeConversation();
-    setStatus(String(err), "error");
+    reportProblem(err, "could not open that group");
     refreshRoster();
   }
 }
@@ -748,7 +766,7 @@ async function openBot(name) {
     // Nothing opened, so nothing is shown. The roster is redrawn too, or the
     // sidebar would keep its accent edge on a conversation that is not there.
     closeConversation();
-    setStatus(String(err), "error");
+    reportProblem(err, "could not open that Bot");
     refreshRoster();
   }
 }
@@ -774,7 +792,7 @@ async function answerAsk(id, optionId) {
       renderDialog();
       return;
     }
-    setStatus(String(err), "error");
+    reportProblem(err, "your answer did not reach the Bot");
     return;
   }
   removeAsk(id);
@@ -819,7 +837,7 @@ async function supplySecret(id) {
       renderDialog();
       return;
     }
-    setStatus(String(err), "error");
+    reportProblem(err, "the credential did not reach the Bot");
     return;
   }
   secretValueInput.value = "";
@@ -1076,10 +1094,29 @@ function showConnectError(err) {
     : "Nothing started.";
   $("connect-error-raw").textContent = raw;
   show(connectError, true);
+  // A fault the Model section can fix opens it, so the fields are in front of
+  // the person being told they are missing rather than folded away below the
+  // message that says so.
+  if (fault && fault.demo) $("model-setup").open = true;
   const offerDemo = Boolean(fault && fault.demo);
   show($("connect-demo"), offerDemo);
   emphasise($("connect-demo"), offerDemo);
   emphasise(connectBtn, !offerDemo);
+}
+
+/// What the Model section is asking for, or `null` when it asks for nothing.
+///
+/// Every field is optional and an empty one changes nothing, so somebody whose
+/// model is already configured and who only needs to supply a key does not have
+/// to retype the model to do it.
+function modelInput() {
+  const id = $("model-id").value.trim();
+  const apiKey = $("model-key").value;
+  const apiKeyEnv = $("model-key-env").value.trim();
+  const dialect = $("model-dialect").value;
+  const baseUrl = $("model-base").value.trim();
+  if (!id && !apiKey.trim() && !dialect && !baseUrl) return null;
+  return { id, apiKey, apiKeyEnv, dialect, baseUrl };
 }
 
 /// Connect, optionally in the scripted demo.
@@ -1101,8 +1138,13 @@ async function connect(demo = false) {
       home: home || (await invoke("default_home")),
       hub: hub || "http://127.0.0.1:9812",
       demo,
+      model: modelInput(),
     });
     await enterWorkspace();
+    // The key has been handed to the runtime; nothing needs it in the DOM
+    // afterwards, and a password field that keeps its value keeps it for
+    // anything that can read the page.
+    $("model-key").value = "";
     // "Connected" has to mean what a person reads into it. The agent is
     // running either way; whether there is a computer behind it is a separate
     // question, and answering it here is the difference between finding out
@@ -1153,7 +1195,7 @@ async function disconnect() {
   try {
     await invoke("disconnect");
   } catch (err) {
-    setStatus(String(err), "error");
+    reportProblem(err, "could not disconnect cleanly");
     return;
   }
   closeConversation();
@@ -1194,7 +1236,7 @@ async function sendPrompt(text) {
     // Bot had stopped reading: the agent says so rather than pretending it
     // landed, and the text goes back in the box so it can be sent again
     // without being retyped.
-    setStatus(String(err), "error");
+    reportProblem(err, "the run stopped");
     if (joining && !input.value.trim()) input.value = text;
   } finally {
     // Whatever ended the turn, a step still open at this point is never going
@@ -1209,6 +1251,7 @@ async function sendPrompt(text) {
 // ------------------------------------------------------------------- wiring
 
 $("no-computer-dismiss").addEventListener("click", () => show($("no-computer"), false));
+$("problem-dismiss").addEventListener("click", () => show($("problem"), false));
 
 listen("chunk", (event) => {
   if (event.payload.session === session) appendChunk(event.payload);
@@ -1225,13 +1268,30 @@ connectBtn.addEventListener("click", () => connect(false));
 // action offered on a J2 failure is the one that shows a Bot doing real work
 // on real tools. Wrapped for the same reason as above — a MouseEvent is truthy.
 $("connect-demo").addEventListener("click", () => connect(true));
+// The hint tells somebody which variable to set for the key to survive a
+// restart, so it has to name the one they typed rather than the default.
+$("model-key-env").addEventListener("input", () => {
+  $("model-key-env-echo").textContent = $("model-key-env").value.trim() || "XAI_API_KEY";
+});
 $("disconnect").addEventListener("click", disconnect);
 $("pick-home").addEventListener("click", async () => {
   const folder = await invoke("pick_folder");
   if (folder) setPath($("home-path"), folder);
 });
 
-for (const id of ["openbot-path", "home-path", "hub-url"]) {
+// Deliberately not "model-key": a tooltip is a hover away from anybody
+// standing behind you, and putting a secret in one would undo the reason the
+// field is a password box. It is the one connect field whose value is not
+// meant to be readable, and `no_dialog_field_is_narrower_than_the_placeholder_in_it`
+// exempts password inputs for that reason.
+for (const id of [
+  "openbot-path",
+  "home-path",
+  "hub-url",
+  "model-id",
+  "model-key-env",
+  "model-base",
+]) {
   // Typed as well as picked: a tooltip that only tracked the picker would go
   // stale the moment somebody edited the field, which is worse than none.
   // The hub URL is here too: it has no picker, but it is a value a person is
@@ -1843,7 +1903,7 @@ async function closeComputer() {
   try {
     await invoke("close_computer");
   } catch (err) {
-    setStatus(String(err), "error");
+    reportProblem(err, "could not close the computer");
   }
 }
 $("close-computer").addEventListener("click", closeComputer);
@@ -2326,7 +2386,7 @@ cancelBtn.addEventListener("click", async () => {
   try {
     forgetAsks(await invoke("cancel", { session }));
   } catch (err) {
-    setStatus(String(err), "error");
+    reportProblem(err, "search failed");
   }
 });
 
