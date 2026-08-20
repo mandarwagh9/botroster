@@ -970,11 +970,97 @@ function refuseAsks() {
 
 // -------------------------------------------------------------- connection
 
-async function connect() {
+/// What a failed connect means, in the person's vocabulary.
+///
+/// J2 has more than one way to fail and they need different answers: a runtime
+/// that is not there cannot be fixed the way a runtime with no model can, and
+/// telling somebody the wrong one sends them to retry the wrong thing. The
+/// runtime states its own fault precisely, so this maps that to what it means
+/// and what is safe, and leaves the runtime's words in the expander as
+/// evidence.
+///
+/// Ordered: the key case has to be tested before the model case, because the
+/// runtime words it as "no usable model: $KEY is not set" and the model rule
+/// would otherwise swallow it.
+const CONNECT_FAULTS = [
+  {
+    match: /is not set/i,
+    what: "The runtime has a model configured, but not the key it needs.",
+    safe: "Nothing started. No Bot ran, and nothing on this computer was touched.",
+    demo: true,
+  },
+  {
+    match: /no usable model|no model configured/i,
+    what: "The runtime started, but it has no model to use.",
+    safe: "Nothing started. No Bot ran, and nothing on this computer was touched.",
+    demo: true,
+  },
+  {
+    match: /is not on your PATH|no openbot binary at/i,
+    what: "The openbot runtime is not where this window looked for it.",
+    // No demo offer here: the demo runs *in* the runtime, so with no runtime
+    // there is nothing to run it. Offering it would be a button that fails
+    // the same way.
+    safe: "Nothing started.",
+    demo: false,
+  },
+];
+
+/// The runtime's first meaningful line, which is where it states the fault.
+function whyFrom(raw) {
+  const lines = String(raw)
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  // Skip the window's own framing line; the runtime's own words come after it.
+  const said = lines.find((l) => /^Error:/i.test(l)) || lines[lines.length - 1] || "";
+  return said.replace(/^Error:\s*/i, "");
+}
+
+function clearConnectError() {
+  show(connectError, false);
+  show($("connect-demo"), false);
+  emphasise(connectBtn, true);
+  emphasise($("connect-demo"), false);
+}
+
+/// Which button is the primary one. There is exactly one per screen, and after
+/// a failed connect it is not Connect: pressing Connect again does the same
+/// thing and fails the same way. The action that resolves the state gets the
+/// emphasis, or the loudest control on the screen is the one that cannot work.
+function emphasise(btn, on) {
+  btn.classList.toggle("primary", on);
+}
+
+function showConnectError(err) {
+  const raw = String(err);
+  const fault = CONNECT_FAULTS.find((f) => f.match.test(raw));
+  $("connect-error-what").textContent = fault
+    ? fault.what
+    : "The runtime did not start.";
+  // Never the whole message as the message: the why is one line, and the rest
+  // is evidence that belongs behind the expander.
+  $("connect-error-why").textContent = whyFrom(raw);
+  $("connect-error-safe").textContent = fault
+    ? fault.safe
+    : "Nothing started.";
+  $("connect-error-raw").textContent = raw;
+  show(connectError, true);
+  const offerDemo = Boolean(fault && fault.demo);
+  show($("connect-demo"), offerDemo);
+  emphasise($("connect-demo"), offerDemo);
+  emphasise(connectBtn, !offerDemo);
+}
+
+/// Connect, optionally in the scripted demo.
+///
+/// `demo` is passed explicitly rather than read from a global so the button
+/// that offers it and the button that does not cannot drift apart.
+async function connect(demo = false) {
   const openbot = $("openbot-path").value.trim();
   const home = $("home-path").value.trim();
   const hub = $("hub-url").value.trim();
-  connectError.textContent = "";
+  clearConnectError();
   connectBtn.disabled = true;
   try {
     const found = await invoke("connect", {
@@ -984,6 +1070,7 @@ async function connect() {
       // a `~` in it for openbot to take literally.
       home: home || (await invoke("default_home")),
       hub: hub || "http://127.0.0.1:9812",
+      demo,
     });
     await enterWorkspace();
     // "Connected" has to mean what a person reads into it. The agent is
@@ -997,7 +1084,7 @@ async function connect() {
       showComputerProblem(found.why);
     }
   } catch (err) {
-    connectError.textContent = String(err);
+    showConnectError(err);
   } finally {
     connectBtn.disabled = false;
   }
@@ -1100,7 +1187,11 @@ listen("permission-request", (event) => enqueueAsk(event.payload));
 // will never be made.
 listen("permission-withdrawn", (event) => forgetAsks(event.payload || []));
 
-connectBtn.addEventListener("click", connect);
+connectBtn.addEventListener("click", () => connect(false));
+// Value before configuration: the demo needs no key and no model, so the one
+// action offered on a J2 failure is the one that shows a Bot doing real work
+// on real tools. Wrapped for the same reason as above — a MouseEvent is truthy.
+$("connect-demo").addEventListener("click", () => connect(true));
 $("disconnect").addEventListener("click", disconnect);
 $("pick-home").addEventListener("click", async () => {
   const folder = await invoke("pick_folder");

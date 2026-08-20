@@ -81,17 +81,56 @@ S.s01 = {
 
 // ---------------------------------------------------------------- s02
 S.s02 = {
-  what: "connect panel, sidecar not found",
+  what: "connect panel, runtime binary not found",
+  // The wording is `found()` in openbot-desktop/src/engine.rs verbatim. A
+  // paraphrase here would have the loop designing against a sentence the
+  // product never says — which is exactly how run 1 filed a defect against an
+  // approval dialog that does not exist.
   pre() {
     window.__replies.connected = false;
     window.__replies.default_home = "C:\\Users\\you\\.openbot";
     window.__throw = {
-      connect: "no openbot binary at that path, and none on PATH",
+      connect:
+        "`openbot` is not on your PATH. OPENBOT drives the openbot runtime and " +
+        "does not include it: install it with `cargo install --path crates/openbot-cli`, " +
+        "or point the openbot binary field at the executable",
     };
   },
   async post() {
     document.getElementById("connect-btn").click();
-    await until(() => document.getElementById("connect-error").textContent.length > 0);
+    await until(() => !document.getElementById("connect-error").classList.contains("hidden"));
+  },
+};
+
+// ---------------------------------------------------------------- s13
+S.s13 = {
+  what: "connect fails because no model is configured — the real first run",
+  // The state every fresh install actually starts in, and the one no scenario
+  // covered: `~/.openbot` exists with bots/ and volumes/ but no config.toml,
+  // so `openbot acp` refuses to start. Verified against the installed binary;
+  // this is its stderr, and the framing line the engine now puts in front of
+  // it.
+  pre() {
+    window.__replies.connected = false;
+    window.__replies.default_home = "C:\\Users\\you\\.openbot";
+    window.__throw = {
+      connect:
+        "openbot acp did not start.\n" +
+        "Error: no usable model: no model configured.\n" +
+        "Set one once:  openbot config set --model grok-4-5\n" +
+        "Or per run:    --model grok-4-5\n" +
+        "Or check a deployment without a key:  --demo",
+    };
+  },
+  async post() {
+    document.getElementById("connect-btn").click();
+    await until(() => !document.getElementById("connect-error").classList.contains("hidden"));
+    // Open the expander: the whole point of this scenario is whether the
+    // runtime's words are reachable and readable, and a closed <details> shows
+    // nothing about that.
+    const d = document.getElementById("connect-error-details");
+    if (d) d.open = true;
+    await sleep(60);
   },
 };
 

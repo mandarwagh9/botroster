@@ -110,6 +110,11 @@ export const SCENARIOS = [
   ["s10", "computer viewer"],
   ["s11", "guest disconnected, budget exhausted"],
   ["s12", "routines list"],
+  // J2's other failure, and the one a fresh install actually hits. Added in
+  // run 2: every scenario from s03 on asserts `connected = true`, so the
+  // harness opened on the far side of the wall and could not see the state
+  // most people meet first.
+  ["s13", "connect fails: no model configured"],
 ];
 
 if (import.meta.url === `file://${process.argv[1].replace(/\\/g, "/")}`) {

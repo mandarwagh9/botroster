@@ -397,12 +397,19 @@ pub fn refuses(kind: PermissionOptionKind) -> bool {
 
 /// Connect to a `openbot acp` agent. The engine verifies the handshake before
 /// the window is told it worked.
+///
+/// `demo` starts the connection in the scripted tool demo instead of against a
+/// model. The window offers it when a connect failed for want of a model or a
+/// key, because the demo needs neither and is the only way to watch a Bot use
+/// real tools before being asked to configure anything. `Option` so the
+/// existing callers that send four arguments keep working.
 #[tauri::command]
 async fn connect(
     state: State<'_, AppState>,
     openbot: String,
     home: String,
     hub: String,
+    demo: Option<bool>,
 ) -> Result<Connected, String> {
     let mut engine = state.engine.lock().await;
     if engine.is_some() {
@@ -415,6 +422,13 @@ async fn connect(
     };
     let mut cfg = Config::new(here.openbot.clone(), here.home.clone(), here.hub.clone());
     state.mode.apply(&mut cfg);
+    // A demo asked for by the window, over whatever the process was launched
+    // with. Reusing `Mode` rather than setting the flag directly keeps one
+    // definition of what a demo is; setting `cfg.demo_tools` here would be a
+    // second one, free to drift.
+    if demo.unwrap_or(false) {
+        Mode::Tools.apply(&mut cfg);
+    }
     let connected = Engine::connect(cfg).await.map_err(|e| e.to_string())?;
     *engine = Some(connected);
     // Ask whether there is a computer, rather than letting "connected" mean

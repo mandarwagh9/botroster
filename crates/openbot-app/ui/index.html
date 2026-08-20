@@ -42,8 +42,24 @@
       <input id="hub-url" class="wide" spellcheck="false"
              value="ws://127.0.0.1:8443/v1/tools" />
     </div>
-    <p id="connect-error" class="error"></p>
+    <!-- A failed connect is the most likely first experience this product
+         has, so it gets a structure rather than a string: what happened, why,
+         what state the machine is in, and one thing to do about it. The
+         runtime's own words go in the expander, copyable, because they are
+         evidence and not a message. -->
+    <div id="connect-error" class="connect-error hidden" role="alert">
+      <p id="connect-error-what" class="ce-what"></p>
+      <p id="connect-error-why" class="ce-why"></p>
+      <p id="connect-error-safe" class="ce-safe"></p>
+      <details id="connect-error-details">
+        <summary>What the runtime said</summary>
+        <pre id="connect-error-raw" tabindex="0"></pre>
+      </details>
+    </div>
     <div class="actions">
+      <!-- Offered only when it would actually help: with no model or no key
+           the demo runs anyway, and with no runtime binary it cannot. -->
+      <button id="connect-demo" class="hidden">Watch the demo instead</button>
       <button id="connect-btn" class="primary">Connect</button>
     </div>
   </section>

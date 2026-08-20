@@ -286,3 +286,45 @@ noticed that a fresh install cannot start at all.
 
 A screenshot harness is only as honest as the state it opens in. J1 and J2 had to be
 established by running the shipped binary, not by looking at pictures of the app.
+
+---
+
+## Run 2 items
+
+### B11 — J2 reported a protocol event instead of the configuration fact
+`done 3665cb8` · J2 · rubric 12
+
+`Engine::connect` discarded the child's stderr and said "openbot acp ended before the
+handshake". WHAT and WHY now carried. See MEMORY for why awaiting the task's error does not
+work.
+
+### B12 — the J2 error carried none of the four doctrine elements
+`done` (this iteration) · J2 · rubric 12, 1, 3
+
+Was a single red string, `String(err)`, with no structure, no statement of what is safe, and
+no action. Now: WHAT in the person's vocabulary, WHY in the runtime's own words, WHAT IS SAFE
+("Nothing started. No Bot ran, and nothing on this computer was touched."), and one action.
+
+The two failure modes are distinguished, which was the spec's own example of a J2 defect: a
+missing runtime binary and a runtime with no model are different faults with different fixes,
+and telling somebody the wrong one sends them to retry the wrong thing. `CONNECT_FAULTS`
+matches on what the runtime said; the key-not-set case is tested before the model case
+because the runtime words it as "no usable model: $KEY is not set" and the model rule would
+otherwise swallow it.
+
+The demo is **not** offered when the binary is missing — the demo runs *in* the runtime, so
+with no runtime it would be a button that fails the same way.
+
+Emphasis moves to the action that resolves the state. After a failed connect the primary is
+no longer Connect, because pressing Connect again does the same thing and fails the same way;
+the loudest control on the screen would have been the one that cannot work.
+
+### B13 — the fixture could not see J1 or J2
+`done` (this iteration) · harness
+
+Every scenario from `s03` on set `connected = true`. Added `s13` (no model configured) and
+corrected `s02` to `found()`'s verbatim wording. 52 shots now, still under 5s.
+
+**Still not covered: J8 (RETURN).** There is no surface for "what happened while you were
+away" — no unread marker, no routine-fired digest, no since-last-visit boundary — so there is
+nothing to photograph. Product gap and harness gap together.
