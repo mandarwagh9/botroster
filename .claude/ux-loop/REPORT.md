@@ -1,226 +1,211 @@
-# REPORT — overnight UX loop, 2026-08-20
+# REPORT — OPENBOT UX loop
 
-Branch `ux/overnight-2026-08-20`. Phase 0 ran ~02:50–04:15; the loop ran ~04:15–06:05.
-**Five commits, four of them UX changes, all gates green.** Nothing merged.
+Branch `ux/overnight-0820`, cut from `ux/overnight-2026-08-20`. Nothing merged.
 
-Read this before the diff. Then run the app for ten minutes before merging anything.
-
----
-
-## The number
-
-**Rubric 21/60 → 31/60.**
-
-The baseline in `BASELINE.md` says 24. It was wrong by three: line 18 (*is amber present
-anywhere nothing requires a human*) was scored 3 by looking for stray amber in the chrome,
-when two Bots-worth of amber were sitting in the coat palette and the "busy" status pill.
-Corrected to 0, the true starting total is 21. **The loop's first real finding was that its
-own baseline had over-scored itself**, which is worth more than the ten points.
+Two runs. **Run 1** (overnight, 02:50–06:05) built the harness and cleared four defects.
+**Run 2** (journey-first, from 09:50) is this report's subject. Read this before the diff,
+then run the app for ten minutes before merging anything.
 
 ---
 
-## Commits
+## 1. Launch to first work
 
-| | Commit | What | Rubric |
+**Before: there was no path.** Not a large number — none. Verified against the installed
+binary at `%LOCALAPPDATA%\OPENBOT\openbot.exe`, not inferred: `~/.openbot` has `bots/` and
+`volumes/` but no `config.toml`, so `openbot acp` exits 1. With a config but no key it still
+exits 1. Neither the model nor the key is settable anywhere in the window — `Settings` is
+`#rules-btn`, inside `#workspace`, which is hidden until the connect that is failing
+succeeds. The README's stated escape hatch ("open Settings") describes a surface that does
+not exist.
+
+Counted honestly, the old path was **10 actions, 4 of them outside the application, 2 of them
+in a terminal**, requiring prior knowledge of a command the app never mentions.
+
+**After: 2 actions, no key, no terminal.**
+
+| | Action | Elapsed |
+|---|---|---|
+| 1 | Connect | ~2s, fails, and now says why |
+| 2 | **Watch the demo instead** | a Bot runs real tools against a real workspace |
+
+Well inside the 90-second target. The demo needs no model and no key, which the onboarding
+doctrine calls the strongest asset in the product; it was reachable only from a CLI flag.
+
+**The real-model path is unchanged at 10 actions.** No model surface was added — that is a
+new surface, and it is item 2 of the next-six-hours list. What changed is that the dead end
+now explains itself and offers a way to see the product work.
+
+---
+
+## 2. Rubric, per line
+
+| # | Line | 000 | run 1 | run 2 |
+|---|---|---|---|---|
+| 1 | cold start unambiguous | 2 | 2 | 2 |
+| 2 | four roster statuses in <1s | 0 | 0 | 0 |
+| 3 | one loudest element per screen | 1 | 2 | 2 |
+| 4 | doing-now vs already-did | 2 | 3 | 3 |
+| 5 | steps state their target | 3 | 3 | 3 |
+| 6 | computer visible without interaction | 0 | 0 | 0 |
+| 7 | approval: safe choice louder | 0 | 0 | 0 |
+| 8 | denial reads as final | 2 | 2 | 2 |
+| 9 | find last approval in 200 steps | 0 | 1 | 1 |
+| 10 | which Bot produced which step | 1 | 2 | 2 |
+| 11 | takeover obvious | 0 | 0 | 0 |
+| 12 | failure names cause + one action | 1 | 1 | **2** |
+| 13 | three routine states | 0 | 0 | 0 |
+| 14 | empty state is a path | 1 | 3 | 3 |
+| 15 | provenance trail | 0 | 0 | 0 |
+| 16 | light equal to dark | 2 | 2 | 2 |
+| 17 | nothing looks library-default | 2 | 2 | 2 |
+| 18 | amber only where a human blocks | **0** | 3 | 3 |
+| 19 | recognisable as the reference | 3 | 3 | 3 |
+| 20 | Chanel test | 1 | 2 | 2 |
+| | **Total** | **21** | **31** | **32** |
+
+(`000` line 18 is corrected from the 3 the baseline gave itself; two Bots-worth of amber were
+in the coat palette and the busy pill.)
+
+**The rubric moved one point for the most important fix in either run, and that is a fact
+about the rubric.** Not one of its twenty lines covers J1 or J2. It was written against the
+twelve steady-state scenarios, every one of which asserts `connected = true`, so an app that
+cannot be started at all scores the same as one that can. Any future run should add lines for
+launch and connect before trusting this total as a measure of onboarding.
+
+---
+
+## 3. Commits
+
+| Run | Commit | Stage | What | Delta |
+|---|---|---|---|---|
+| 1 | `ae23db5` | — | the harness: fixture, shots, gates, baseline | — |
+| 1 | `53c6bde` | J4 | `.step-state` legible; run log keyboard-reachable; rules `select` named | 4: 2→3 |
+| 1 | `ae0c5f3` | J6 | no Bot wears amber; `--coat-4` olive | 18: 0→3, 10: 1→2 |
+| 1 | `12e3b21` | J3 | empty conversation says something true, and offers the way out | 14: 1→3 |
+| 1 | `f726bf5` | J6 | transport pill quiet; working state off amber | 3: 1→2, 20: 1→2 |
+| 2 | `3665cb8` | **J2** | the window stops hiding what the runtime told it | 12 (WHAT+WHY) |
+| 2 | `8286b2d` | **J2** | a failed connect says what, why, what is safe, and one thing to do | 12: →3 for connect |
+| 2 | `bfdc79a` | **J7** | a step nobody heard back from says so instead of spinning forever | 12: 1→2 |
+
+---
+
+## 4. Changed scenarios, before / after
+
+Shots are gitignored; paths are on disk.
+
+| Scenario | Before | After | What changed |
 |---|---|---|---|
-| 000 | `ae23db5` | the harness — fixture, shots, gates, baseline. No UI change. | — |
-| 001 | `53c6bde` | `.step-state` legible, run log keyboard-reachable, rules `select` named | 4: 2→3 |
-| 002 | `ae0c5f3` | no Bot wears amber; `--coat-4` olive | 18: 0→3, 10: 1→2 |
-| 003 | `12e3b21` | empty conversation says something true and offers the way out | 14: 1→3 |
-| 004 | `f726bf5` | transport pill quiet; working state off amber | 3: 1→2, 20: 1→2 |
+| `s02` binary missing | `shots/011/s02-*` | `shots/013/s02-*` | structured error; `found()`'s verbatim wording replaces a paraphrase |
+| `s13` no model **(new)** | — | `shots/013/s13-*` | the state every fresh install hits; did not exist before run 2 |
+| `s11` guest drops | `shots/011/s11-*` | `shots/013/s11-*` | abandoned step now states it may or may not have run |
+| `s05` mid-run | `shots/000/s05-*` | `shots/013/s05-*` | run 1: "running" legible at last |
+| `s03`/`s04` roster | `shots/000/*` | `shots/013/*` | run 1: coats, empty state, transport pill |
 
-Line 9 also moved 0→1: the log taking focus makes a 200-step thread scrollable from the
-keyboard, which is most of the way to "find the last approval" without being a marker.
-
-**No iteration was reverted, and no gate failed after 001.** That is a smaller claim than it
-looks — see *What this did not do*.
+Each in `1280-dark`, `1280-light`, `1600-dark`, `1600-light`.
 
 ---
 
-## Gates: baseline vs final
+## 5. Every error state against the four doctrine elements
 
-| Gate | 000 | final |
+WHAT / WHY / WHAT IS SAFE / ONE ACTION.
+
+| State | WHAT | WHY | SAFE | ACTION | |
+|---|---|---|---|---|---|
+| `s13` no model configured | ✓ | ✓ | ✓ | ✓ demo | **4/4** |
+| key configured but not set | ✓ | ✓ | ✓ | ✓ demo | **4/4** — same path, no scenario yet |
+| `s02` runtime binary missing | ✓ | ✓ | ✓ | ✗ | 3/4 — the `…` picker resolves it but is not offered as *the* action. Demo is correctly withheld: with no runtime it cannot run |
+| `s07` denied by policy | ✓ | ✓ | ✓ | n/a | **pass** — reads as final, no control implies appeal |
+| `s11` abandoned tool step | ✓ | ✓ | ✓ | n/a | **pass** — a step is not an action surface |
+| `s11` status pill | ✗ | ✗ | ✗ | ✗ | **P0 (B15)** — raw error string as the whole message, in the chrome, 90 characters, no expander |
+| `s11` budget exhausted | ~ | ✓ | ✗ | ✗ | **P1 (B16)** — rendered as a crash, not a decision point; no raise-it control exists |
+| `s11` "No computer" banner | ✗ | ~ | ✗ | ✗ | **P1 (B17)** — written for connect-time, reused for a mid-run drop where it is wrong; "Dismiss" resolves nothing |
+| connector 401 | — | — | — | — | **no rendering path found anywhere** |
+
+---
+
+## 6. NEEDS REVIEW — yours to decide
+
+- **B08** — approvals are a blocking centred modal, not inline gates. DIRECTION calls the
+  modal "the lazy answer" that "trains people to click through". Past the 200-line ceiling
+  and entangled with the approval queue `page.rs` pins in about a dozen tests. The largest
+  UX item in the file.
+- **B02** — the grant is the only accent fill in the approval dialog. Real against rubric 7,
+  but `renderDialog` carries a written rationale for the current arrangement (one accent per
+  dialog; narrowest grant first; positional so an unclassifiable future `kind` cannot be
+  dressed in the accent). Not a change to make unattended on a security dialog.
+- **B09** — `APPROVAL-INVARIANTS.md` invariant 4 says Escape resolves to refuse; the shipped
+  behaviour is that Escape does nothing, pinned by
+  `escape_closes_a_panel_but_never_an_approval`. Both fail closed.
+- **B07** — a routine can only be `enabled` or paused. Rubric 13 asks for three states over a
+  model carrying two; the third needs the runtime to report it.
+- **B16** — raising a token budget from the window is a new surface, not a patch.
+
+---
+
+## 7. Gates vs BASELINE
+
+| Gate | 000 | now |
 |---|---|---|
 | axe serious | **4** | **0** |
 | axe critical | **2** | **0** |
 | contrast failures | **2** | **0** |
-| worst contrast | **2.79:1** | no failures |
+| worst contrast | **2.79:1** | none |
 | keyboard unreachable | 0 | 0 |
 | reduced-motion violations | 0 | 0 |
 | approval invariants | pass | pass |
-| `cargo test --test page` | 57 passed | 57 passed |
-| bundle | 135,667 B | ~139,300 B (ceiling 156,017) |
-| shot run | 4.0s / 48 | ~5s / 48 |
+| `cargo test --test page` | 57 | 57 |
+| `engine_live` | 12 | **13** |
+| bundle | 135,667 B | **147,214 B** (+8.5%, ceiling 156,017) |
+| shots | 48 in 4.0s | **52 in 3.8s** |
 
-The baseline did not pass its own gates. Six of the eight failures were real defects in the
-shipped product, and 001 cleared all of them:
-
-1. **`.step-state` at 2.79:1.** The word "running" — the answer to *what is the Bot doing
-   right now* — was the least legible text on the screen, set in `--ghost`, a tier the design
-   system documents as not clearing AA and reserves for placeholders.
-2. **The run log scrolled but could not take focus.** Past the last screenful, a 200-step
-   thread was unreachable without a pointer.
-3. **The `select` that decides what the hub allows had no accessible name.**
+**Bundle headroom is down to about six points.** The next surface that lands will need the
+baseline re-cut or the ceiling revisited; the gate will otherwise revert a legitimate change.
 
 ---
 
-## The three things worth your attention
+## 8. Three things to do with another six hours
 
-### 1. The fixture was wrong, and it invented a defect
-
-The first backlog item — "the approval dialog makes the grant the loudest thing" — was filed
-against a screenshot of a dialog **the product never renders**. The fixture had `danger: true`
-on the session grant; `renderDialog` styles on that flag, so the harness painted the large
-grant in refusal styling and the refusal in quiet styling.
-
-It was caught by reading the option-construction loop in `main.js` before patching, not by
-looking harder at the picture. Corrected in `shots/001/` onward.
-
-**This is the loop's main structural risk and it fired on iteration one.** A screenshot is
-only as true as the fixture behind it, and a wrong fixture produces confident, well-evidenced,
-entirely fictional defects. If you extend the scenarios, derive every payload from the Rust
-type or the code that consumes it.
-
-### 2. Amber was misused twice, and DIRECTION is what caught it
-
-DIRECTION says amber means *a person is blocking progress*, and rubric 18 makes any other
-amber an automatic P0. Two violations, neither in the chrome where the baseline looked:
-
-- `--coat-4` was `#f19d38`. A Bot idly assigned that coat raised the waiting-on-you signal
-  with nobody waiting. It was also the same hue as `--coat-3`, so two Bots read as one colour.
-- `.status.busy` was `--warn` **and pulsed**, making a Bot quietly doing its job the loudest
-  thing on screen, in the colour that means it needs you.
-
-Having found the first, grepping every other use of `--warn` found the second in about a
-minute. One misuse of a semantic token predicts others.
-
-### 3. Four items are NEEDS REVIEW and were deliberately not touched
-
-These are in `BACKLOG.md` with full reasoning. All four are yours to decide:
-
-- **B08 — approvals are a blocking centred modal, not an inline gate.** DIRECTION calls the
-  modal "the lazy answer" that "trains people to click through". This is the single largest UX
-  item in the file. It is well past the 200-line ceiling and it interacts with the approval
-  queue that `page.rs` pins in about a dozen tests. Not something to attempt unattended.
-- **B02 — the grant is the only accent fill in the approval dialog.** Real against rubric 7,
-  but `renderDialog` carries an explicit written rationale for the current arrangement (one
-  accent per dialog; the shell orders options narrowest-grant-first; positional on purpose so
-  an unclassifiable future `kind` cannot be dressed in the accent). Inverting emphasis on a
-  security dialog against a written in-code decision is not a 4am change.
-- **B07 / s12 — a routine cannot express "erroring".** The payload has `enabled` and nothing
-  else. Rubric 13 asks for three distinguishable states over a model carrying two. Fixing it
-  means changing what the runtime reports, which was outside tonight's writable set.
-- **B09 — invariant 4 contradicts shipped behaviour.** LOOP.md says Escape resolves to refuse;
-  the shipped behaviour is that Escape does nothing to an approval, pinned by
-  `escape_closes_a_panel_but_never_an_approval`. Both fail closed. Decided at launch to keep
-  shipped and not touch the test.
+1. **B15, then a model surface on the connect panel.** B15 is small and is a straight
+   doctrine violation — the header shows a raw error string as the whole message while the
+   panel three inches below it now does the right thing. Then the real fix for section 1:
+   the connect panel is the only screen that exists before a connection, so it is the only
+   place a model and a key can be set. That is what turns the real-model path from 10 actions
+   and a terminal into something comparable to the demo path's 2.
+2. **Decide B08 and build it.** Inline approval gates plus a persistent waiting-on-you count
+   move rubric 2, 7 and 9 together, and J5 — the moment the whole product is explained — is
+   currently three buttons that never mention that the gate is in the hub where the agent
+   cannot reach it.
+3. **Give the roster a status, and the rubric some lines for J1/J2.** Status is DIRECTION's
+   first consequence and scores 0; the window can already derive *open*, *has a pending
+   approval* and *paused*, and only *working* needs the engine. And the measurement instrument
+   itself needs fixing, per section 2.
 
 ---
 
-## What this did not do
+## Notes on how this ran
 
-**The product's whole argument still scores zero.** Every rubric line that DIRECTION treats as
-the differentiator is untouched:
+**`reference/` was empty.** The Grok Bot captures were never dropped in, so neither run had
+any interaction lessons from them. Nothing in either report was informed by the reference.
 
-| Line | | Score |
-|---|---|---|
-| 2 | roster status board | **0** |
-| 6 | computer as a peer pane | **0** |
-| 11 | takeover | **0** |
-| 13 | three routine states | **0** |
-| 15 | the provenance trail | **0** |
+**The fixture was structurally blind to J1 and J2**, because every scenario from `s03` on
+asserts `connected = true`. That is why run 1 cleared four real defects without noticing the
+app could not start. `s13` and a corrected `s02` close it. **J8 (RETURN) is still not
+covered** — there is no unread marker, no routine-fired digest, no since-last-visit boundary,
+so there is nothing to photograph. Product gap and harness gap at once.
 
-Tonight's four commits were legibility, accessibility, colour semantics and copy — real, and
-they make the surface honest, but they are the floor, not the thesis. **A reader of this
-report should not conclude the UI now argues for open, self-hosted, hub-enforced gating. It
-does not. It is merely no longer inaccessible or lying in its empty states.**
+**A wrong fixture invents defects.** Run 1 filed a P0 against an approval dialog the product
+never renders, because `danger` was on the wrong option. Run 2's rule: derive every payload
+from the code that consumes it, and drive the real path rather than painting the end state —
+`s11` sends a message that rejects, so the logic under test actually runs.
 
-Three of those five are blocked on data the window does not have (`roster` carries no status;
-routines carry no error; takeover has no window-side surface), which is why B01 is scoped and
-B07 is NEEDS REVIEW rather than done.
+**Assert on the cause, not on the message changing.** The first attempt at the J2 fix — await
+the task's error — yields `Incoming transport closed`, because the transport error beats the
+child-exit report that carries stderr. A test asserting "not the old string" would have
+passed and shipped a window telling somebody with an unset API key about a transport.
 
-**Motion, latency, scroll feel and input responsiveness were not assessed at all.** A
-screenshot cannot see them. Budget an hour by hand.
+**The preflight gate blocked the run for something harmless** — it matched any process named
+`openbot*`, so the installed app being open failed everything. A gate that stops the run for
+something harmless is a gate that gets switched off.
 
-**The full re-skin did not happen.** You chose it over my recommendation, and I built for it:
-`DIRECTION.md` now carries the complete token system, with the gaps it left — accent, the
-eight Bot coats, the remaining text tiers, shape, depth, and the whole light theme — derived
-and marked `DERIVED`, so an unattended iteration had something to reach for instead of
-inventing one. The load-bearing derivation is **the accent is neutral, because colour in this
-app means status and never emphasis**; every remaining hue was already spoken for, and a
-fourth would have put a colour on screen carrying no state.
-
-But swapping the token layer is a >200-line change, which STEP 3 sends to NEEDS REVIEW by
-construction, and it would re-baseline every measured contrast ratio in a stylesheet whose
-comments record them. With ~1h45m of loop time after Phase 0 and an eight-minute gate cycle,
-starting it would have meant leaving a half-applied palette at 06:30. **The derived system is
-ready; applying it is the first thing to do awake.** The three typefaces are not vendored —
-that needs font files, PROVENANCE.md rows, and a licence check per family.
-
----
-
-## Three things to do next with another six hours
-
-1. **Apply the re-skin, in one sitting, with the gate running.** `DIRECTION.md` is complete
-   now. Do it as one commit against a re-baselined contrast measurement, not incrementally —
-   a half-swapped palette is worse than either end state. Vendor Geist Sans, Commit Mono and
-   Martian Mono with their PROVENANCE rows first.
-2. **Decide B08.** Inline approval gates plus a persistent waiting-on-you count is the change
-   that would move rubric 2, 7 and 9 together, and it is the one DIRECTION argues hardest for.
-   It needs a person because it touches the approval queue.
-3. **Give the roster a status.** It is the first consequence in DIRECTION and it scores 0. The
-   window can already derive *open*, *has a pending approval*, and *paused*; *working* needs
-   something from the engine. Scoping that is a design decision, not a patch.
-
----
-
-## Why it stopped at 06:05, not 06:30
-
-Not the clock, and not three flat iterations. **Every remaining open item needs a person.**
-
-- `B01` (roster status), `B07` (routine errors) and rubric 11 (takeover) are blocked on data
-  the window is not given. Fixing them means changing what the runtime reports, which is
-  outside tonight's writable set by design.
-- `B03` (computer as a peer pane) and `B08` (inline approval gates) are both structural
-  layout changes past STEP 3's ~200-line ceiling, and `B08` interacts with the approval queue
-  `page.rs` pins in about a dozen tests.
-- `B02` and `B09` are security-surface decisions that contradict written in-code rationale.
-
-What was left after those was polish worth less than the risk of leaving a half-finished
-change in the tree at handover. The loop had run out of work it could do *safely* unattended
-before it ran out of time, and continuing would have meant manufacturing changes to keep
-busy — which is precisely the failure mode LOOP.md section 5 warns about, where commit count
-rises and the rubric does not.
-
-## One scoring correction, made by checking
-
-Rubric line 16 (*is light theme equal in quality to dark*) was scored 2 in the baseline
-without a single light screenshot being opened — scored from the fact that the stylesheet
-uses `light-dark()` pairs, which is an argument, not evidence.
-
-Checked before publishing this report. It holds: light is a genuine design, not an inversion.
-The coats resolve to darker variants that carry on a light surface, `--muted` and the log
-gutter read correctly, and the quieted transport pill works in both.
-
-One thing that surfaced while checking, not filed as a defect because it is a judgement call
-rather than a violation: `--scrim` in light is `rgba(20,20,23,.4)`, so whenever an approval is
-up the entire light theme goes dark behind it. Approvals are this product's core moment, so a
-light-theme user spends that moment looking at a dark screen. Worth a decision; it is not
-wrong.
-
----
-
-## Harness notes
-
-`HARNESS.md` documents it. Three things a future run should know:
-
-- **The gate cycle is ~8 minutes and dominates everything.** Shots are 4-5s for all 48. The
-  cost is `cargo check` + `clippy` + the 57-test page suite. Start the gate in the background
-  and read for the next iteration while it runs.
-- **This branch has another writer.** `104dc9a` is not from this loop — it fixed README's
-  stale `./openbot-data` default and swept in the `page.rs`/stub extraction, and its follow-up
-  edits to `README.md` and `CLAUDE.md` landed inside `ae23db5` rather than their own commit.
-  The edits are correct; the attribution is not. **Do not revert with a blanket
-  `git checkout .`** — it would discard another writer's work.
-- **`sh scripts/ux-verify.sh | tail` returns `tail`'s exit code**, not the gate's. Redirect to
-  a file and check `$?`.
+**This branch has other writers.** `104dc9a` and `e478fe8` are not from either loop. Do not
+revert with a blanket `git checkout .`.
