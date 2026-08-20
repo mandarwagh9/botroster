@@ -21,8 +21,17 @@ it.
    > is filed as BACKLOG B09 for the operator. Do not "fix" the code to match the line above
    > without that decision.
 5. A `deny` from policy renders as unappealable. No control in the UI suggests otherwise.
-6. Nothing auto-resolves on timeout. No countdown. No "remember my choice" that spans
-   sessions.
+6. Nothing auto-resolves on timeout. No countdown. ~~No "remember my choice" that spans
+   sessions.~~
+   > **AMENDED BY THE OPERATOR (2026-08-20).** The last clause is overturned: bypass is
+   > remembered between launches. The two that remain are not — nothing resolves on a timer
+   > and there is no countdown, because those decide *for* you while you are looking at the
+   > question. A remembered bypass is a decision you already made and can see.
+   >
+   > What replaces the clause is a condition: **it may be on before anybody clicks, but it may
+   > never be on without the window saying so.** Pinned by
+   > `a_remembered_bypass_is_visible_before_anything_is_clicked`, which fails if the flag is
+   > restored without going through `setBypass` — i.e. if it is ever in force silently.
 7. The gate is not skippable by keyboard mashing: a single Enter on mount cannot approve.
 
 ## The carve-out
@@ -68,8 +77,19 @@ The rules it must keep, each pinned by a test in `page.rs`:
 - **A credential request still stops and asks.**
   `bypass_does_not_answer_a_request_for_a_credential`. It wants a value, and a bypass has none
   to give.
-- **Session-scoped, never persisted.** Cleared on disconnect and gone on reload. Invariant 6
-  forbids a choice that spans sessions, and a flag surviving a restart would be exactly that.
+- **Remembered between launches, and never silently.** Kept in the webview's own storage —
+  a window preference, in this app's data directory, not in `config.toml`, which is the
+  runtime's file and describes the runtime rather than this client. Restored through
+  `setBypass`, so the toggle is amber and reads "Approving everything" from the first frame.
+  `a_remembered_bypass_is_visible_before_anything_is_clicked` and
+  `turning_bypass_off_is_remembered_as_well` hold both directions — a one-way memory would be
+  worse than none, because somebody who switched it off would find it back on having been
+  told otherwise.
+
+  This was originally session-scoped and cleared on disconnect, under invariant 6's
+  "no choice that spans sessions". The operator overturned that deliberately; see the
+  amendment on invariant 6 for what replaced it. It is recorded rather than quietly changed
+  because the point of this file is that it describes the product.
 - **Every auto-approved call is recorded with its arguments.** Invariant 3 requires the full
   argument list to be readable before a choice is reachable; with no choice to reach, the
   arguments still have to land where a person can find them afterwards. Marked distinctly,

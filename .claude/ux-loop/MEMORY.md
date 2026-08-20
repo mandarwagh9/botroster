@@ -178,3 +178,34 @@ matches on path now.
 
 **Generalisable: a gate that stops the run for something harmless is a gate that gets
 switched off.** False positives cost more than the check is worth.
+
+### Persisting the bypass — two failures worth keeping
+
+**The fixture inherited state it could not see.** Bypass is remembered in `localStorage`,
+which is per-origin, and Playwright shares storage across pages in one browser context. So
+`s14` clicking bypass *on* leaked into every scenario loaded after it, and `s06`'s approval
+dialog stopped opening — the window was already approving everything. The gate caught it at
+exactly the right place: `approval invariant: the approval dialog did not open in s06`.
+
+**Generalisable, and this is the second time it has bitten:** whatever the fixture does not
+set, it inherits, and whatever it inherits it cannot see. The first time it was
+`connected = true` hiding J1/J2. Every scenario now clears storage before `pre()`.
+
+**I made the mistake this file already warns about.** The two persistence tests used
+`settle()` twice after `location.reload()`. They passed alone and failed in the full run,
+because a reload under a loaded suite takes longer than 300ms. `wait_until` now, with a
+deadline. Reading your own notes is not the same as applying them.
+
+### The page suite is near its concurrency limit
+
+One run failed with `chrome-error://chromewebdata/` on a test nothing had touched — a
+navigation that never completed, not an assertion. Evidence: three clean runs at 229s, 173s
+and 177s against one failure at **104s**. The failing run was the fastest, which is the tell:
+more parallelism, more contention.
+
+Each test in `page.rs` spawns a Chromium *and* a loopback server. Adding five browser-driving
+tests for bypass pushed a suite that was already close. Nothing here is a defect, and a
+retry-once on navigation in `page()` would probably remove it — but that is shared test
+infrastructure and the flake could not be reproduced on demand, so it is recorded rather than
+guessed at. **If CI starts failing on unrelated browser tests, this is the first thing to
+look at.**

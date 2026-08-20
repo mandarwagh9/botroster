@@ -867,6 +867,14 @@ async function supplySecret(id) {
 /// survived a restart would be exactly that.
 let bypass = false;
 
+/// Where the choice is kept between sessions.
+///
+/// The webview's own storage, in this app's data directory — a window
+/// preference, kept where window preferences belong, and not in `config.toml`,
+/// which is the runtime's file and describes the runtime rather than this
+/// client.
+const BYPASS_KEY = "openbot.bypass";
+
 function setBypass(on) {
   bypass = on;
   const btn = $("bypass");
@@ -875,7 +883,31 @@ function setBypass(on) {
   $("bypass-label").textContent = on ? "Approving everything" : "Asking first";
   btn.title = on
     ? "Approving every request without asking. Click to start asking again."
-    : "Approve requests without asking, for this session only";
+    : "Approve requests without asking, and keep doing so until turned off";
+  // Remembered. Storage can throw (a locked-down webview, a full disk); the
+  // choice still applies to this window when it does, it just will not survive
+  // the next launch. Failing to remember is not a reason to fail to obey.
+  try {
+    localStorage.setItem(BYPASS_KEY, on ? "1" : "0");
+  } catch {
+    /* not remembered; still in force for this window */
+  }
+}
+
+/// Put the toggle back the way it was left, at load.
+///
+/// It is applied through `setBypass`, so the button is amber and reads
+/// "Approving everything" from the first frame. That is the whole condition on
+/// persisting this: it may be on before anybody clicks, but it may never be on
+/// without saying so.
+function restoreBypass() {
+  let stored = null;
+  try {
+    stored = localStorage.getItem(BYPASS_KEY);
+  } catch {
+    stored = null;
+  }
+  setBypass(stored === "1");
 }
 
 /// Answer an ask without a person, and leave a record that says so.
@@ -1279,9 +1311,6 @@ async function enterWorkspace() {
 }
 
 async function disconnect() {
-  // Not carried across connections. The operator accepted the risk for this
-  // session; the next one is a new decision.
-  setBypass(false);
   try {
     await invoke("disconnect");
   } catch (err) {
@@ -2504,6 +2533,7 @@ invoke("default_home")
 
 // A reload must not offer to connect an engine that is already running: the
 // page is transient, the shell's state is not.
+restoreBypass();
 invoke("connected")
   .then((on) => {
     if (on) return enterWorkspace();

@@ -4393,3 +4393,89 @@ async fn bypass_does_not_answer_a_request_for_a_credential() {
         "a credential must not be answered by a bypass"
     );
 }
+
+/// A remembered bypass is on from the first frame, and says so.
+///
+/// This is the condition on persisting it at all. It may be on before anybody
+/// clicks; it may never be on without the window saying so. A stored flag that
+/// applied silently would be the thing the approval dialog exists to prevent,
+/// arrived at from the other direction.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_remembered_bypass_is_visible_before_anything_is_clicked() {
+    let Some((b, _p)) = page().await else { return };
+
+    // Store the choice and reload, which is what a next launch looks like.
+    b.text_of("localStorage.setItem('openbot.bypass', '1'); 'ok'")
+        .await
+        .expect("remember it");
+    b.text_of("location.reload(); 'ok'").await.ok();
+    // Waited for, not slept through. A reload under a loaded suite takes longer
+    // than it does alone, and two `settle()`s passed in isolation and failed in
+    // the full run — the exact race MEMORY.md already warns about.
+    wait_until(
+        &b,
+        "String(document.getElementById('bypass').getAttribute('aria-pressed') === 'true')",
+        Duration::from_secs(10),
+    )
+    .await;
+
+    assert_eq!(
+        b.text_of("document.getElementById('bypass').getAttribute('aria-pressed')")
+            .await
+            .unwrap(),
+        "true",
+        "a remembered bypass should be in force at load"
+    );
+    assert_eq!(
+        b.text_of("document.getElementById('bypass-label').textContent")
+            .await
+            .unwrap(),
+        "Approving everything",
+        "and it must say so, not sit on silently"
+    );
+    assert!(
+        b.text_of("document.getElementById('bypass').className")
+            .await
+            .unwrap()
+            .contains("bypassing"),
+        "the toggle should be wearing the amber that means a person is being skipped"
+    );
+}
+
+/// Turning it off is remembered too.
+///
+/// A one-way memory would be worse than none: somebody who switched it off
+/// would find it back on at the next launch, having been told it was off.
+#[tokio::test(flavor = "multi_thread")]
+async fn turning_bypass_off_is_remembered_as_well() {
+    let Some((b, _p)) = page().await else { return };
+
+    b.text_of("localStorage.setItem('openbot.bypass', '1'); 'ok'")
+        .await
+        .expect("remember it on");
+    b.text_of("location.reload(); 'ok'").await.ok();
+    wait_until(
+        &b,
+        "String(document.getElementById('bypass').getAttribute('aria-pressed') === 'true')",
+        Duration::from_secs(10),
+    )
+    .await;
+
+    b.text_of("document.getElementById('bypass').click(); 'ok'")
+        .await
+        .expect("turn it off");
+    wait_until(
+        &b,
+        "String(localStorage.getItem('openbot.bypass') === '0')",
+        Duration::from_secs(10),
+    )
+    .await;
+
+    assert_eq!(
+        b.text_of("localStorage.getItem('openbot.bypass')")
+            .await
+            .unwrap(),
+        "0",
+        "switching it off must be what is remembered"
+    );
+}

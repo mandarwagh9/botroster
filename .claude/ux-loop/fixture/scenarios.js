@@ -438,6 +438,22 @@ S.s14 = {
   },
 };
 
+// Every scenario starts from a known store.
+//
+// Bypass is remembered in localStorage, which is per-origin — so s14 turning it
+// on leaked into every scenario loaded after it in the same browser context,
+// and s06's approval dialog stopped opening because the window was already
+// approving everything. The gate caught it; a harness that shared state
+// silently would not have.
+//
+// Same lesson as `connected = true`: whatever the fixture does not set, it
+// inherits, and whatever it inherits it cannot see.
+try {
+  localStorage.clear();
+} catch {
+  /* nothing to clear */
+}
+
 const chosen = new URLSearchParams(location.search).get("s") || "s01";
 window.__scenarioId = chosen;
 window.__scenario = S[chosen];
