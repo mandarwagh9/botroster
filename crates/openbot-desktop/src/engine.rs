@@ -17,7 +17,13 @@ use agent_client_protocol::schema::v1::{
     TextContent, ToolCallUpdate,
 };
 use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, ConnectionTo};
+use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, ConnectionTo, LineDirection};
+
+/// How many stderr lines from `openbot acp` are kept to explain a failed
+/// connect. The message that matters is the first thing it prints and runs to
+/// about four lines; the cap is there so a child that fails by printing
+/// forever cannot grow the buffer without bound.
+const STDERR_LINES_KEPT: usize = 40;
 
 /// How long the engine keeps an approval request open for the shell to answer.
 ///
@@ -459,6 +465,22 @@ impl Engine {
         // ended before the handshake": a protocol message for what is a
         // missing file, and the first thing a person sees after installing.
         found(&cfg.openbot)?;
+
+        // What the child said on its way out.
+        //
+        // `openbot acp` refuses to start when nothing is configured and states
+        // both the fault and the fix on stderr. That is the only useful account
+        // of a failed connect, and without this it is discarded: the SDK's own
+        // child-exit report carries a stderr tail, but the transport-closed
+        // error beats it to the task's return value, so awaiting the task
+        // yields `Incoming transport closed` and nothing about the cause.
+        // Reading the lines as they arrive is the one route that does not race.
+        //
+        // Bounded: a child that fails by printing forever must not be able to
+        // grow this without limit, and the tail is what carries the message.
+        let said: std::sync::Arc<std::sync::Mutex<Vec<String>>> = std::sync::Arc::default();
+        let sink = std::sync::Arc::clone(&said);
+
         let agent = AcpAgent::new(
             AcpAgentConfig::new(&cfg.openbot)
                 .arg("acp")
@@ -479,7 +501,16 @@ impl Engine {
                     Some(bot) => vec!["--bot".to_owned(), bot.clone()],
                     None => vec![],
                 }),
-        );
+        )
+        .with_debug(move |line, direction| {
+            if matches!(direction, LineDirection::Stderr) {
+                if let Ok(mut lines) = sink.lock() {
+                    if lines.len() < STDERR_LINES_KEPT {
+                        lines.push(line.trim_end().to_owned());
+                    }
+                }
+            }
+        });
 
         let (commands, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (updates, update_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -656,24 +687,63 @@ impl Engine {
                 .await
         });
 
-        let engine = Self {
-            commands,
-            updates: update_rx,
-            permissions: permission_rx,
-            task,
-        };
         // Connection-level failures after spawn are not errors on the wire;
         // they show up as this oneshot, or the task ending. Either way,
         // `connect` reports them instead of leaving the shell with a window
         // that has no agent behind it.
+        //
+        // The engine is not assembled until the handshake lands, because
+        // `Drop for Engine` aborts the task and the failure path needs to
+        // *read* it instead. See below.
         match tokio::time::timeout(Duration::from_secs(30), handshake_rx).await {
-            Ok(Ok(())) => Ok(engine),
+            Ok(Ok(())) => Ok(Self {
+                commands,
+                updates: update_rx,
+                permissions: permission_rx,
+                task,
+            }),
             Ok(Err(_)) => {
-                engine.task.abort();
-                Err(anyhow::anyhow!("openbot acp ended before the handshake"))
+                // The sender was dropped, so the task has already ended — and
+                // it ended holding the only useful account of why. The SDK
+                // formats a nonzero child exit as `Process exited with
+                // {status}: {stderr}`, and `openbot acp` refuses to start with
+                // a message that says exactly what is wrong and how to fix it:
+                //
+                //     Error: no usable model: no model configured.
+                //     Set one once:  openbot config set --model grok-4-5
+                //
+                // Aborting the task threw that away and left "ended before the
+                // handshake" — a protocol event standing in for a
+                // configuration fact, and the first thing a person meets after
+                // installing. This is the same fault the pre-spawn `found`
+                // check above was added to prevent, one step later.
+                //
+                // The wait is bounded because the task has ended in every case
+                // that reaches this arm; the timeout is for the one where the
+                // oneshot was dropped for some other reason and the task is
+                // still winding down. A missing reason is not worth hanging a
+                // window on, so it falls back to the old wording.
+                task.abort();
+                let why = said
+                    .lock()
+                    .ok()
+                    .map(|lines| {
+                        lines.join(
+                            "
+",
+                        )
+                    })
+                    .filter(|said| !said.trim().is_empty());
+                Err(match why {
+                    Some(why) => anyhow::anyhow!(
+                        "openbot acp did not start.
+{why}"
+                    ),
+                    None => anyhow::anyhow!("openbot acp ended before the handshake"),
+                })
             }
             Err(_) => {
-                engine.task.abort();
+                task.abort();
                 Err(anyhow::anyhow!(
                     "openbot acp went quiet for 30 s during the handshake"
                 ))

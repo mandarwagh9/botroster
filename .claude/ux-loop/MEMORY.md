@@ -126,3 +126,55 @@ this one in about a minute. One misuse of a semantic token predicts others.
   else's in-flight work. Revert the specific files the iteration touched.
 - **`sh scripts/ux-verify.sh | tail` hides the exit code** (you get `tail`'s). Redirect to a
   file and check `$?`, which is what the `.gate-NNN.log` files do.
+
+---
+
+## Run 2 — journey-first, 2026-08-20 morning
+
+### The fixture is structurally blind to J1 and J2
+
+**Every scenario from `s03` onward sets `window.__replies.connected = true`.** The harness
+opens on the far side of the wall. That is correct for photographing steady-state surfaces,
+and it is exactly why run 1 cleared four real defects and never noticed that a fresh install
+cannot start at all.
+
+J1 and J2 had to be established by running the shipped binary
+(`%LOCALAPPDATA%\OPENBOT\openbot.exe acp --home …`), not by looking at pictures.
+
+**Generalisable: a screenshot harness is only as honest as the state it opens in.** Before
+trusting a journey analysis, ask what the fixture asserts as already true. Whatever it
+asserts, it cannot see.
+
+### 011 — the window had the answer and threw it away · held
+
+`openbot acp` refuses to start with no model and says both the fault and the fix on stderr.
+`Engine::connect` reported `openbot acp ended before the handshake`.
+
+Two routes were tried, and the first one failed for an instructive reason:
+
+1. **Await the task's error.** The task is `JoinHandle<Result<(), acp::Error>>` and the SDK
+   formats a nonzero child exit as `Process exited with {status}: {stderr}`. But the
+   transport-closed error beats the child-exit report to the return value, so awaiting the
+   task yields `Incoming transport closed: {"reason":"incoming_transport_closed"}` and
+   nothing about the cause. **The test caught this** — it was written to assert the message
+   names the model, so a plausible-looking improvement that carried no cause still failed.
+2. **`AcpAgent::with_debug(|line, direction|)`**, buffering `LineDirection::Stderr` lines.
+   This does not race: the lines are read as they arrive.
+
+**Generalisable: when a fix must surface a *cause*, assert on the cause in the test, not on
+the message being different.** Asserting "not the old string" would have passed on route 1
+and shipped a window that said `Incoming transport closed` to somebody whose real problem
+was an unset API key.
+
+Also: `Engine` implements `Drop` (it aborts the task), so the handle cannot be moved out of
+an assembled engine. The engine is now built only on the success arm.
+
+### The preflight gate blocked on something harmless
+
+The check matched any process named `openbot*`, so it failed the whole run because the
+**installed** app in `%LOCALAPPDATA%\OPENBOT` was open — a different file on a path cargo
+never writes to. Only a binary running out of this checkout can hold this build, so it
+matches on path now.
+
+**Generalisable: a gate that stops the run for something harmless is a gate that gets
+switched off.** False positives cost more than the check is worth.

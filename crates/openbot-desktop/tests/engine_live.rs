@@ -817,3 +817,57 @@ async fn a_credential_request_reaches_the_client_and_the_value_is_stored() {
         .expect("the credential the person typed was not stored");
     assert!(!stored.fingerprint.is_empty());
 }
+
+/// The first thing a person meets after installing is a home with no
+/// `config.toml` in it, and `openbot acp` refuses to start there. It says why,
+/// on stderr, in a sentence that names the fix:
+///
+/// ```text
+/// Error: no usable model: no model configured.
+/// Set one once:  openbot config set --model grok-4-5
+/// ```
+///
+/// The engine used to abort the task that held that message and report
+/// "openbot acp ended before the handshake" — a protocol event standing in for
+/// a configuration fact, offering nothing to act on. Every other test in this
+/// file passes `demo: true`, which is precisely why none of them ever walked
+/// this path.
+///
+/// No hub is needed: `openbot acp` reaches one lazily per turn, and with no
+/// model it exits before any of that.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_home_with_no_model_says_so_instead_of_blaming_the_handshake() {
+    let agent_home = tempfile::tempdir().expect("a home with nothing configured in it");
+
+    // Matched rather than `expect_err`: `Engine` has no `Debug`, and giving it
+    // one to satisfy a test would put the command channel and the join handle
+    // in reach of anything that formats it.
+    let err = match Engine::connect(Config {
+        openbot: common::up::openbot(),
+        home: agent_home.path().to_path_buf(),
+        hub: "ws://127.0.0.1:8443/v1/tools".to_owned(),
+        demo: false,
+        demo_tools: false,
+        demo_secret: false,
+        bot: None,
+    })
+    .await
+    {
+        Ok(_) => panic!("a home with no model configured cannot produce a working agent"),
+        Err(e) => e,
+    };
+
+    let text = format!("{err:#}");
+    assert!(
+        text.contains("no model configured") || text.contains("no usable model"),
+        "the error should carry what the agent actually said: {text}"
+    );
+    assert!(
+        text.contains("config set"),
+        "the error should carry the fix the agent named: {text}"
+    );
+    assert!(
+        !text.contains("ended before the handshake"),
+        "a missing model is not a protocol problem: {text}"
+    );
+}

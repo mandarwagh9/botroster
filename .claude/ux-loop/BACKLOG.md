@@ -132,3 +132,157 @@ non-button element in the header.
   `open_computer` and is painted by the hub's viewer; with no hub there is nothing inside the
   frame. Human takeover is a hub-enforced lock with no window-side surface at all today.
 - **s12 erroring routine** — unreachable. See B07.
+
+---
+
+# THE JOURNEY — analysis, 2026-08-20 (run 2, journey-first)
+
+Evidence is `shots/010/` unless stated. J1 and J2 are **not** evidenced from the fixture —
+see the blindness note at the end, which is the most important line in this section.
+
+## The headline number
+
+**Launch to a Bot producing visible work: unreachable on a fresh install.**
+
+Not a large number. Not a bad number. There is no path. Verified against the installed
+binary at `C:\Users\Mandar\AppData\Local\OPENBOT\openbot.exe`, not inferred:
+
+```
+$ openbot.exe acp --home "%USERPROFILE%\.openbot"
+Error: no usable model: no model configured.          exit 1
+```
+
+`~/.openbot` has `bots/` and `volumes/` but no `config.toml`. With a config but no key it
+still exits 1 (`$XAI_API_KEY is not set`). With both it exits 0 and the handshake path is
+clear. So J2 needs **two** things a fresh install does not have, and **neither is settable
+anywhere in the window**: `Settings` is `#rules-btn`, it lives inside `#workspace`, and
+`#workspace` is hidden until the connect that is failing succeeds. `main.js` contains no
+model surface at all.
+
+Counted honestly, the current path to first work is:
+
+| | Action | Where |
+|---|---|---|
+| 1 | find the runtime binary | file explorer |
+| 2 | `openbot config set --model … --api-key-env …` | **a terminal, outside the app** |
+| 3 | `setx XAI_API_KEY …` | **a terminal, outside the app** |
+| 4 | restart the app so it inherits the variable | outside the app |
+| 5 | Connect | J2 |
+| 6 | New Bot | J3 |
+| 7 | type a name | J3 |
+| 8 | submit | J3 |
+| 9 | type a task | J4 |
+| 10 | Send | J4 |
+
+**10 actions, 4 of them outside the application, 2 of them requiring a terminal and prior
+knowledge of a command the app never mentions.** Against a target of 5 actions and 90
+seconds. The README's stated escape hatch — *"To point a Bot at a real model, open
+Settings"* — describes a surface that does not exist.
+
+Steady-state, with config already present, it is **6 actions** (5→10 above). That is the
+number every J1–J5 change must not increase.
+
+---
+
+## J1 LAUNCH — `s01`
+
+- **Job:** orient, and get to a working state.
+- **Actions to complete:** 1 (Connect) — but see J2; it does not complete.
+- **Eye lands on:** the OPENBOT mark and wordmark, then three path fields. The fields are
+  the visual weight of the screen.
+- **Will try and cannot:** set a model or a key; run the demo; find out what a Bot is
+  before committing. Nothing on this frame mentions that a model is required.
+- **Says why if stuck:** no.
+- **Unsigned-binary moment:** not acknowledged anywhere. The `.sha256` files exist on the
+  release page and the first frame does not mention them.
+
+## J2 CONNECT — `s02`
+
+- **Job:** attach the window to a runtime.
+- **Actions:** 1, and on a fresh install it fails.
+- **Eye lands on:** the error line under the fields.
+- **Will try and cannot:** understand the failure. The message is
+  `openbot acp ended before the handshake` — a protocol event standing in for a
+  configuration fact the child process stated plainly on stderr and the window discarded.
+- **Says why if stuck:** **no, and it has the answer in hand.** `engine.rs:673` returns the
+  generic string; the spawned task is `JoinHandle<Result<(), acp::Error>>` and the SDK
+  formats `Process exited with {status}: {stderr}` — then `connect` calls `task.abort()`
+  instead of reading it. There is even a comment at `engine.rs:459` explaining that a
+  pre-spawn existence check was added *specifically* so a missing binary would not produce
+  this exact string. The same class of fault, one step later, is unhandled.
+
+## J3 FIRST BOT — `s03`
+
+- **Job:** zero to one teammate with a real standing brief.
+- **Actions:** 3 (New Bot → name → submit). Unreachable behind J2.
+- **Eye lands on:** the empty-pane card, which since `12e3b21` carries a primary action.
+- **Will try and cannot:** write the brief here. The dialog asks only for a name; the
+  standing brief — the thing that makes a Bot a teammate rather than a chat — is set later
+  via Edit, and nothing on this screen says so or pre-fills one.
+- **Says why if stuck:** n/a, no failure path.
+
+## J4 FIRST RUN — `s05`
+
+- **Job:** send work, watch it happen.
+- **Actions:** 2. Unreachable behind J2.
+- **Eye lands on:** the agent's prose, then the step rows. Correct.
+- **Will try and cannot:** see the computer while it works — it is behind a top-right
+  button (B03).
+- **Says why if stuck:** partially; see J7.
+- **Note:** this stage is the product's strongest surface and needs no work. Steps state
+  their target ("Read applications/2026-08.jsonl · 120 characters"). Rubric 5 is the only
+  line at 3 in the baseline.
+
+## J5 FIRST GATE — `s06`
+
+- **Job:** the moment the whole product is explained.
+- **Actions:** 1.
+- **Eye lands on:** "Allow once" — the accent fill, and the consequential choice.
+- **Will try and cannot:** learn *why* they are being asked, or that the gate is enforced
+  in the hub where the agent cannot reach it. The dialog states the tool, the arguments and
+  the choices, and never states the thesis. This is the product's whole argument and its
+  best moment to make it, used to render three buttons.
+- **Says why if stuck:** the tool's own reason line is shown, which is good.
+
+## J6 STEADY STATE — `s04`, `s09`, `s10`, `s12`
+
+- **Job:** run several Bots without losing track.
+- **Eye lands on:** four identical roster rows (B01 — no status exists at all).
+- **Will try and cannot:** tell which Bot is working, waiting on them, or paused; see the
+  computer without a click; find which of three routines is failing (only `enabled` exists).
+- **Says why if stuck:** n/a.
+
+## J7 FAILURE — `s11`, `s07`, `s02`
+
+Scored against the four doctrine elements: WHAT / WHY / WHAT IS SAFE / ONE ACTION.
+
+| State | WHAT | WHY | SAFE | ACTION | Verdict |
+|---|---|---|---|---|---|
+| `s02` connect failure | ✗ protocol string | ✗ discarded | ✗ | ✗ | **P0** |
+| `s11` guest disconnected | ~ banner names it | ~ | ✗ **silent on the open `shell.exec`** | ✗ "Dismiss" | **P0** |
+| `s11` budget exhausted | ~ in prose | ✓ | ✗ | ✗ no raise-it | **P0** |
+| `s07` denied by policy | ✓ | ✓ | ✓ reads final | n/a correctly | **pass** |
+| connector 401 | — | — | — | — | **no rendering path found** |
+
+The denial state is the one that already reads the way the doctrine asks. Everything else
+fails on WHAT IS SAFE, which the doctrine calls the worst possible silence: `s11` drops the
+computer mid-`shell.exec` and never says whether the command ran.
+
+## J8 RETURN — **no fixture scenario exists**
+
+Coming back after two days is not represented in the twelve states at all. There is no
+surface for "what happened while you were away": no unread marker, no routine-fired digest,
+no since-last-visit boundary in a thread. Cannot be scored from screenshots because it
+cannot be photographed. **Filed as a harness gap and a product gap, not scored.**
+
+---
+
+## The blindness note — why run 1 missed all of this
+
+**Every fixture scenario from `s03` onward sets `window.__replies.connected = true`.** The
+harness starts on the far side of the wall. That is correct for photographing steady-state
+surfaces and it is exactly why last night's loop — which cleared four real defects — never
+noticed that a fresh install cannot start at all.
+
+A screenshot harness is only as honest as the state it opens in. J1 and J2 had to be
+established by running the shipped binary, not by looking at pictures of the app.

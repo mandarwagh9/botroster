@@ -25,11 +25,25 @@ step() { printf '\n== %s\n' "$*"; }
 # A held binary makes `cargo check` fail with "Access is denied" and the tests
 # then run against a stale build, which looks like a pass. Catch it here rather
 # than five iterations later.
+#
+# Only a binary running *out of this checkout* can hold this build. The first
+# version of this check matched any process named `openbot*`, which blocked the
+# whole gate on the installed app in %LOCALAPPDATA%\OPENBOT — a different file
+# on a different path that cargo never writes to. A gate that stops the run for
+# something harmless gets switched off, so it matches on the path now.
 step "preflight"
-if command -v tasklist >/dev/null 2>&1; then
-  if tasklist 2>/dev/null | grep -qi 'openbot.*\.exe'; then
-    note "FAIL preflight: an openbot binary is running and will hold the build"
-    exit 1
+if command -v powershell >/dev/null 2>&1; then
+  win_root=$(pwd -W 2>/dev/null | tr '/' '\\' || true)
+  if [ -n "$win_root" ]; then
+    held=$(powershell -NoProfile -Command \
+      "Get-Process -Name openbot,openbot-app -ErrorAction SilentlyContinue |
+       Where-Object { \$_.Path -and \$_.Path.StartsWith('$win_root', 'OrdinalIgnoreCase') } |
+       ForEach-Object { \$_.Path }" 2>/dev/null | tr -d '\r' | grep . || true)
+    if [ -n "$held" ]; then
+      note "FAIL preflight: a binary from this checkout is running and will hold the build:"
+      printf '  %s\n' $held
+      exit 1
+    fi
   fi
 fi
 if [ ! -e crates/openbot-app/binaries/openbot-x86_64-pc-windows-msvc.exe ] \
