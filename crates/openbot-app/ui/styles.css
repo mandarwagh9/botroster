@@ -968,6 +968,15 @@ textarea {
 }
 
 /* Failed: a cross in the danger ink. */
+/* Ran, and nobody knows how it ended. Deliberately neither the tick nor the
+   cross: a hollow ring on the warn wash, because this is the one step state
+   that wants a person to look at it. It does not spin — the spinner means
+   "still happening", which is the thing this is not. */
+.step-mark[data-state="unknown"] {
+  background: var(--warn-wash);
+  border: 1.5px dashed var(--warn);
+}
+
 .step-mark[data-state="failed"] {
   background: var(--danger-wash);
 }

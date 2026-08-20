@@ -337,13 +337,27 @@ S.s11 = {
   pre() {
     S.s05.pre();
     window.__replies.computer_alive = false;
+    // The turn dies the way it really does: the prompt call rejects. Driving
+    // the real path matters \u2014 the step-abandoning logic lives in `prompt`'s
+    // `finally`, so a fixture that painted the end state by hand would be
+    // photographing an assertion rather than the product.
+    window.__throw = {
+      prompt: "the computer disconnected mid-call, and the token budget for this turn is exhausted (24,000 of 24,000 used)",
+    };
   },
   async post() {
     await openFirstBot();
+    // A command goes out and no result ever comes back for it.
     window.__fire("chunk", c("tool", "shell.exec cargo build", { args: { command: "cargo build" } }));
     await sleep(40);
-    window.__fire("chunk", c("result", "\u2717 {\"error\":\"the computer disconnected mid-call\"}"));
-    window.__fire("chunk", c("agent", "The run stopped: the token budget for this turn is exhausted (24,000 of 24,000 used) and the computer disconnected while a command was open."));
+    // Send, which rejects, which ends the turn with that step still open.
+    const box = document.getElementById("input");
+    if (box) {
+      box.value = "build it and tell me what broke";
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    document.getElementById("send").click();
+    await until(() => !openStepStillRunning());
     // The window's own "no computer" banner, which is the surface the product
     // actually shows when the guest goes away.
     const banner = document.getElementById("no-computer");
@@ -353,6 +367,11 @@ S.s11 = {
     await sleep(80);
   },
 };
+
+/// True while any step in the log is still painted as running.
+function openStepStillRunning() {
+  return Boolean(document.querySelector('.step-mark[data-state="running"]'));
+}
 
 // ---------------------------------------------------------------- s12
 S.s12 = {

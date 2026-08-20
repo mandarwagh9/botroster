@@ -395,6 +395,36 @@ function stepMark(state) {
 
 /// Fill a step row in with its result: the mark becomes a tick or a cross,
 /// and the summary gains its detail ("· 93 bytes") when the tool is known.
+/// A step that was still running when the turn ended.
+///
+/// The window cannot know whether the call landed. The computer went away
+/// mid-flight, and "no result came back" is not the same fact as "it did not
+/// run" — a shell command that was already executing does not stop because the
+/// transport did. Both of the obvious renderings assert something false: a
+/// spinner left turning says it is still happening, and a failure mark says it
+/// did not happen. So the step says what is actually known, which is that
+/// nobody knows.
+///
+/// This is the WHAT IS SAFE line of the error doctrine, on the one surface
+/// where silence is worst: a person looking at an abandoned `shell.exec` needs
+/// to know whether to run it again.
+function abandonOpenStep() {
+  if (!openStep) return;
+  const mark = openStep.querySelector(".step-mark");
+  if (mark) mark.dataset.state = "unknown";
+  openStep.classList.add("unknown");
+  const st = openStep.querySelector(".step-state");
+  if (st) st.textContent = "";
+  const text = openStep.querySelector(".step-text");
+  if (text) {
+    const d = document.createElement("span");
+    d.className = "step-detail";
+    d.textContent = "no result came back — this may or may not have run";
+    text.appendChild(d);
+  }
+  openStep = null;
+}
+
 function completeStep(step, chunk) {
   const ok = chunk.text.startsWith("✓");
   const mark = step.querySelector(".step-mark");
@@ -1167,6 +1197,9 @@ async function sendPrompt(text) {
     setStatus(String(err), "error");
     if (joining && !input.value.trim()) input.value = text;
   } finally {
+    // Whatever ended the turn, a step still open at this point is never going
+    // to be completed by a result that is no longer coming.
+    abandonOpenStep();
     busy = false;
     show(cancelBtn, false);
     refreshRoster();

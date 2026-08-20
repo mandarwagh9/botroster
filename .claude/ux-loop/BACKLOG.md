@@ -328,3 +328,43 @@ corrected `s02` to `found()`'s verbatim wording. 52 shots now, still under 5s.
 **Still not covered: J8 (RETURN).** There is no surface for "what happened while you were
 away" — no unread marker, no routine-fired digest, no since-last-visit boundary — so there is
 nothing to photograph. Product gap and harness gap together.
+
+### B14 — a step abandoned mid-run said nothing about whether it ran
+`done` (iteration 013) · J7 · rubric 12 · `shots/013/s11-1280-dark.png`
+
+When the computer went away with a `shell.exec` open, the step kept spinning forever. That is
+the WHAT IS SAFE silence the doctrine calls the worst possible answer: a spinner asserts the
+call is still happening, and a failure mark would assert it did not run. Neither is known — a
+shell command already executing does not stop because the transport did.
+
+The step now says so, on a dashed amber ring. Amber is correct here under DIRECTION rather
+than in tension with it: this is a state that genuinely requires a human, because only a
+person can decide whether it is safe to run the command again.
+
+### B15 — the status pill shows a raw error string as the whole message
+`open` · **P0** · J7 · rubric 3, 12 · `shots/013/s11-1280-dark.png`
+
+`setStatus(String(err), "error")` on a failed turn puts the entire error text in the header
+pill. In `s11` that is a 90-character sentence spanning a third of the window, in the chrome,
+permanently, with no expander and no action.
+
+The doctrine is explicit: *never show a raw error string as the whole message; put it behind
+a Details expander, copyable.* The connect panel now does this properly (B12); the header
+does not. The same treatment applies — a short WHAT in the pill, the runtime's words behind
+a disclosure.
+
+### B16 — budget exhaustion is rendered as a crash, not a decision point
+`open` · P1 · J7 · rubric 12 · `shots/013/s11-1280-dark.png`
+
+"the token budget for this turn is exhausted (24,000 of 24,000 used)" arrives as an error
+string. The doctrine: *token budget exhausted is not a crash. It is a decision point. Show
+what was spent and offer to raise it.* There is no raise-it control anywhere in the window,
+and `--token-budget` is a CLI flag. Needs a surface; sized as NEEDS REVIEW if it grows past
+the connect-panel pattern.
+
+### B17 — the "No computer" banner names the transport, not the consequence
+`open` · P1 · J7 · rubric 12 · `shots/013/s11-1280-dark.png`
+
+The banner is written for the connect-time case ("starting a computer did not work") and is
+reused for a mid-run disconnect, where it is wrong: the computer did start, and then went
+away. Its one action is "Dismiss", which resolves nothing.
