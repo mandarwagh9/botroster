@@ -17,7 +17,7 @@ Shots: `.claude/ux-loop/shots/000/` (48 files, gitignored).
 | worst contrast | **2.79:1** (needs 4.5) |
 | keyboard unreachable | 0 |
 | reduced-motion violations | 0 |
-| bundle | **135,667 bytes** (ceiling 155,017) |
+| bundle | **135,667 bytes** (ceiling 156,017) |
 | shot run | 4.0s for 48 shots |
 | full gate run | ~8 min cold |
 
@@ -68,3 +68,64 @@ Scored from `shots/000/`. Lines 6, 11 and 15 describe surfaces that do not exist
 Weakest cluster: everything DIRECTION calls the product's argument — the computer pane (6),
 the provenance trail (15), takeover (11), roster status (2) — scores zero. The thread log
 (5) is the one line that already scores full marks and should not be touched.
+
+---
+
+# Bundle baseline re-cuts
+
+`.claude/ux-loop/.baseline-bytes` is **gitignored**, so the number itself leaves no trace in
+review. This is where a re-cut is recorded, because a growth gate whose reference point moved
+silently is not a gate.
+
+The gate measures `ui/index.html + ui/main.js + ui/styles.css` (plus `ui/fonts/` when it
+exists — it does not yet) and fails at **+15%** over the baseline.
+
+| Date | Old | New | Growth absorbed | New ceiling | Why |
+|---|---|---|---|---|---|
+| 2026-08-20 | 135,667 | **154,229** | +18,562 (13.7%) | 177,363 | Two surfaces landed deliberately and the old floor predated both of them |
+
+## What went into the 18,562 bytes
+
+Measured per commit, not estimated — `git show <rev>:ui/*` summed at each one:
+
+| Commit | Bytes | What |
+|---|---|---|
+| `9d9f13f` | **+7,015** | the Model section on the connect panel (B18) and the shared problem banner (B15) |
+| `8286b2d` | **+6,073** | structured connect error, fault table, demo offer (B12) |
+| `bfdc79a` | **+1,841** | abandoned-step rendering (B14) |
+| `12e3b21` | +1,263 | the empty conversation offers the way out of itself |
+| `53c6bde` | +1,098 | step-state legibility, log reachability, select naming |
+| `f726bf5` | +748 | transport pill quiet, working state off amber |
+| `ae0c5f3` | +524 | `--coat-4` off amber |
+| `3665cb8` | 0 | Rust only — the engine change touched no `ui/` file |
+| | **+18,562** | |
+
+`9d9f13f` is not split between B18 and B15 because they landed in one commit; splitting the
+byte count afterwards would be a guess presented as a measurement.
+
+None of it is dependency weight: there are no dependencies. `ui/` is still three
+hand-written files with no bundler, no framework and no npm, which is a documented property
+of this repo and the reason these numbers are readable at all.
+
+## Why re-cut rather than trim
+
+The old baseline was measured on `main` before any of this existed, so by the end it was
+holding two requested features against a floor cut before either was written. At 154,229 of
+a 156,017 ceiling there were 1,788 bytes left — the next legitimate change would have been
+reverted by the gate for being the straw, not for being wrong.
+
+The gate's purpose is catching growth nobody decided on. Re-cutting after a decided change is
+the gate working; trimming a surface to fit a stale number would have been the gate working
+the product.
+
+## A weakness worth knowing
+
+`.baseline-bytes` is gitignored, and `ux-verify.sh` writes it on first run when absent. So on
+a fresh clone the first gate run records whatever it finds and **cannot fail**, and every
+machine carries its own reference point. That is fine for a growth detector used by one
+person on one checkout, and wrong for anything shared: two machines can hold different
+baselines and disagree about whether the same change passes.
+
+Tracking the file instead would fix both — re-cuts would show up in a diff, and every clone
+would measure against the same number. That changes the harness contract, so it is left as a
+recommendation rather than done here.
