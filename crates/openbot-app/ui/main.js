@@ -229,6 +229,11 @@ function renderAttached() {
   show(attachedList, attached.length > 0);
 }
 
+// Applies to requests that arrive after it is turned on. A click that
+// instantly answered a dialog already on screen — one the person was mid-way
+// through reading — would be the opposite of a considered decision.
+$("bypass").addEventListener("click", () => setBypass(!bypass));
+
 attachBtn.addEventListener("click", async () => {
   if (!session) return;
   try {
@@ -845,6 +850,84 @@ async function supplySecret(id) {
   renderDialog();
 }
 
+/// Whether this window answers approvals itself instead of asking.
+///
+/// The CLI has had `--approve auto` since the beginning — "approve everything
+/// without asking, for runs where the operator has explicitly accepted the
+/// risk". This is that, with a face, and it is the same bargain: it changes who
+/// answers, never what is asked.
+///
+/// **It does not move the gate.** The hub still evaluates policy on every call
+/// and still refuses anything a `deny` rule covers; a client has never been
+/// able to approve past one. What this removes is the person, not the control
+/// plane.
+///
+/// In memory only, off whenever the window opens, and cleared on disconnect.
+/// APPROVAL-INVARIANTS.md forbids a choice that spans sessions, and a flag that
+/// survived a restart would be exactly that.
+let bypass = false;
+
+function setBypass(on) {
+  bypass = on;
+  const btn = $("bypass");
+  btn.classList.toggle("bypassing", on);
+  btn.setAttribute("aria-pressed", String(on));
+  $("bypass-label").textContent = on ? "Approving everything" : "Asking first";
+  btn.title = on
+    ? "Approving every request without asking. Click to start asking again."
+    : "Approve requests without asking, for this session only";
+}
+
+/// Answer an ask without a person, and leave a record that says so.
+///
+/// The narrowest grant, always. `renderDialog` documents that the shell orders
+/// options narrowest-first and marks refusals with `danger`, so the first
+/// non-refusing option is the smallest one on offer. Taking any later grant
+/// would turn a client-side convenience into a hub-side session grant that
+/// outlives the toggle — the one way this could actually weaken the gate.
+///
+/// Returns false when there is nothing safe to pick, in which case the dialog
+/// is shown and a person answers after all.
+function autoApprove(ask) {
+  const grant = ask.options.find((o) => !o.danger);
+  if (!grant) return false;
+  noteAutoApproval(ask, grant);
+  answerAsk(ask.id, grant.id);
+  return true;
+}
+
+/// The record of a call nobody was asked about.
+///
+/// Bypass removes the choice, not the account of it. The invariants require the
+/// full argument list to be readable before a choice is reachable; with no
+/// choice to reach, the arguments still have to land somewhere a person can
+/// find them afterwards. Marked distinctly, because "approved" and "approved by
+/// you" are different facts.
+function noteAutoApproval(ask, grant) {
+  const el = document.createElement("div");
+  el.className = "msg auto-approved";
+  const head = document.createElement("span");
+  head.className = "auto-head";
+  head.textContent = "Approved without asking";
+  el.appendChild(head);
+  const what = document.createElement("span");
+  what.className = "auto-tool";
+  what.textContent = String(ask.tool || "").split(": ")[0];
+  el.appendChild(what);
+  for (const f of ask.fields || []) {
+    const row = document.createElement("span");
+    row.className = "auto-field";
+    row.textContent = `${f.name}  ${f.value}`;
+    el.appendChild(row);
+  }
+  const how = document.createElement("span");
+  how.className = "auto-grant";
+  how.textContent = grant.name;
+  el.appendChild(how);
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+
 function enqueueAsk(ask) {
   // An ask for a conversation this window is no longer showing has nobody to
   // answer it. Refuse it now rather than leaving it parked: fail closed, and
@@ -853,6 +936,10 @@ function enqueueAsk(ask) {
     invoke("answer_permission", { id: ask.id, optionId: "" }).catch(() => {});
     return;
   }
+  // Answered here rather than by a person, when the operator has said so.
+  // A credential request is never auto-answered: it wants a value, and a
+  // bypass has none to give, so it still stops and asks.
+  if (bypass && !ask.secret && autoApprove(ask)) return;
   asks.push(ask);
   renderDialog();
 }
@@ -1192,6 +1279,9 @@ async function enterWorkspace() {
 }
 
 async function disconnect() {
+  // Not carried across connections. The operator accepted the risk for this
+  // session; the next one is a new decision.
+  setBypass(false);
   try {
     await invoke("disconnect");
   } catch (err) {

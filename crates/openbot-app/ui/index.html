@@ -254,6 +254,17 @@
           <button type="button" id="attach" class="link" title="Attach a file">
             <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 5.5l-4.6 4.6a1.6 1.6 0 0 0 2.3 2.3l5-5a3.2 3.2 0 0 0-4.5-4.5l-5 5a4.8 4.8 0 0 0 6.8 6.8l4-4"/></svg><span>Attach</span>
           </button>
+          <!-- The window's face on `--approve auto`, which the CLI has had all
+               along. It answers approvals for you; it does not remove the gate.
+               The hub still evaluates policy and still refuses past a `deny`
+               rule, and a credential request is never auto-answered because a
+               bypass has no value to give. Off every time the window opens and
+               cleared on disconnect: invariant 6 forbids a choice that spans
+               sessions. -->
+          <button type="button" id="bypass" class="link" aria-pressed="false"
+                  title="Approve requests without asking, for this session only">
+            <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8l5.2 2.1v4c0 3-2.2 5.4-5.2 6.3-3-0.9-5.2-3.3-5.2-6.3v-4z"/><path d="M5.8 8.1l1.6 1.6 3-3.2"/></svg><span id="bypass-label">Asking first</span>
+          </button>
           <span class="spacer"></span>
           <button type="button" id="cancel" class="hidden"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg><span>Stop</span></button>
           <button type="submit" id="send" class="primary" title="Send"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" style="stroke-width:2"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5"/></svg><span>Send</span></button>

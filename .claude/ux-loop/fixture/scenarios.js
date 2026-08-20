@@ -411,6 +411,33 @@ S.s12 = {
   },
 };
 
+
+// ---------------------------------------------------------------- s14
+S.s14 = {
+  what: "bypass on: the request is answered without asking, and recorded",
+  pre() {
+    S.s05.pre();
+  },
+  async post() {
+    await openFirstBot();
+    document.getElementById("bypass").click();
+    await sleep(40);
+    window.__fire("chunk", c("tool", "shell.exec cargo test --workspace", { args: { command: "cargo test --workspace" } }));
+    await sleep(40);
+    // The same ask s06 uses. With bypass on it never reaches the dialog; it is
+    // answered and written into the log instead.
+    window.__fire(
+      "permission-request",
+      ask("a1", "shell.exec: runs a command on the computer", [
+        { name: "command", value: "cargo test --workspace", long: false },
+        { name: "cwd", value: "/home/you/.openbot/volumes/openbot-workspace", long: false },
+      ])
+    );
+    await until(() => Boolean(document.querySelector(".msg.auto-approved")));
+    await sleep(80);
+  },
+};
+
 const chosen = new URLSearchParams(location.search).get("s") || "s01";
 window.__scenarioId = chosen;
 window.__scenario = S[chosen];

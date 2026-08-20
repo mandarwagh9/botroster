@@ -4239,3 +4239,157 @@ async fn a_model_key_is_not_left_in_the_connect_panel() {
         "the key is still sitting in the connect panel after connecting"
     );
 }
+
+/// An ask offering a larger grant than the one it leads with, so a test can
+/// tell "took the narrowest" apart from "took the first that worked".
+fn ask_with_session_grant(id: &str, session: &str) -> String {
+    format!(
+        r#"{{"id":"{id}","session":"{session}","tool":"shell.exec: runs a command",
+            "fields":[{{"name":"command","value":"rm -rf build","long":false}}],
+            "options":[{{"id":"allow-once","name":"Allow once","kind":"allow_once",
+                         "danger":false}},
+                       {{"id":"allow-session","name":"Allow for the rest of this session",
+                         "kind":"allow_always","danger":false}},
+                       {{"id":"reject-once","name":"Not this time","kind":"reject_once",
+                         "danger":true}}]}}"#
+    )
+}
+
+/// Bypass is off when the window opens, and the dialog still gates.
+///
+/// The whole approval suite is written against a window that asks. If bypass
+/// ever defaulted on, every one of those tests would still pass — they answer
+/// the dialog, and there would be no dialog to answer — while the product
+/// silently approved everything. So the default is asserted on its own.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_window_starts_by_asking_and_not_by_approving() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    assert_eq!(
+        b.text_of("document.getElementById('bypass').getAttribute('aria-pressed')")
+            .await
+            .unwrap(),
+        "false",
+        "bypass must be off when the window opens"
+    );
+
+    b.text_of(&format!(
+        "window.__fire('permission-request', {}); 'ok'",
+        ask("a1", "s1", "shell.exec")
+    ))
+    .await
+    .expect("fire the ask");
+    settle().await;
+
+    assert_eq!(
+        b.text_of("String(!document.getElementById('dialog').classList.contains('hidden'))")
+            .await
+            .unwrap(),
+        "true",
+        "with bypass off the request must still reach a person"
+    );
+    assert_eq!(
+        b.text_of("String(window.__sent('answer_permission').length)")
+            .await
+            .unwrap(),
+        "0",
+        "nothing may be answered before a person answers it"
+    );
+}
+
+/// With bypass on, the ask is answered with the *narrowest* grant.
+///
+/// This is the one way this feature could weaken the gate. `allow_once` is a
+/// client-side convenience; `allow_always` is a hub-side session grant that
+/// outlives the toggle, so a bypass that reached for it would quietly widen
+/// what the hub permits for the rest of the session. The ask here offers both,
+/// so taking the wrong one is visible.
+#[tokio::test(flavor = "multi_thread")]
+async fn bypass_takes_the_narrowest_grant_and_never_the_session_one() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    b.text_of("document.getElementById('bypass').click(); 'ok'")
+        .await
+        .expect("turn bypass on");
+
+    b.text_of(&format!(
+        "window.__fire('permission-request', {}); 'ok'",
+        ask_with_session_grant("a1", "s1")
+    ))
+    .await
+    .expect("fire the ask");
+    settle().await;
+
+    let sent = b
+        .text_of("JSON.stringify(window.__sent('answer_permission').map(c=>c.args.optionId))")
+        .await
+        .unwrap();
+    assert!(
+        sent.contains("allow-once"),
+        "bypass should have answered with the narrowest grant: {sent}"
+    );
+    assert!(
+        !sent.contains("allow-session"),
+        "bypass must never take the session-wide grant: {sent}"
+    );
+
+    assert_eq!(
+        b.text_of("String(!document.getElementById('dialog').classList.contains('hidden'))")
+            .await
+            .unwrap(),
+        "false",
+        "the dialog should not have been shown at all"
+    );
+
+    // The choice is gone; the account of it is not.
+    let note = b
+        .text_of("document.querySelector('.msg.auto-approved').textContent")
+        .await
+        .expect("the auto-approval should be recorded in the log");
+    for needle in ["Approved without asking", "shell.exec", "rm -rf build"] {
+        assert!(
+            note.contains(needle),
+            "the record should carry {needle:?}: {note}"
+        );
+    }
+}
+
+/// A credential request is never auto-answered.
+///
+/// It asks for a value, not for a choice. A bypass has no value to give, and
+/// answering it with an option id would hand the Bot an empty credential while
+/// telling it the person had supplied one.
+#[tokio::test(flavor = "multi_thread")]
+async fn bypass_does_not_answer_a_request_for_a_credential() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    b.text_of("document.getElementById('bypass').click(); 'ok'")
+        .await
+        .expect("turn bypass on");
+
+    b.text_of(&format!(
+        "window.__fire('permission-request', {}); 'ok'",
+        secret_ask("s-1", "s1")
+    ))
+    .await
+    .expect("fire the credential ask");
+    settle().await;
+
+    assert_eq!(
+        b.text_of("String(!document.getElementById('dialog').classList.contains('hidden'))")
+            .await
+            .unwrap(),
+        "true",
+        "a credential request must still stop and ask, even with bypass on"
+    );
+    assert_eq!(
+        b.text_of("String(window.__sent('answer_permission').length)")
+            .await
+            .unwrap(),
+        "0",
+        "a credential must not be answered by a bypass"
+    );
+}

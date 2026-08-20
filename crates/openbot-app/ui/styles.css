@@ -1608,3 +1608,57 @@ textarea {
 .model-hint {
   margin-top: 12px;
 }
+
+/* Bypass, while it is on. Amber, and consistent with the rule rather than an
+   exception to it: this is a state where a person's judgement is being skipped,
+   which is exactly what amber is reserved to mean. It should be impossible to
+   have this on and not know. */
+.link.bypassing {
+  color: var(--warn);
+  background: var(--warn-wash);
+  font-weight: 600;
+}
+
+.link.bypassing:hover {
+  color: var(--warn);
+  background: var(--warn-wash);
+  filter: brightness(1.06);
+}
+
+/* The record of a call nobody was asked about. It reads as a log entry rather
+   than as a message, because that is what it is: the arguments the approval
+   card would have shown, kept where they can be found afterwards. */
+.msg.auto-approved {
+  display: grid;
+  gap: 2px;
+  margin: 10px 0;
+  padding: 9px 12px;
+  border: 1px dashed var(--warn);
+  border-radius: var(--r-row);
+  background: var(--warn-wash);
+}
+
+.auto-head {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--warn);
+}
+
+.auto-tool {
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+  color: var(--ink);
+}
+
+.auto-field {
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.auto-grant {
+  font-size: var(--fs-11);
+  color: var(--faint);
+}

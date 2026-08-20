@@ -115,6 +115,7 @@ export const SCENARIOS = [
   // harness opened on the far side of the wall and could not see the state
   // most people meet first.
   ["s13", "connect fails: no model configured"],
+  ["s14", "bypass on: answered without asking, and recorded"],
 ];
 
 if (import.meta.url === `file://${process.argv[1].replace(/\\/g, "/")}`) {
