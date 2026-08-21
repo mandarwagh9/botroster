@@ -80,12 +80,14 @@ pub async fn gather(hub_url: &str, home: &Path, opts: &crate::config::ModelOverr
 
     let settings = opts.applied(home);
     let key_env = settings.api_key_env.trim().to_owned();
-    // An empty key variable is a configured answer — "this endpoint wants no
-    // credential", which is the normal case for a model on localhost — and not
-    // a key that has gone missing. Reporting it red would have `status`
-    // contradict a setup that works: the agent starts, and the one command a
-    // person runs to check on it calls the arrangement broken.
-    let key_present = key_env.is_empty() || std::env::var(&key_env).is_ok();
+    // Asked the way a run asks, rather than re-implemented here. Two things
+    // count as having a key that `std::env::var` alone does not see: an empty
+    // variable name, which is a configured answer meaning "this endpoint wants
+    // no credential", and a key kept in the credential store. Either way a
+    // `status` that disagreed with a working agent would send somebody to fix
+    // something that is not broken — which is the opposite of what this screen
+    // is for.
+    let key_present = crate::config::key_available(home, &key_env);
 
     let now = chrono::Utc::now();
     let (mut bots, mut enabled, mut paused, mut due, mut last_seen) = (0, 0, 0, Vec::new(), None);

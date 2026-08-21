@@ -371,6 +371,20 @@ fn resolve_key(home: &Path, key_env: &str) -> anyhow::Result<String> {
         })
 }
 
+/// Would a run find its key?
+///
+/// Exists so `status` answers this the same way a run does. It used to ask
+/// `std::env::var` itself, which was one definition of "the key is available"
+/// too many the moment a second place to keep one existed: a remembered key
+/// worked perfectly and `status` — the command somebody runs precisely to find
+/// out whether things are set up — called it missing.
+///
+/// The value is read and dropped. Checking presence without reading would mean
+/// a second lookup path, which is the thing this exists to prevent.
+pub fn key_available(home: &Path, key_env: &str) -> bool {
+    resolve_key(home, key_env).is_ok()
+}
+
 /// Resolve a model for a run.
 ///
 /// `demo` short-circuits to a scripted stand-in so a deployment can be checked
@@ -604,6 +618,37 @@ mod tests {
             "the store overrode an exported variable"
         );
         assert_eq!(got, std::env::var("PATH").unwrap());
+    }
+
+    /// What `status` reports and what a run does are the same question.
+    ///
+    /// They were two lookups for as long as there was only one place to keep a
+    /// key, and the moment there were two, `status` started calling a working
+    /// setup broken — for both a remembered key and a keyless endpoint.
+    #[test]
+    fn status_counts_a_remembered_key_as_present() {
+        const VAR: &str = "STATUS_ONLY_KEY_NOTHING_EXPORTS_31007";
+        assert!(std::env::var(VAR).is_err(), "{VAR} is set here");
+
+        let d = tempfile::tempdir().unwrap();
+        assert!(
+            !key_available(d.path(), VAR),
+            "a key was reported before anything stored one"
+        );
+
+        openbotd::secrets::SecretStore::open(d.path())
+            .unwrap()
+            .set(VAR, openbotd::secrets::Secret::new("stored"))
+            .unwrap();
+
+        assert!(
+            key_available(d.path(), VAR),
+            "a remembered key is reported as missing, so `status` contradicts a working run"
+        );
+        assert!(
+            key_available(d.path(), ""),
+            "a keyless endpoint is reported as missing a key it never wanted"
+        );
     }
 
     /// A keyless endpoint never consults the store.
