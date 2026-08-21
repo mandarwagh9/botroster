@@ -332,13 +332,36 @@ pub fn build(
              Or check a deployment without a key:  --demo"
         )
     })?;
-    let key = std::env::var(&s.api_key_env).map_err(|_| {
-        anyhow::anyhow!(
-            "${} is not set.\n\
-             Export your key there, or point --api-key-env at the variable you use.",
-            s.api_key_env
-        )
-    })?;
+    // An empty `api_key_env` means "this endpoint wants no credential", which
+    // is the normal case for a model served on localhost — Ollama, vLLM, LM
+    // Studio. Before this, every endpoint was assumed to be a paid vendor, so
+    // the only way to reach a local model was to invent a variable, set it to
+    // a junk value, and let the header be ignored at the other end. That is a
+    // ritual, not a check, and it taught people to put nonsense in the field
+    // that holds credentials.
+    //
+    // Spelled as an empty variable *name* rather than an empty *value*: the
+    // question being answered is "which variable holds the key", and "none"
+    // is a real answer to it. An unset variable stays an error, because
+    // meaning to use a key and forgetting to export it is a mistake worth
+    // reporting.
+    // Trimmed once and then used, rather than trimmed for the emptiness test
+    // and looked up raw. A name that arrived with surrounding whitespace —
+    // from a pasted value, or a field in the window — would otherwise pass the
+    // "not empty" test and then be looked up under a name no environment can
+    // ever hold, failing with a message quoting a variable that looks correct.
+    let key_env = s.api_key_env.trim();
+    let key = if key_env.is_empty() {
+        String::new()
+    } else {
+        std::env::var(key_env).map_err(|_| {
+            anyhow::anyhow!(
+                "${key_env} is not set.\n\
+                 Export your key there, or point --api-key-env at the variable you use.\n\
+                 A model on localhost usually needs none: --api-key-env ''"
+            )
+        })?
+    };
 
     Ok(Arc::new(HttpModel::new(HttpModelConfig {
         dialect: s
@@ -460,6 +483,48 @@ mod tests {
             Ok(_) => panic!("a model was built without its key present"),
         };
         assert!(e.contains("DEFINITELY_NOT_SET_12345"), "{e}");
+    }
+
+    /// A model on localhost takes no credential, and saying so must be enough
+    /// to build one. Before this the only way through was to name a variable
+    /// and set it to something meaningless, which taught people to type
+    /// nonsense into the field that holds keys.
+    #[test]
+    fn an_empty_key_variable_means_the_endpoint_wants_no_key() {
+        let d = tempfile::tempdir().unwrap();
+        let o = ModelOverrides {
+            model: Some("qwen3:1.7b".into()),
+            base_url: Some("http://localhost:11434/v1".into()),
+            api_key_env: Some(String::new()),
+            ..Default::default()
+        };
+        build(d.path(), &o, false, "").expect("a local model with no key variable should build");
+    }
+
+    /// The other half of the rule above, and the reason it is spelled as an
+    /// empty variable *name*. Meaning to use a key and forgetting to export it
+    /// is a mistake, and it has to keep failing loudly — otherwise the change
+    /// above would turn every unset key into a silent unauthenticated request
+    /// that comes back 401 from the vendor with nothing pointing at the cause.
+    #[test]
+    fn a_named_but_unset_variable_is_still_an_error() {
+        let d = tempfile::tempdir().unwrap();
+        let o = ModelOverrides {
+            model: Some("m".into()),
+            api_key_env: Some("   ALSO_DEFINITELY_NOT_SET_98765".into()),
+            ..Default::default()
+        };
+        let e = match build(d.path(), &o, false, "") {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("an unset key variable was treated as `no key wanted`"),
+        };
+        // Padded on purpose. The message has to quote the name that was
+        // actually looked up, because a message quoting `$   FOO` sends
+        // somebody to check an environment variable they do not have.
+        assert!(
+            e.contains("$ALSO_DEFINITELY_NOT_SET_98765"),
+            "the error does not name the variable it looked up: {e}"
+        );
     }
 }
 

@@ -4240,6 +4240,118 @@ async fn a_model_key_is_not_left_in_the_connect_panel() {
     );
 }
 
+/// Pick a provider from the preset list and let the change handler run.
+async fn pick_provider(b: &Browser, which: &str) {
+    b.text_of(&format!(
+        r#"(() => {{ const s = document.getElementById('model-preset');
+             s.value = {which:?};
+             s.dispatchEvent(new Event('change'));
+             return 'ok'; }})()"#
+    ))
+    .await
+    .expect("pick a provider");
+}
+
+/// Choosing a provider fills in the three things a person cannot be expected
+/// to know: the dialect, the base URL, and the key variable's conventional
+/// name. Getting any of them wrong fails in a way that reads like the product
+/// is broken, and the only way to get them right was to already know them.
+#[tokio::test]
+async fn picking_a_provider_fills_in_the_settings_nobody_should_have_to_look_up() {
+    let Some((b, _p)) = page().await else { return };
+    pick_provider(&b, "anthropic").await;
+
+    for (id, want) in [
+        ("model-dialect", "anthropic"),
+        ("model-base", "https://api.anthropic.com"),
+        ("model-key-env", "ANTHROPIC_API_KEY"),
+    ] {
+        assert_eq!(
+            b.text_of(&format!("document.getElementById({id:?}).value"))
+                .await
+                .unwrap(),
+            want,
+            "the preset did not fill {id}"
+        );
+    }
+}
+
+/// A provider that takes no credential closes the key box rather than leaving
+/// it enabled and inert.
+///
+/// An enabled field next to an endpoint that ignores keys invites somebody to
+/// paste a real one where it was never needed, and then to believe it mattered.
+#[tokio::test]
+async fn a_provider_that_wants_no_key_closes_the_key_box_and_says_why() {
+    let Some((b, _p)) = page().await else { return };
+    pick_provider(&b, "ollama").await;
+
+    assert_eq!(
+        b.text_of("String(document.getElementById('model-key').disabled)")
+            .await
+            .unwrap(),
+        "true",
+        "the key box is still accepting a credential the provider will ignore"
+    );
+    assert_eq!(
+        b.text_of(
+            "String(document.getElementById('model-hint-keyless')\
+             .classList.contains('hidden'))"
+        )
+        .await
+        .unwrap(),
+        "false",
+        "nothing on screen explains that no key is needed"
+    );
+    assert_eq!(
+        b.text_of(
+            "String(document.getElementById('model-hint-key')\
+             .classList.contains('hidden'))"
+        )
+        .await
+        .unwrap(),
+        "true",
+        "the panel still warns about protecting a key that will never exist"
+    );
+}
+
+/// The empty key variable has to survive the trip to the shell.
+///
+/// This is the one field where empty is a *meaning* — "this endpoint wants no
+/// credential" — rather than "not filled in". Every other layer treats an empty
+/// string as absent, so the natural thing for each of them to do is drop it,
+/// and dropping it leaves a local model being asked for a key that does not
+/// exist. Asserting on the exact value rather than on the connect succeeding,
+/// because a connect that keeps the previous key variable also succeeds.
+#[tokio::test]
+async fn choosing_a_local_provider_tells_the_runtime_that_no_key_is_wanted() {
+    let Some((b, _p)) = page().await else { return };
+    pick_provider(&b, "ollama").await;
+
+    b.text_of(
+        r#"(() => { window.__replies.connect = { computer: true, tools: 3 };
+             window.__replies.open_bot = null;
+             window.__replies.roster = [];
+             document.getElementById('connect-btn').click();
+             return 'ok'; })()"#,
+    )
+    .await
+    .expect("connect");
+    settle().await;
+
+    let sent = b
+        .text_of(
+            "JSON.stringify(window.__sent('connect')\
+             .map(c => c.args.model && c.args.model.apiKeyEnv))",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        sent, r#"[""]"#,
+        "the `no key wanted` choice did not reach the shell: {sent}"
+    );
+}
+
 /// An ask offering a larger grant than the one it leads with, so a test can
 /// tell "took the narrowest" apart from "took the first that worked".
 fn ask_with_session_grant(id: &str, session: &str) -> String {

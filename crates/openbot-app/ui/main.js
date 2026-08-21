@@ -1387,10 +1387,92 @@ connectBtn.addEventListener("click", () => connect(false));
 // action offered on a J2 failure is the one that shows a Bot doing real work
 // on real tools. Wrapped for the same reason as above — a MouseEvent is truthy.
 $("connect-demo").addEventListener("click", () => connect(true));
+/// The facts about a provider nobody should have to look up before they can
+/// send one message: which wire dialect it speaks, where its API lives, and
+/// what its key variable is conventionally called. Getting any of the three
+/// wrong produces a failure that reads like the product is broken, and the
+/// only way to get them right was to already know them.
+///
+/// The model id is filled too, and it is the one entry here that is a
+/// suggestion rather than a fact. Having chosen a provider you almost always
+/// want its current flagship; it stays editable, and being wrong about it
+/// fails with an error that names the model, which is the good failure.
+///
+/// `keyEnv: ""` is not "unknown" — it is "this one takes no key", which is the
+/// normal case for a model served on localhost. It reaches `config.toml` as an
+/// empty `api_key_env`, the way the runtime is told an endpoint wants no
+/// credential. See `build` in `crates/openbot-cli/src/config.rs`.
+const PRESETS = {
+  ollama: {
+    id: "qwen3:1.7b",
+    dialect: "openai",
+    baseUrl: "http://localhost:11434/v1",
+    keyEnv: "",
+  },
+  xai: {
+    id: "grok-4-5",
+    dialect: "openai",
+    baseUrl: "https://api.x.ai/v1",
+    keyEnv: "XAI_API_KEY",
+  },
+  anthropic: {
+    id: "claude-sonnet-5",
+    dialect: "anthropic",
+    baseUrl: "https://api.anthropic.com",
+    keyEnv: "ANTHROPIC_API_KEY",
+  },
+  openai: {
+    id: "gpt-5",
+    dialect: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    keyEnv: "OPENAI_API_KEY",
+  },
+};
+
 // The hint tells somebody which variable to set for the key to survive a
 // restart, so it has to name the one they typed rather than the default.
+function syncKeyEnvEcho() {
+  $("model-key-env-echo").textContent =
+    $("model-key-env").value.trim() || "XAI_API_KEY";
+}
+
+/// Show that a provider wants no credential, instead of leaving an enabled box
+/// that does nothing.
+///
+/// A key field that still accepts typing next to an endpoint that ignores keys
+/// is an invitation to paste a real one somewhere it was never needed, and then
+/// to believe it mattered. Disabling it says the opposite thing, and says it
+/// before anybody types.
+function setKeyless(on) {
+  const key = $("model-key");
+  key.disabled = on;
+  if (on) key.value = "";
+  key.placeholder = on
+    ? "not needed — this provider takes no key"
+    : "kept for this window only, never written to a file";
+  show($("model-hint-key"), !on);
+  show($("model-hint-keyless"), on);
+}
+
+$("model-preset").addEventListener("change", () => {
+  const preset = PRESETS[$("model-preset").value];
+  // "custom" is not a provider with blank settings; it is the absence of a
+  // choice. Clearing the fields on the way back to it would throw away what
+  // somebody had just finished typing.
+  if (!preset) return;
+  $("model-id").value = preset.id;
+  $("model-dialect").value = preset.dialect;
+  $("model-base").value = preset.baseUrl;
+  $("model-key-env").value = preset.keyEnv;
+  setKeyless(preset.keyEnv === "");
+  syncKeyEnvEcho();
+});
+
 $("model-key-env").addEventListener("input", () => {
-  $("model-key-env-echo").textContent = $("model-key-env").value.trim() || "XAI_API_KEY";
+  // Typing a variable name by hand is a statement that a key is wanted, so it
+  // takes the field back out of the keyless state the preset put it in.
+  setKeyless($("model-key-env").value.trim() === "" && $("model-preset").value === "ollama");
+  syncKeyEnvEcho();
 });
 $("disconnect").addEventListener("click", disconnect);
 $("pick-home").addEventListener("click", async () => {

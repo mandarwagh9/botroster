@@ -93,12 +93,20 @@ impl Model for HttpModel {
         };
 
         let mut rb = self.client.post(self.endpoint()).json(&body);
-        rb = match self.dialect {
-            Dialect::AnthropicMessages => rb
-                .header("x-api-key", &self.api_key)
-                .header("anthropic-version", "2023-06-01"),
-            Dialect::OpenAiChat => rb.bearer_auth(&self.api_key),
-        };
+        // No key means a local endpoint that wants none. Sending the header
+        // empty is not the same as not sending it: `Authorization: Bearer `
+        // is a malformed credential, and a server that validates the header
+        // before looking at its contents answers 401 to a request that should
+        // simply have arrived unauthenticated.
+        if !self.api_key.is_empty() {
+            rb = match self.dialect {
+                Dialect::AnthropicMessages => rb.header("x-api-key", &self.api_key),
+                Dialect::OpenAiChat => rb.bearer_auth(&self.api_key),
+            };
+        }
+        if self.dialect == Dialect::AnthropicMessages {
+            rb = rb.header("anthropic-version", "2023-06-01");
+        }
 
         // The dialect translations are unit-tested against hand-written JSON,
         // not against live endpoints. When a real provider rejects something,
@@ -419,6 +427,17 @@ mod openai {
             "model": model,
             "max_tokens": max_tokens,
             "messages": messages,
+            // Asked for explicitly because [`super::HttpModel::turn`] reads the
+            // whole response and parses it as one JSON object. The vendors
+            // default to non-streaming, so this was invisible against them —
+            // but an OpenAI-compatible gateway is free to default the other
+            // way, and one measured here did: it answered a request with no
+            // `stream` field in `text/event-stream` chunks, which arrive as a
+            // run of `data:` lines that no JSON parser accepts. The failure
+            // surfaces as `Malformed`, which reads like the provider is broken
+            // rather than like it is streaming at something that cannot
+            // stream. One field removes the whole class.
+            "stream": false,
         });
         if !tools.is_empty() {
             body["tools"] = Value::Array(tools);

@@ -957,3 +957,56 @@ async fn a_key_from_the_window_reaches_the_agent_and_is_never_written_down() {
         "the file should record the variable's name:\n{toml}"
     );
 }
+
+/// A model on this computer starts with no credential anywhere in the picture.
+///
+/// This is the whole first-run claim in one test. Somebody who has just
+/// installed the app, has no account with any vendor and has exported nothing
+/// picks a local provider in the window, and the agent starts. Every earlier
+/// layer treats an empty string as "not filled in", so the failure this guards
+/// against is any one of them helpfully dropping the field: the window, the
+/// `config set` call, or the settings merge. Drop it in any of those and the
+/// stored key variable survives instead, the runtime looks it up, and a local
+/// model is refused for want of a key that was never needed.
+///
+/// Driven through `save_model` rather than by writing `config.toml` directly,
+/// because the passthrough is the thing under test and a hand-written file
+/// would skip it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_local_model_starts_with_no_key_configured_anywhere() {
+    let home = tempfile::tempdir().expect("a home");
+    openbot_desktop::settings::save_model(
+        &common::up::openbot(),
+        home.path(),
+        "qwen3:1.7b",
+        Some("openai"),
+        Some("http://localhost:11434/v1"),
+        // The empty name is the message: this endpoint wants no credential.
+        Some(""),
+    )
+    .await
+    .expect("config set");
+
+    let toml = std::fs::read_to_string(home.path().join("config.toml")).expect("config.toml");
+    assert!(
+        toml.contains(r#"api_key_env = """#),
+        "the `no key wanted` choice did not survive the trip to disk:\n{toml}"
+    );
+
+    // And the agent starts on it, with nothing supplying a key. Reaching the
+    // handshake is the assertion: it is the point the runtime has resolved a
+    // model, which is where a missing key fails.
+    let engine = Engine::connect(Config {
+        openbot: common::up::openbot(),
+        home: home.path().to_path_buf(),
+        hub: "ws://127.0.0.1:8443/v1/tools".to_owned(),
+        demo: false,
+        demo_tools: false,
+        demo_secret: false,
+        bot: None,
+        api_key: None,
+    })
+    .await
+    .expect("a local model needs no key, so the agent should start without one");
+    drop(engine);
+}

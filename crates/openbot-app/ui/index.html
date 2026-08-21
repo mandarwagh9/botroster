@@ -53,6 +53,24 @@
     <details id="model-setup">
       <summary>Model</summary>
       <div class="fields">
+        <!-- The four fields below are the whole configuration, and three of
+             them are facts about a vendor rather than choices a person makes:
+             the base URL, the dialect it speaks and the name its key variable
+             conventionally takes. Asking somebody to know those before they
+             can send one message is how a first run turns into a search. The
+             preset fills them, leaves the model and the key — the two that are
+             genuinely theirs — and can still be overridden field by field,
+             which is what "custom" reverts to. -->
+        <label for="model-preset">provider</label>
+        <select id="model-preset" class="wide"
+                aria-label="fill the fields below for a known provider">
+          <option value="">custom — set the fields yourself</option>
+          <option value="ollama">Ollama — on this computer, free, no key</option>
+          <option value="xai">xAI — Grok</option>
+          <option value="anthropic">Anthropic — Claude</option>
+          <option value="openai">OpenAI — GPT</option>
+        </select>
+
         <label for="model-id">model</label>
         <input id="model-id" class="wide" spellcheck="false"
                placeholder="grok-4-5 — leave empty to keep what is configured" />
@@ -81,11 +99,24 @@
                placeholder="https://api.x.ai/v1" />
       </div>
       <p class="hint model-hint">
-        The key goes to the runtime this window starts, and nowhere else.
-        <code>config.toml</code> records the variable's name, never its value,
-        so a key cannot end up in a backup or a screen share. Set
-        <code id="model-key-env-echo">XAI_API_KEY</code> in your environment to
-        have it survive a restart.
+        <span id="model-hint-key">
+          The key goes to the runtime this window starts, and nowhere else.
+          <code>config.toml</code> records the variable's name, never its value,
+          so a key cannot end up in a backup or a screen share. Set
+          <code id="model-key-env-echo">XAI_API_KEY</code> in your environment to
+          have it survive a restart.
+        </span>
+        <!-- Shown in place of the paragraph above when the chosen provider
+             takes no credential, because every sentence in it is then about a
+             key that will never exist, and reading a warning about protecting
+             something you were never asked for is how a person concludes they
+             have missed a step. -->
+        <span id="model-hint-keyless" class="hidden">
+          A model on this computer needs no key and no account, and nothing
+          leaves the machine. Start it with <code>ollama serve</code>, and put
+          one of the names <code>ollama list</code> prints in the model field —
+          the one filled in above is only a common small default.
+        </span>
       </p>
     </details>
     <!-- A failed connect is the most likely first experience this product

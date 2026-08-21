@@ -34,6 +34,9 @@ struct Vendor {
     url: String,
     seen: Arc<Mutex<Vec<Value>>>,
     auth: Arc<Mutex<Vec<String>>>,
+    /// `anthropic-version`, kept apart from `auth` so a test can assert the
+    /// credential is absent while the version header is still present.
+    versions: Arc<Mutex<Vec<String>>>,
 }
 
 /// One scripted reply: an HTTP status and a body.
@@ -46,12 +49,13 @@ impl Vendor {
         let addr = listener.local_addr().unwrap();
         let seen: Arc<Mutex<Vec<Value>>> = Arc::default();
         let auth: Arc<Mutex<Vec<String>>> = Arc::default();
+        let versions: Arc<Mutex<Vec<String>>> = Arc::default();
 
-        let (s, a) = (Arc::clone(&seen), Arc::clone(&auth));
+        let (s, a, v) = (Arc::clone(&seen), Arc::clone(&auth), Arc::clone(&versions));
         tokio::spawn(async move {
             let mut turn = 0usize;
             while let Ok((mut sock, _)) = listener.accept().await {
-                let (s, a) = (Arc::clone(&s), Arc::clone(&a));
+                let (s, a, v) = (Arc::clone(&s), Arc::clone(&a), Arc::clone(&v));
                 let reply = replies.get(turn).cloned().unwrap_or(Reply(
                     500,
                     json!({ "error": "the agent asked for more turns than the script has" }),
@@ -87,6 +91,9 @@ impl Vendor {
                         if low.starts_with("authorization:") || low.starts_with("x-api-key:") {
                             a.lock().unwrap().push(l.trim().to_owned());
                         }
+                        if low.starts_with("anthropic-version:") {
+                            v.lock().unwrap().push(l.trim().to_owned());
+                        }
                     }
                     let mut body = buf[head_end + 4..].to_vec();
                     while body.len() < len {
@@ -117,6 +124,7 @@ impl Vendor {
             url: format!("http://{addr}"),
             seen,
             auth,
+            versions,
         }
     }
 
@@ -126,14 +134,21 @@ impl Vendor {
     fn auth_headers(&self) -> Vec<String> {
         self.auth.lock().unwrap().clone()
     }
+    fn versions(&self) -> Vec<String> {
+        self.versions.lock().unwrap().clone()
+    }
 
     fn model(&self, dialect: Dialect) -> HttpModel {
+        self.model_with_key(dialect, "test-key-not-a-real-one")
+    }
+
+    fn model_with_key(&self, dialect: Dialect, api_key: &str) -> HttpModel {
         HttpModel::new(HttpModelConfig {
             dialect,
             // The OpenAI dialect appends `/chat/completions`, the Anthropic one
             // `/v1/messages`; both land on this server.
             base_url: self.url.clone(),
-            api_key: "test-key-not-a-real-one".into(),
+            api_key: api_key.into(),
             model: "test-model".into(),
             max_tokens: 1024,
             timeout: Duration::from_secs(10),
@@ -446,6 +461,96 @@ async fn a_rejected_key_says_so_plainly() {
     assert!(
         text.to_lowercase().contains("api key"),
         "the vendor's explanation was thrown away: {text}"
+    );
+}
+
+/// A model with no key sends no credential header at all.
+///
+/// Not the same as sending an empty one. `Authorization: Bearer ` is a
+/// malformed credential rather than an absent one, and a server that checks the
+/// header's presence before its contents answers 401 to a request that should
+/// simply have arrived unauthenticated — which is how reaching a model on
+/// localhost fails with a message about a key nobody was asked for.
+#[tokio::test]
+async fn a_model_that_needs_no_key_sends_no_credential_header() {
+    for dialect in [Dialect::OpenAiChat, Dialect::AnthropicMessages] {
+        let vendor = Vendor::serving(vec![match dialect {
+            Dialect::OpenAiChat => openai_text("hello"),
+            Dialect::AnthropicMessages => anthropic_text("hello"),
+        }])
+        .await;
+
+        vendor
+            .model_with_key(dialect, "")
+            .turn(&TurnRequest {
+                system: "you are a test".into(),
+                messages: vec![openbot_agent::model::Message::user("hi")],
+                tools: vec![],
+            })
+            .await
+            .expect("an unauthenticated turn should succeed");
+
+        assert_eq!(
+            vendor.auth_headers(),
+            Vec::<String>::new(),
+            "a credential header was sent for a model configured without a key"
+        );
+    }
+}
+
+/// The Anthropic dialect keeps its version header when there is no key.
+///
+/// Held separately because the two headers are set in the same place and the
+/// obvious way to skip the credential skips the version with it. A request
+/// without `anthropic-version` is rejected by the real vendor, so a keyless
+/// local endpoint speaking that dialect would work while the paid one broke.
+#[tokio::test]
+async fn the_anthropic_version_header_does_not_depend_on_having_a_key() {
+    let vendor = Vendor::serving(vec![anthropic_text("hello")]).await;
+    vendor
+        .model_with_key(Dialect::AnthropicMessages, "")
+        .turn(&TurnRequest {
+            system: "you are a test".into(),
+            messages: vec![openbot_agent::model::Message::user("hi")],
+            tools: vec![],
+        })
+        .await
+        .expect("an unauthenticated turn should succeed");
+    assert!(
+        vendor.versions().iter().any(|h| h.contains("2023-06-01")),
+        "the anthropic-version header went missing with the key: {:?}",
+        vendor.versions()
+    );
+}
+
+/// Every OpenAI-dialect request says it does not want a stream.
+///
+/// `HttpModel::turn` reads the whole response and parses it as one JSON object.
+/// The vendors default to non-streaming so this was invisible against them, but
+/// an OpenAI-compatible gateway may default the other way — one measured here
+/// answered a request carrying no `stream` field with `text/event-stream`
+/// chunks, which arrive as `data:` lines that no JSON parser accepts. It
+/// surfaces as `Malformed`, which reads like a broken provider rather than like
+/// streaming at something that cannot stream.
+#[tokio::test]
+async fn an_openai_request_asks_for_a_whole_answer_not_a_stream() {
+    let vendor = Vendor::serving(vec![openai_text("hello")]).await;
+    vendor
+        .model(Dialect::OpenAiChat)
+        .turn(&TurnRequest {
+            system: "you are a test".into(),
+            messages: vec![openbot_agent::model::Message::user("hi")],
+            tools: vec![],
+        })
+        .await
+        .expect("the turn should succeed");
+
+    let sent = vendor.requests();
+    assert_eq!(
+        sent[0]["stream"],
+        json!(false),
+        "the request did not ask for a whole answer: {}",
+        sent[0]
     );
 }
 

@@ -181,14 +181,21 @@ pub async fn save_model(
         .arg(home)
         .arg("--model")
         .arg(model);
-    for (flag, value) in [
-        ("--dialect", dialect),
-        ("--base-url", base_url),
-        ("--api-key-env", api_key_env),
-    ] {
+    for (flag, value) in [("--dialect", dialect), ("--base-url", base_url)] {
         if let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) {
             cmd.arg(flag).arg(value);
         }
+    }
+    // `api_key_env` does not get the empty-means-absent treatment the other two
+    // get, because for this one field empty is a *meaning*: it is how a model
+    // on localhost says it wants no credential at all. Folding `Some("")` into
+    // `None` here would make that choice unsendable from the window — the
+    // field would silently keep whatever key variable was configured before,
+    // and a local endpoint would be asked for a key that does not exist. Only
+    // `None`, which is "the caller did not mention this field", leaves it
+    // alone.
+    if let Some(value) = api_key_env {
+        cmd.arg("--api-key-env").arg(value.trim());
     }
     cmd.env("NO_COLOR", "1")
         .env_remove("OPENBOT_HOME")
