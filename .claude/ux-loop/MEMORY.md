@@ -209,3 +209,73 @@ retry-once on navigation in `page()` would probably remove it — but that is sh
 infrastructure and the flake could not be reproduced on demand, so it is recorded rather than
 guessed at. **If CI starts failing on unrelated browser tests, this is the first thing to
 look at.**
+
+---
+
+## Run 3 — ready by default, 2026-08-22
+
+### There is no free unmetered agent-capable endpoint, and it was measured
+
+The task was "make the exe ready by default", believed to mean *free* by default.
+Three candidates, all rejected on evidence rather than on reading:
+
+- **Pollinations** (keyless) genuinely returns `tool_calls` with `finish_reason:"tool_calls"`.
+  It then 402s — "API key budget too low" — on roughly the second *fresh* request. The trap:
+  a repeat of an identical request comes back **200 from cache**, same `id`, same `created`
+  timestamp. Retrying the same body and seeing 200 proves nothing. Vary the body, or read the
+  id.
+- **OmniRoute** (`npm i -g omniroute`, 1196 packages) survives repeated calls where Pollinations
+  dies, so its fallback is real. But `stream:false` fails outright — "Maximum combo retry limit
+  reached", poolSize 54, attempted 27 — and the diagnostics name the zero-credential pool:
+  `theoldllm/CLAUDE_4_6_OPUS`, `duckduckgo-web/gpt-5-mini`, `auggie/aug/prism`. Those are
+  reverse-engineered endpoints, not documented free tiers. **Read the `diagnostics` block of a
+  gateway's failure — it lists what it actually tried, which the README does not.**
+- **Ollama** passes: `tool_calls`, non-streamed, unauthenticated, `{base}/chat/completions`
+  matching what `http.rs` already builds. Free, no account, offline, no ToS question.
+
+**Generalisable: "free" and "no setup" are different axes, and a local model trades one for the
+other.** The deliverable became zero-*terminal* setup plus a genuinely free local path, which is
+what could honestly be built.
+
+### `stream` was never sent, and the vendors hid it
+
+`HttpModel::turn` reads the whole body and parses one JSON object. Every real vendor defaults to
+non-streaming, so the missing field was invisible for the life of the project. A compatible
+gateway defaulted the other way and answered in `data:` chunks, surfacing as `Malformed` — which
+reads as a broken provider rather than as streaming at something that cannot stream.
+
+**Generalisable: a default you rely on but never state is a dependency on every implementation
+agreeing with you.**
+
+### The width test caught a CSS bug I would not have looked for
+
+Adding the first `<input type="checkbox">` to this UI tripped
+`no_dialog_field_is_narrower_than_the_placeholder_in_it`. The reflex is to exempt checkboxes and
+move on. The actual cause was that the global `input` rule sets `width: 100%` and a text field's
+padding, so the checkbox rendered as a **373px full-width bordered box**. Both were needed: fix
+the CSS, *and* exempt checkboxes from a text-width rule (`value` is `"on"`, never drawn).
+
+**Generalisable: when a new element trips an old test, find out why before exempting it. The
+exemption is often correct and still not the whole answer.**
+
+### The page suite flake has a likelier cause than "concurrency"
+
+`escape_closes_a_panel_but_never_an_approval` failed inside `ux-verify.sh` and passed 3/3 alone
+and in a standalone full-suite run. The gate had been started **immediately after
+`cargo test --workspace`, which runs the page suite too** — so Chromium instances from the
+previous run were probably still winding down. Re-run alone: clean, 68 passed.
+
+**Before filing a page-suite flake, check what was running just before it.**
+
+### Credential persistence reused what was already there
+
+The window collected a key into the spawned agent's environment and nowhere else, so it was
+retyped at every launch. No new dependency was needed: `openbotd::secrets::SecretStore` is the
+0600 `secrets.json` connector tokens already use, `openbot secret set` reads the value from
+**stdin** (no `--value` flag, deliberately), and `openbot-cli` already depends on `openbotd` — so
+`isolation.rs` was unaffected. Environment first, store second, and that order is asserted:
+a stored key that silently overrode an exported one makes "why is it using the wrong key"
+unanswerable from the shell.
+
+**Generalisable: before adding a crate for a capability, check whether a sibling subsystem
+already solved it — and whether the invariant tests already permit the edge you need.**

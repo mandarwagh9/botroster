@@ -1010,3 +1010,104 @@ async fn a_local_model_starts_with_no_key_configured_anywhere() {
     .expect("a local model needs no key, so the agent should start without one");
     drop(engine);
 }
+
+/// A key the window remembered is found at the next launch, with nothing in the
+/// environment and nothing passed in.
+///
+/// This is the second launch, which is the one that used to fail. The key the
+/// window collected went into the spawned agent's environment and nowhere else,
+/// so every launch asked for it again. Here it is stored once and then found by
+/// a connect that supplies no key at all — the shape of opening the app a day
+/// later.
+///
+/// The variable is one nothing sets, so a key leaking in from the developer's
+/// own environment cannot make this pass.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_remembered_key_is_still_there_at_the_next_launch() {
+    const VAR: &str = "OPENBOT_TEST_REMEMBERED_KEY_NOTHING_SETS";
+    const VALUE: &str = "remembered-not-a-real-key-7c31";
+    assert!(
+        std::env::var(VAR).is_err(),
+        "{VAR} is set in this environment, so this test would prove nothing"
+    );
+
+    let home = tempfile::tempdir().expect("a home");
+    let openbot = common::up::openbot();
+    openbot_desktop::settings::save_model(
+        &openbot,
+        home.path(),
+        "grok-4-5",
+        Some("openai"),
+        Some("https://api.x.ai/v1"),
+        Some(VAR),
+    )
+    .await
+    .expect("config set");
+
+    let cfg = || Config {
+        openbot: openbot.clone(),
+        home: home.path().to_path_buf(),
+        hub: "ws://127.0.0.1:8443/v1/tools".to_owned(),
+        demo: false,
+        demo_tools: false,
+        demo_secret: false,
+        bot: None,
+        // Nothing handed in: this is the launch after the one that typed it.
+        api_key: None,
+    };
+
+    // Before remembering, the agent refuses and names the variable.
+    match Engine::connect(cfg()).await {
+        Ok(_) => panic!("an agent started with no key from anywhere"),
+        Err(e) => assert!(
+            format!("{e:#}").contains(VAR),
+            "the refusal should name the variable: {e:#}"
+        ),
+    }
+
+    openbot_desktop::settings::save_key(&openbot, home.path(), VAR, VALUE)
+        .await
+        .expect("the window should be able to remember a key");
+
+    // After remembering, it starts — with the environment still empty.
+    let engine = Engine::connect(cfg())
+        .await
+        .expect("a remembered key should be found at the next launch");
+    drop(engine);
+
+    // And it went to the credential store, not into the settings file.
+    let toml = std::fs::read_to_string(home.path().join("config.toml")).expect("config.toml");
+    assert!(
+        !toml.contains(VALUE),
+        "the key must never be written to config.toml, found it in:\n{toml}"
+    );
+    assert!(
+        std::fs::read_to_string(home.path().join("secrets.json"))
+            .expect("secrets.json")
+            .contains(VALUE),
+        "the key was not stored where the runtime looks for it"
+    );
+}
+
+/// A key that cannot be sent is refused where it can be explained.
+///
+/// `openbot secret set` rejects an empty value and one carrying control
+/// characters, because neither can go in an HTTP header. A paste that picked up
+/// a stray character has to fail here, with the window able to say so, rather
+/// than being stored and surfacing later as an unexplained 401 from the vendor.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_that_could_never_be_sent_is_refused_when_it_is_stored() {
+    let home = tempfile::tempdir().expect("a home");
+    let err = openbot_desktop::settings::save_key(
+        &common::up::openbot(),
+        home.path(),
+        "OPENBOT_TEST_BAD_KEY",
+        "has-a\u{7}bell-in-it",
+    )
+    .await
+    .expect_err("a key with a control character cannot be sent and must not be stored");
+    assert!(
+        !format!("{err:#}").is_empty(),
+        "the refusal carried no explanation"
+    );
+}

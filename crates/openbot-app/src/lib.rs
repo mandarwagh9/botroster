@@ -420,6 +420,13 @@ struct ModelInput {
     api_key_env: Option<String>,
     #[serde(default)]
     api_key: Option<String>,
+    /// Keep the key on this computer, so it survives a restart.
+    ///
+    /// Off unless the window says otherwise. Storing a credential is a choice
+    /// somebody makes, and a default that quietly kept every key typed into a
+    /// shared machine would be the wrong one to make for them.
+    #[serde(default)]
+    remember: bool,
 }
 
 /// Connect to a `openbot acp` agent. The engine verifies the handshake before
@@ -488,6 +495,17 @@ async fn connect(
                 .map(str::trim)
                 .filter(|v| !v.is_empty())
                 .unwrap_or("XAI_API_KEY");
+            // Stored before the connect rather than after it succeeds. The
+            // failure this avoids is the common one: a key that is right, a
+            // model id that is wrong, and a person who fixes the id and then
+            // wonders why they are being asked for the key again. Storing it is
+            // not a claim that it works — the runtime says that — and a key
+            // that turns out to be wrong is overwritten by the next attempt.
+            if model.remember {
+                settings::save_key(&here.openbot, &here.home, var, key)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
             cfg.api_key = Some((var.to_owned(), key.to_owned()));
         }
     }

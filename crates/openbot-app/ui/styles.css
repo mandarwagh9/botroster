@@ -252,6 +252,21 @@ select {
   transition: border-color var(--t) var(--ease);
 }
 
+/* The rule above is written for boxes you type into, and a checkbox is not one.
+   It was inheriting `width: 100%` and a text field's padding, which stretched a
+   13px control across its whole grid cell and drew a field-sized border round
+   it — so the thing that looks like an empty text input is the tick box. Caught
+   by `no_dialog_field_is_narrower_than_the_placeholder_in_it`, which measures
+   what each field can show. */
+input[type="checkbox"] {
+  width: auto;
+  flex: none;
+  padding: 0;
+  margin: 0;
+  border-radius: 3px;
+  accent-color: var(--ink);
+}
+
 input:hover,
 textarea:hover,
 select:hover {
@@ -457,6 +472,19 @@ textarea {
 .fields input.wide,
 .fields select.wide {
   grid-column: 2 / 4;
+}
+
+/* `.fields label` right-aligns every label so the column reads as a column,
+   which is exactly wrong for a label wrapping its own control: the box would
+   be pushed away from the words describing it, and the two would read as
+   unrelated. This one is a row, not a column entry. */
+.fields label.check {
+  grid-column: 2 / 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
 }
 
 .fields button {

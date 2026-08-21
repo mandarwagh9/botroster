@@ -221,6 +221,73 @@ pub async fn save_model(
     Ok(())
 }
 
+/// Remember an API key on this computer, under the name `config.toml` records.
+///
+/// Until this existed the key a person typed into the window lived in the
+/// spawned agent's environment and nowhere else, which is correct and meant
+/// retyping it at every launch. The runtime reads the environment first and
+/// falls back to this store, so an exported variable still wins and nothing
+/// about the existing arrangement changes for somebody using one.
+///
+/// The value goes over **stdin**, never as an argument. Command-line arguments
+/// are world-readable in `/proc/<pid>/cmdline` for as long as the process lives
+/// and land in shell history besides — which is why `openbot secret set` has no
+/// `--value` flag to pass it to. Shelling out rather than writing the file from
+/// here for the same reason [`save_model`] does: the store's format, its
+/// permissions and its validation are the runtime's, and a second writer would
+/// be a second definition of them.
+///
+/// # Errors
+/// If the binary cannot be run, or the runtime refuses the value. It refuses an
+/// empty one and one containing control characters, because neither can be sent
+/// as an HTTP header — a paste that picked up a stray character fails here,
+/// where it can be explained, rather than as an unexplained 401 later.
+pub async fn save_key(openbot: &Path, home: &Path, name: &str, value: &str) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt as _;
+
+    let mut cmd = tokio::process::Command::new(openbot);
+    cmd.arg("secret")
+        .arg("set")
+        .arg("--home")
+        .arg(home)
+        .arg(name)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .env("NO_COLOR", "1")
+        .env_remove("OPENBOT_HOME")
+        .env_remove("OPENBOT_HUB_URL");
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("could not run {}: {e}", openbot.display()))?;
+    // Taken and dropped before waiting. The child reads to end of file, so a
+    // pipe left open here would have both sides waiting for the other.
+    {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("no stdin on the runtime process"))?;
+        stdin.write_all(value.as_bytes()).await?;
+        stdin.shutdown().await?;
+    }
+    let out = child.wait_with_output().await?;
+    if !out.status.success() {
+        return Err(anyhow::anyhow!(
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+                .trim()
+                .trim_start_matches("Error:")
+                .trim()
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

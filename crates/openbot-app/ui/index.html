@@ -79,6 +79,15 @@
         <input id="model-key" class="wide" type="password" spellcheck="false"
                placeholder="kept for this window only, never written to a file" />
 
+        <label for="model-remember">remember it</label>
+        <!-- Off by default. Keeping a credential is a choice a person makes,
+             and a box that arrived ticked would make it for them on a machine
+             they might be sharing. -->
+        <label class="check">
+          <input id="model-remember" type="checkbox" />
+          <span>keep this key on this computer</span>
+        </label>
+
         <label for="model-key-env">key variable</label>
         <!-- Sent explicitly rather than defaulted on the other side: the window
              has to set the environment variable the runtime will read, so both
@@ -100,11 +109,14 @@
       </div>
       <p class="hint model-hint">
         <span id="model-hint-key">
-          The key goes to the runtime this window starts, and nowhere else.
-          <code>config.toml</code> records the variable's name, never its value,
-          so a key cannot end up in a backup or a screen share. Set
-          <code id="model-key-env-echo">XAI_API_KEY</code> in your environment to
-          have it survive a restart.
+          Unremembered, the key goes to the runtime this window starts and
+          nowhere else, so you would type it again next launch. Remembered, it
+          joins your other credentials in <code>secrets.json</code>, readable
+          only by you. Either way <code>config.toml</code> records the
+          variable's name and never its value, so a key cannot end up in a
+          backup or a screen share — and an exported
+          <code id="model-key-env-echo">XAI_API_KEY</code> still wins over a
+          remembered one.
         </span>
         <!-- Shown in place of the paragraph above when the chosen provider
              takes no credential, because every sentence in it is then about a

@@ -309,6 +309,68 @@ impl ModelOverrides {
     }
 }
 
+/// The API key for a run: the environment first, then the credential store.
+///
+/// An empty `key_env` means "this endpoint wants no credential", the normal
+/// case for a model served on localhost — Ollama, vLLM, LM Studio. Before it
+/// meant anything, every endpoint was assumed to be a paid vendor, and the only
+/// way to reach a local model was to invent a variable, set it to junk, and let
+/// the header be ignored at the far end. That is a ritual rather than a check,
+/// and it taught people to type nonsense into the field that holds credentials.
+/// Spelled as an empty variable *name*, because the question is "which variable
+/// holds the key" and "none" is a real answer to it.
+///
+/// The environment is tried first and deliberately wins. A stored key that
+/// silently overrode an exported one makes "why is it using the wrong key" a
+/// question with no answer visible from the shell — you would have to know the
+/// store existed to start looking. This way round, `export` always does what it
+/// appears to do, and the store answers only when nothing else did.
+///
+/// The store is consulted because the desktop window is the only surface a
+/// fresh install has, and a key it collected used to live in the spawned
+/// agent's environment and nowhere else: correct, and it meant retyping the key
+/// at every launch. `secrets.json` is the same owner-only file connector tokens
+/// already live in, so this adds a reader rather than a storage mechanism, and
+/// `config.toml` still records the name and never the value.
+///
+/// Separate from [`build`] so the precedence can be asserted directly. Through
+/// `build` it is only observable as a working or failing `HttpModel`, which
+/// cannot tell "took the environment" from "took the store".
+///
+/// # Errors
+/// If a name was configured and neither source has it. That stays an error:
+/// meaning to use a key and forgetting to export it is a mistake worth
+/// reporting, and folding it into "no key wanted" would turn every forgotten
+/// key into a silent unauthenticated request that comes back 401 with nothing
+/// pointing at the cause.
+fn resolve_key(home: &Path, key_env: &str) -> anyhow::Result<String> {
+    // Trimmed once and then used, rather than trimmed for the emptiness test
+    // and looked up raw. A name that arrived with surrounding whitespace — from
+    // a paste, or a field in the window — would otherwise pass the "not empty"
+    // test and then be looked up under a name no environment can hold, failing
+    // with a message quoting a variable that looks exactly right.
+    let key_env = key_env.trim();
+    if key_env.is_empty() {
+        return Ok(String::new());
+    }
+    if let Ok(from_env) = std::env::var(key_env) {
+        return Ok(from_env);
+    }
+    // Only reached when a name was configured, so a keyless local model never
+    // goes looking for a secret called "".
+    openbotd::secrets::SecretStore::open(home)
+        .and_then(|store| store.get(key_env))
+        .map(|found| found.expose().to_owned())
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "${key_env} is not set, and no key is stored under that name.\n\
+                 Export your key there, or store it once:  \
+                 openbot secret set {key_env}\n\
+                 A model on localhost usually needs none: --api-key-env ''"
+            )
+        })
+}
+
 /// Resolve a model for a run.
 ///
 /// `demo` short-circuits to a scripted stand-in so a deployment can be checked
@@ -332,36 +394,7 @@ pub fn build(
              Or check a deployment without a key:  --demo"
         )
     })?;
-    // An empty `api_key_env` means "this endpoint wants no credential", which
-    // is the normal case for a model served on localhost — Ollama, vLLM, LM
-    // Studio. Before this, every endpoint was assumed to be a paid vendor, so
-    // the only way to reach a local model was to invent a variable, set it to
-    // a junk value, and let the header be ignored at the other end. That is a
-    // ritual, not a check, and it taught people to put nonsense in the field
-    // that holds credentials.
-    //
-    // Spelled as an empty variable *name* rather than an empty *value*: the
-    // question being answered is "which variable holds the key", and "none"
-    // is a real answer to it. An unset variable stays an error, because
-    // meaning to use a key and forgetting to export it is a mistake worth
-    // reporting.
-    // Trimmed once and then used, rather than trimmed for the emptiness test
-    // and looked up raw. A name that arrived with surrounding whitespace —
-    // from a pasted value, or a field in the window — would otherwise pass the
-    // "not empty" test and then be looked up under a name no environment can
-    // ever hold, failing with a message quoting a variable that looks correct.
-    let key_env = s.api_key_env.trim();
-    let key = if key_env.is_empty() {
-        String::new()
-    } else {
-        std::env::var(key_env).map_err(|_| {
-            anyhow::anyhow!(
-                "${key_env} is not set.\n\
-                 Export your key there, or point --api-key-env at the variable you use.\n\
-                 A model on localhost usually needs none: --api-key-env ''"
-            )
-        })?
-    };
+    let key = resolve_key(home, &s.api_key_env)?;
 
     Ok(Arc::new(HttpModel::new(HttpModelConfig {
         dialect: s
@@ -524,6 +557,68 @@ mod tests {
         assert!(
             e.contains("$ALSO_DEFINITELY_NOT_SET_98765"),
             "the error does not name the variable it looked up: {e}"
+        );
+    }
+
+    /// A remembered key is found when the environment has nothing to say.
+    ///
+    /// This is what makes the window's "keep this key" mean anything: without
+    /// it the key reached one spawned process and had to be retyped at the next
+    /// launch.
+    #[test]
+    fn a_remembered_key_is_used_when_the_environment_has_none() {
+        const VAR: &str = "STORE_ONLY_KEY_NOTHING_EXPORTS_44821";
+        const VALUE: &str = "stored-not-a-real-key";
+        assert!(
+            std::env::var(VAR).is_err(),
+            "{VAR} is set here, so this test would pass without proving anything"
+        );
+
+        let d = tempfile::tempdir().unwrap();
+        openbotd::secrets::SecretStore::open(d.path())
+            .unwrap()
+            .set(VAR, openbotd::secrets::Secret::new(VALUE))
+            .unwrap();
+
+        assert_eq!(resolve_key(d.path(), VAR).unwrap(), VALUE);
+    }
+
+    /// An exported variable beats a remembered one.
+    ///
+    /// The alternative makes "why is it using the wrong key" unanswerable from
+    /// the shell: you would have to know the store existed before you could
+    /// start looking. `PATH` is used because it is set everywhere, so the test
+    /// never has to mutate the environment — which would race the other tests
+    /// in this binary.
+    #[test]
+    fn an_exported_key_wins_over_a_remembered_one() {
+        let d = tempfile::tempdir().unwrap();
+        openbotd::secrets::SecretStore::open(d.path())
+            .unwrap()
+            .set("PATH", openbotd::secrets::Secret::new("the-stored-one"))
+            .unwrap();
+
+        let got = resolve_key(d.path(), "PATH").unwrap();
+        assert_ne!(
+            got, "the-stored-one",
+            "the store overrode an exported variable"
+        );
+        assert_eq!(got, std::env::var("PATH").unwrap());
+    }
+
+    /// A keyless endpoint never consults the store.
+    ///
+    /// The store is keyed by the variable's name, and an endpoint that wants no
+    /// credential has no name — so the lookup would be for a secret called "",
+    /// which the store is right to refuse. Returning empty before reaching it
+    /// keeps a local model's setup from depending on a credential file at all.
+    #[test]
+    fn a_keyless_endpoint_does_not_reach_for_the_store() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(resolve_key(d.path(), "   ").unwrap(), "");
+        assert!(
+            !d.path().join("secrets.json").exists(),
+            "a keyless model touched the credential store"
         );
     }
 }

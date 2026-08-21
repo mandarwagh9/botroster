@@ -2127,6 +2127,11 @@ async fn no_dialog_field_is_narrower_than_the_placeholder_in_it() {
             "  for (const e of d.querySelectorAll('input')) {",
             "    const t = e.value || e.placeholder || ''; if (!t) continue;",
             "    if (e.type === 'password') continue;",
+            // Same exemption as the connect-panel scan below, and here for the
+            // same reason: a checkbox's `value` is a submission token, not text
+            // it draws. Kept in step deliberately — two copies of one scan with
+            // different rules is how the two stop meaning the same thing.
+            "    if (e.type === 'checkbox' || e.type === 'radio') continue;",
             "    c.font = getComputedStyle(e).font;",
             "    const need = Math.ceil(c.measureText(t).width);",
             "    const have = Math.round(e.clientWidth - 20);",
@@ -2167,6 +2172,12 @@ async fn no_dialog_field_is_narrower_than_the_placeholder_in_it() {
             // standing behind you. `a_credential_is_never_left_in_the_window`
             // holds the other half of this.
             "  if (e.type === 'password') continue;",
+            // A checkbox's `value` is the token a form submission carries, not
+            // text it draws — it is "on" whatever the label beside it says.
+            // Measuring it asks whether a 13px control can display a word it
+            // never displays. The label's text is ordinary flow content and is
+            // covered by the overflow checks that apply to everything else.
+            "  if (e.type === 'checkbox' || e.type === 'radio') continue;",
             "  const t = e.value || e.placeholder || ''; if (!t) continue;",
             "  c.font = getComputedStyle(e).font;",
             "  const need = Math.ceil(c.measureText(t).width);",
@@ -4237,6 +4248,69 @@ async fn a_model_key_is_not_left_in_the_connect_panel() {
             .unwrap(),
         "",
         "the key is still sitting in the connect panel after connecting"
+    );
+}
+
+/// Keeping a credential is a choice, and the window has to make it only when
+/// asked. A box that arrived ticked would decide for somebody on a machine they
+/// might be sharing, and the deciding is the whole point of the box.
+#[tokio::test]
+async fn a_key_is_only_kept_when_the_window_was_asked_to_keep_it() {
+    for (tick, want) in [("false", "[false]"), ("true", "[true]")] {
+        let Some((b, _p)) = page().await else { return };
+        b.text_of(&format!(
+            r#"(() => {{ window.__replies.connect = {{ computer: true, tools: 3 }};
+                 window.__replies.open_bot = null;
+                 window.__replies.roster = [];
+                 document.getElementById('model-id').value = 'grok-4-5';
+                 document.getElementById('model-key').value = 'not-a-real-key';
+                 document.getElementById('model-remember').checked = {tick};
+                 document.getElementById('connect-btn').click();
+                 return 'ok'; }})()"#
+        ))
+        .await
+        .expect("connect");
+        settle().await;
+
+        let sent = b
+            .text_of(
+                "JSON.stringify(window.__sent('connect')\
+                 .map(c => c.args.model && c.args.model.remember))",
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            sent, want,
+            "the window sent the wrong answer for `keep this key` when the box was {tick}"
+        );
+    }
+}
+
+/// The offer to keep a key closes along with the key box.
+///
+/// Offering to remember a credential that is not being collected is an offer to
+/// store nothing, and a tick left sitting there says the opposite of what is
+/// happening.
+#[tokio::test]
+async fn a_provider_that_wants_no_key_does_not_offer_to_keep_one() {
+    let Some((b, _p)) = page().await else { return };
+    b.text_of(
+        "(() => { document.getElementById('model-remember').checked = true; \
+         return 'ok'; })()",
+    )
+    .await
+    .expect("tick it first");
+    pick_provider(&b, "ollama").await;
+
+    assert_eq!(
+        b.text_of(
+            "JSON.stringify([document.getElementById('model-remember').disabled,\
+             document.getElementById('model-remember').checked])"
+        )
+        .await
+        .unwrap(),
+        "[true,false]",
+        "the keep-this-key box is still live for a provider that takes no key"
     );
 }
 

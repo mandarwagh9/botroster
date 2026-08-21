@@ -1234,8 +1234,9 @@ function modelInput() {
   const apiKeyEnv = $("model-key-env").value.trim();
   const dialect = $("model-dialect").value;
   const baseUrl = $("model-base").value.trim();
+  const remember = $("model-remember").checked;
   if (!id && !apiKey.trim() && !dialect && !baseUrl) return null;
-  return { id, apiKey, apiKeyEnv, dialect, baseUrl };
+  return { id, apiKey, apiKeyEnv, dialect, baseUrl, remember };
 }
 
 /// Connect, optionally in the scripted demo.
@@ -1450,6 +1451,12 @@ function setKeyless(on) {
   key.placeholder = on
     ? "not needed — this provider takes no key"
     : "kept for this window only, never written to a file";
+  // Closed with the key box, and cleared. Offering to remember a credential
+  // that is not being collected is an offer to store nothing, and a tick left
+  // sitting there says the opposite of what is happening.
+  const remember = $("model-remember");
+  remember.disabled = on;
+  if (on) remember.checked = false;
   show($("model-hint-key"), !on);
   show($("model-hint-keyless"), on);
 }
