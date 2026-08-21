@@ -79,8 +79,13 @@ pub async fn gather(hub_url: &str, home: &Path, opts: &crate::config::ModelOverr
     };
 
     let settings = opts.applied(home);
-    let key_env = settings.api_key_env.clone();
-    let key_present = std::env::var(&key_env).is_ok();
+    let key_env = settings.api_key_env.trim().to_owned();
+    // An empty key variable is a configured answer — "this endpoint wants no
+    // credential", which is the normal case for a model on localhost — and not
+    // a key that has gone missing. Reporting it red would have `status`
+    // contradict a setup that works: the agent starts, and the one command a
+    // person runs to check on it calls the arrangement broken.
+    let key_present = key_env.is_empty() || std::env::var(&key_env).is_ok();
 
     let now = chrono::Utc::now();
     let (mut bots, mut enabled, mut paused, mut due, mut last_seen) = (0, 0, 0, Vec::new(), None);
@@ -226,6 +231,14 @@ pub fn render(s: &Status, st: Style) -> String {
             &mut out,
             "model",
             st.yellow("none configured — `openbot config set --model …`, or use --demo"),
+        ),
+        // Said rather than left blank. A model with an empty key variable would
+        // otherwise print its name followed by nothing, which reads as a row
+        // that failed to render rather than as a deliberate arrangement.
+        (Some(m), true) if s.key_env.trim().is_empty() => row(
+            &mut out,
+            "model",
+            format!("{m}  {}", st.dim("no key needed")),
         ),
         (Some(m), true) => row(&mut out, "model", format!("{m}  {}", st.dim(&s.key_env))),
         (Some(m), false) => row(
@@ -499,6 +512,26 @@ second line
         s.key_present = false;
         let out = render(&s, Style::plain());
         assert!(out.contains("not set in this shell"), "{out}");
+    }
+
+    /// A model that wants no key is a working arrangement, and `status` is the
+    /// one command somebody runs to ask whether things are set up. Calling a
+    /// local model's absent key a problem would have it contradict an agent
+    /// that starts perfectly well, which is worse than saying nothing.
+    #[test]
+    fn a_model_that_needs_no_key_is_not_reported_as_a_problem() {
+        let mut s = base();
+        s.key_env = String::new();
+        s.key_present = true;
+        let out = render(&s, Style::plain());
+        assert!(
+            !out.contains("not set in this shell"),
+            "a local model was reported as missing a key it never wanted: {out}"
+        );
+        assert!(
+            out.contains("no key needed"),
+            "the row does not say why the key column is empty: {out}"
+        );
     }
 
     #[test]

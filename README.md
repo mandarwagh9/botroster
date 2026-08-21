@@ -146,6 +146,19 @@ rules = [
 A rule that cannot be understood stops the hub rather than being skipped: a rule that is silently
 dropped is a security failure, not a warning.
 
+#### A model on this computer
+
+An empty `api_key_env` means the endpoint wants no credential, which is the usual arrangement for a
+model served on localhost. No account, no key, and nothing leaves the machine:
+
+```sh
+openbot config set --model qwen3:1.7b --dialect openai --base-url http://localhost:11434/v1 --api-key-env ''
+```
+
+The desktop window offers the same thing as a provider in its Model section, so a fresh install
+needs no terminal at all. A *named* variable that is not set is still an error — meaning to use a
+key and forgetting to export it is a mistake worth reporting.
+
 ## Design
 
 <p align="center">
