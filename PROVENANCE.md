@@ -111,6 +111,29 @@ successor's source is published.
 `openbot` first-party code is **Apache-2.0**, matching the primary upstream so the combination is
 frictionless and downstream users inherit one coherent grant.
 
+### Brand assets
+
+An icon is not code, and Apache-2.0 §6 withholds trademark rights in both directions: the grant on
+this repository's code does not license its marks to anyone either.
+
+| Asset | Where it is used | Origin | Status |
+|---|---|---|---|
+| `docs/brand/app-icon-source.png` (penguin on violet) | source for `crates/openbot-app/icons/*` and the `.mark.product` data URI in `ui/styles.css` | **Supplied by the repository owner.** Not drawn in-repo, not taken from any upstream in this file. | ⚠️ **Origin unconfirmed.** See below. |
+
+**The open question, recorded rather than assumed.** The file arrived as
+`bc2dd8dcd42bee12-penguin-violet-bg.png` — a content-hash filename, which is what a download or a
+generator produces, not what an author names their own artwork. Whether it is original, commissioned,
+generated, or taken from somewhere with terms attached is not something this repository can tell by
+looking at the pixels, and it is published to the world in every release.
+
+This row exists because §5 below says a component is recorded **before** merging, and the honest
+record here is "we do not yet know". It is deliberately not a licence claim. Before a release that
+is offered to anyone else, the owner should either confirm the asset is theirs to license and
+replace this row with the actual terms, or swap the artwork for one whose terms are known.
+
+Nothing else in the repository depends on the answer: the icon set and the data URI are both
+regenerated from this one file, so replacing it is a one-command change.
+
 ## 5. Adding a dependency
 
 1. Record it in the table above **before** merging.

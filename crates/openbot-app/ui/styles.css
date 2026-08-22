@@ -546,6 +546,30 @@ textarea {
   color: var(--accent-ink);
 }
 
+/* The product mark, as distinct from a Bot's.
+
+   The artwork itself rather than a redrawing of it. A hand-authored SVG
+   would be smaller and would scale, but it would also be a second, subtly
+   different penguin: the one in the taskbar and the one in the window
+   would not match, and a brand mark that disagrees with itself is worse
+   than a heavier one. Encoded once here rather than inline at each of the
+   three places it appears, so the bytes are paid for once.
+
+   48px for a 24px box, so it stays sharp on a 2x display. Quantised to 48
+   colours, which is indistinguishable from the full-colour resize at 6x
+   zoom and about a third of the size.
+
+   Longhands, not the `background` shorthand: `.mark` sets a background
+   colour and the shorthand here would reset properties this rule has no
+   opinion about. The artwork brings its own ground, so the accent fill
+   underneath it is turned off rather than left to show at the edges. */
+.mark.product {
+  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAMAAABg3Am1AAAAkFBMVEX///79/f37/Pv6+vr5+fn2+Pf09fXx8vPu7/Lr7O/o6uzm5uvh5OfZ3ODPztmlnMFyZpZMQm1MQHI/QEg+P0g+P0dwPe5vPe1uPeY9Pkc9PkY8PUZwPO5vPO5vPO1wPOxvPOxvPOtuPO1vO+1vO+xuO+1uO+xuO+tuOuxpNOtKN4E6O0M1Nj8vMDkpKjIbGyUMRpJ7AAAEeElEQVR42lWViXKzOgyFDWFfDIxZhiX8FAiBMdD3f7t7JEh7qzaBOPp8tJmIcXw+n/SC9VU1juPr9aR3uqELPjx57YUvX4t4Pbuue5Zd+cdAd8++x6XCXdn1z7KqsPB6iVdHvl1ZkV//Q/R0W/VV3/cds1jAa4ICPnd9f62Aq9iTHXnx+exvg04/LmKdnvTN9OItbpSvU//Xqn5YFgKu7149b4vb7ge7jTYjG/sbqHDD2w2MAuQNfv0ncu6X13QBE9+zHsCF4RfZBxj7ma7LPBOwcBDDPyoNV2ognWn6yeA3neHKgaoyrNuvrVTVaeYIu+l/2Y8MlCU5wye5DDoE/fs3cFITovsRo5gFnBMZeab42MOTSflFewwcByIfefuBiEGU0jMN07TIHg/TMJjyZbltA/WWEmbfK4tB2Kbjuo5t2+RuAmADEydQocDuQaDqLgA8zwPg/CIswkxUbmtFZcLGAMf5FyDiRm4ZYoRAYOU8Iw2uwABgFr7/F0Em5s3g3y+3fzMMqWB36gSAm2DkjwxUhJEwAWCmwFDW4CL+Ip8CkAgRw0DIwKMREOF/dG6CkcdVMybQjok1FhEGQRB6FhphCAuM8ycZJsqtGqh/wwWEYWBFSZpmaSKtx53/JXVXzGaiG24g8v1EnWxHJg2IeO7VbmHbFNdDRBspzCSyiMiPs3NvGzJ9nolhO4YtoZgmsRCOxUSylQsfh3EUQazOoqnrpika3e5nGkdJdgumMRMPwym3YSGFeRBhdhZtocgAaQ2189BN27Z6P48EBApClVqWFcAiUuyvLisKFtl1qzUBWh8nE5bpltu8riv1odHsn8O7UEXTtOTbck5AjkOajm3ZkKgArO9F7Jri4VfBGGVDltckcmYmdcWItvl9AbrlcBC7ylXOBJTqmlHKQxo4LpZZbl/rgqCEbnj37+/vnXSuzXMQiK8giVR4aCKlTTGRQotY9A3kV70oNiwdRdsemUW9NyQD70GgIE19A3muPlarE0sKgPJpWh5euaJO7zeAuqjVfgGqRlGpajkDp6rbXYUujfEDRwk5rABQFAZ0rrTOMqX2I0d0P4BPgGtwYZcVZW1rxHJ8HyrXSlq2G8lUFx+gPjLHp5NiAljQOaEweFQT+sMk+K6NZ1q6K3UgaVUXZ2oGdLhMySEtIjkxNzUbAD+OozCyEsjlO6imOaQd0HG0YszfMq8iyI5WY1prlEirhIDAJYVruo7M9ekUe06EGqFQeCjuOw0PS+g2wzlIUn13AwKJTYfY952wAvBeRewlx35NXFPn7X4c+8495+E6U/YH4IblipgAgNgPmmWGam5eUeeYQfQi9YKQTn1wAxi+OI59SYf0g7AUJrUtMEe+H4ZRRIQH4Ov9tQgJIorwGDjY/YM1CE4nHrwjAlAIVhgmISUhgUwynEgMxnXWkIpKpRvdRkC8LP0NEBH7ER4VijyRNoqVxG5A2h/CldtAv0cMXEjkB5GU9DsnZeR7UXzZDTiSnrGokpS/CHfNR6Oij/cHiEKHZ2ld/wOo8tKGMzaPYgAAAABJRU5ErkJggg==");
+  background-size: cover;
+  background-position: center;
+  background-color: transparent;
+}
+
 /* A Bot's own mark: its coat, filled, with its initial. --coat is set by
    markEl from the Bot's id, one of eight. Held by
    every_coat_a_bot_can_wear_is_legible. */

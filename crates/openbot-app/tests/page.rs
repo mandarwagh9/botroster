@@ -4251,6 +4251,75 @@ async fn a_model_key_is_not_left_in_the_connect_panel() {
     );
 }
 
+/// The product wears the logo; a Bot still wears its own initial.
+///
+/// Both use `.mark`, so the risk in giving the product one an image was giving
+/// every Bot the same image — which would delete the only per-Bot identity the
+/// roster has, and do it silently, since a roster of identical marks still
+/// renders and still lays out. The two halves are asserted together for that
+/// reason: `.mark.product` carries artwork and no letter, `.mark.bot-mark`
+/// carries a letter and no artwork.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_product_mark_is_the_logo_and_a_bot_keeps_its_initial() {
+    let Some((b, _p)) = page().await else { return };
+
+    let product = b
+        .text_of(
+            "JSON.stringify([...document.querySelectorAll('.mark.product')].map(e => ({\
+               text: e.textContent.trim(),\
+               img: getComputedStyle(e).backgroundImage.slice(0, 22) })))",
+        )
+        .await
+        .unwrap();
+    assert!(
+        product.contains(r#""img":"url(\"data:image/png"#),
+        "the product mark is not showing the logo: {product}"
+    );
+    assert!(
+        !product.contains(r#""text":"O""#),
+        "the product mark still has the letterform in it: {product}"
+    );
+    // All three of them, not just whichever one happened to be on screen.
+    assert_eq!(
+        b.text_of("String(document.querySelectorAll('.mark.product').length)")
+            .await
+            .unwrap(),
+        "3",
+        "a product mark was left behind as a letter"
+    );
+
+    open_session(&b, "s1").await;
+    b.text_of(
+        r#"(() => { window.__replies.roster = [
+             { id: "talent-scout", name: "Talent Scout", title: "", description: "",
+               hidden: false, messages: 0 }];
+             return 'ok'; })()"#,
+    )
+    .await
+    .expect("a roster with one Bot");
+    settle().await;
+
+    let bot = b
+        .text_of(
+            "JSON.stringify([...document.querySelectorAll('.mark.bot-mark')].map(e => ({\
+               text: e.textContent.trim(),\
+               img: getComputedStyle(e).backgroundImage })))",
+        )
+        .await
+        .unwrap();
+    // Checked before the interesting assertion, because "no Bot mark carries
+    // the logo" is trivially true of no Bot marks at all. Without this the test
+    // would keep passing after any change that stopped the roster rendering.
+    assert!(
+        bot.contains(r#""text":"T""#),
+        "no Bot mark with an initial was on screen, so the check below proves nothing: {bot}"
+    );
+    assert!(
+        !bot.contains("data:image"),
+        "a Bot's mark picked up the product logo, so every Bot now looks the same: {bot}"
+    );
+}
+
 /// Keeping a credential is a choice, and the window has to make it only when
 /// asked. A box that arrived ticked would decide for somebody on a machine they
 /// might be sharing, and the deciding is the whole point of the box.

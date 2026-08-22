@@ -279,3 +279,25 @@ unanswerable from the shell.
 
 **Generalisable: before adding a crate for a capability, check whether a sibling subsystem
 already solved it — and whether the invariant tests already permit the edge you need.**
+
+### The page-suite flake is now two data points, and I made it likelier
+
+`storing_a_credential_sends_it_as_a_value_not_as_an_option` failed inside `ux-verify.sh` and
+passed 3/3 alone and on the very next gate run. That is a **different test** from the earlier
+`escape_closes_a_panel_but_never_an_approval` failure, which is the tell: it is not a bug in
+either test, it is the suite.
+
+Each test in `page.rs` spawns a Chromium *and* a loopback server. This session added five
+browser-driving tests (three for providers and the remembered key, one for the keep-this-key box,
+one for the product mark), taking the suite from 63 to 69. Every one of them makes the next flake
+likelier.
+
+**This is worth fixing and was deliberately not fixed here**, because it is shared test
+infrastructure and the task in hand was a logo. The shape of the fix: `page()` retries **once**
+when navigation lands on `chrome-error://chromewebdata/`, which is a navigation that never
+completed and is distinguishable from an assertion failure. A blanket retry would be wrong — it
+would hide real failures — so it must key on that condition only.
+
+**Generalisable: when you add load to a suite that is already flaking, say so in the same breath
+as the feature.** A flake that arrives with a change looks like the change caused it, and the next
+person will go looking in the wrong place.
