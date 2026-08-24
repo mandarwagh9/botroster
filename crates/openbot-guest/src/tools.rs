@@ -302,7 +302,7 @@ fn browser_catalog() -> Vec<ToolDescription> {
         ),
         ToolDescription::new(
             "browser.click",
-            "Click something. Give either a ref from browser.snapshot, or a CSS selector.",
+            "Click something. Give either a ref from browser.snapshot, or a CSS selector. Waits for any navigation the click starts and reports where the page ended up; when navigated is true, earlier refs are dead and you need a new snapshot.",
             json!({
                 "type": "object",
                 "properties": {
@@ -570,14 +570,24 @@ pub async fn invoke(
         "browser.click" => {
             let target = target_of(args)?;
             let b = ctx.browser().await?;
-            b.click_target(&target)
+            // `click_and_settle`, not `click` then `info`: those two used to be
+            // separate calls, and for a link or a submit button the second one
+            // landed in the old execution context and reported the previous
+            // page as if the click had done nothing.
+            let after = b
+                .click_and_settle(&target)
                 .await
                 .map_err(|e| ToolError::Failed(e.to_string()))?;
-            let info = b
-                .info()
-                .await
-                .map_err(|e| ToolError::Failed(e.to_string()))?;
-            Ok(json!({ "clicked": target_label(&target), "url": info.url, "title": info.title }))
+            // `navigated` is reported rather than left to be inferred from the
+            // url: it is what tells the model that every ref from its last
+            // snapshot is dead, and a model that has to compare urls to work
+            // that out will sometimes not bother.
+            Ok(json!({
+                "clicked": target_label(&target),
+                "navigated": after.navigated,
+                "url": after.url,
+                "title": after.title
+            }))
         }
 
         "browser.fill" => {

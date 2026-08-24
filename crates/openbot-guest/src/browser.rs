@@ -39,6 +39,18 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long to wait for a navigation to settle.
 const NAV_TIMEOUT: Duration = Duration::from_secs(45);
 
+/// How long a click waits to find out whether it started a navigation.
+///
+/// Not the navigation's own budget — that is `NAV_TIMEOUT`, and it starts once
+/// a navigation is known to be underway. This is only the window in which one
+/// may *begin*, and it is the cost a click that changes nothing pays. Chrome
+/// schedules a navigation from a click essentially at once; the slack is for
+/// handlers that defer one behind a timer or an await, which real pages do.
+///
+/// Kept short deliberately. Ten fills and a click is a form, and a second of
+/// waiting per click is a form that takes ten seconds longer than it should.
+const CLICK_SETTLE: Duration = Duration::from_millis(700);
+
 #[derive(Debug, thiserror::Error)]
 pub enum BrowserError {
     #[error("no Chromium-family browser found; set OPENBOT_BROWSER to its path")]
@@ -357,6 +369,12 @@ pub struct Browser {
     tx: mpsc::UnboundedSender<String>,
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>,
     next_id: AtomicU64,
+    /// Distinguishes this click's mark on the document from an earlier one.
+    ///
+    /// A counter rather than a random value: the question is only "is this the
+    /// same context I just marked", and a sequence answers it without needing
+    /// randomness in a crate that has none.
+    nav_token: AtomicU64,
     /// Set once the connection is gone, by whichever side notices first.
     ///
     /// Without it a browser that dies mid-session is slowly unusable rather
@@ -478,6 +496,7 @@ impl Browser {
             tx,
             pending,
             next_id: AtomicU64::new(1),
+            nav_token: AtomicU64::new(0),
             closed,
         };
         b.call("Page.enable", json!({})).await?;
@@ -649,6 +668,81 @@ impl Browser {
             target.resolve_js()
         );
         target.check(self.eval(&expr).await?.as_str())
+    }
+
+    /// Click, then wait to find out whether the page went somewhere.
+    ///
+    /// `e.click()` returns as soon as a navigation is *scheduled*, so the
+    /// `info()` that used to follow it landed in whichever context happened to
+    /// be current: usually the old one, reporting the previous page's url and
+    /// title as if the click had done nothing, and occasionally a context being
+    /// torn down, which answers "Execution context was destroyed" and was
+    /// reported as the click having failed.
+    ///
+    /// Both branches are worse than an error. A model told nothing happened
+    /// clicks again; a model told the click failed retries it. On a live web
+    /// app that is a double-submitted form, a double-sent message, a
+    /// double-charged cart — and the second one is not gated, because the
+    /// approval the person read was for the first.
+    ///
+    /// # How the navigation is detected
+    ///
+    /// By marking the document and watching for the mark to disappear. A
+    /// navigation replaces the JavaScript context, taking any `window` property
+    /// with it, so a token that is gone is a context that was replaced — which
+    /// is precisely the condition that makes `info()` lie and refs go stale.
+    ///
+    /// The alternative is CDP's `Page.frameNavigated`, and it is the better
+    /// mechanism, but this connection drops events on the floor: the read pump
+    /// correlates replies by id and discards anything without one. Building an
+    /// event fan-out to answer one question would be a larger change than the
+    /// defect warrants, and the token answers exactly the question being asked.
+    ///
+    /// A same-document navigation — `pushState`, a client-side router — does
+    /// not replace the context, so `navigated` is false for it and that is
+    /// correct: nothing went stale, and `location.href` in the surviving
+    /// context is already the new URL, so the reported page is right either way.
+    pub async fn click_and_settle(&self, target: &Target) -> Result<Clicked> {
+        // Sequence, not randomness: a fresh value each call, so a stale token
+        // from an earlier click cannot be mistaken for this one surviving.
+        let token = self.nav_token.fetch_add(1, Ordering::Relaxed) + 1;
+        self.eval(&format!("window.__openbot_nav={token}")).await?;
+
+        self.click_target(target).await?;
+
+        // Chrome schedules a navigation from a click essentially at once, but
+        // a handler may defer one. This bounds what a click that does nothing
+        // pays: it returns as soon as the token is confirmed still there and
+        // the page is idle, rather than always waiting out the window.
+        let deadline = tokio::time::Instant::now() + CLICK_SETTLE;
+        let mut navigated = false;
+        while tokio::time::Instant::now() < deadline {
+            match self.eval("String(window.__openbot_nav)").await {
+                // The context is gone: the mark went with it.
+                Ok(Value::String(s)) if s != token.to_string() => {
+                    navigated = true;
+                    break;
+                }
+                // The context is being torn down mid-question, which only
+                // happens when something is navigating.
+                Err(BrowserError::Protocol(_)) => {
+                    navigated = true;
+                    break;
+                }
+                _ => {}
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+
+        if navigated {
+            self.await_ready().await?;
+        }
+        let info = self.info().await?;
+        Ok(Clicked {
+            navigated,
+            url: info.url,
+            title: info.title,
+        })
     }
 
     /// Type into a field, by selector or by ref.
@@ -933,6 +1027,17 @@ pub struct Frame {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PageInfo {
+    pub url: String,
+    pub title: String,
+}
+
+/// What a click did, once it had finished doing it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Clicked {
+    /// Whether the page was replaced. Refs from an earlier `snapshot` are dead
+    /// when this is true, and the model needs to know without inferring it from
+    /// a url it may not have been looking at.
+    pub navigated: bool,
     pub url: String,
     pub title: String,
 }

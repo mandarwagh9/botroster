@@ -287,3 +287,40 @@ shows up on someone else's input is the worst kind**, and it is free to avoid at
   strings on one line** and let rustfmt leave them alone.
 - `every_tool_the_computer_offers_has_a_rule_of_its_own` catches a new tool with no policy rule.
   Adding a tool means adding a rule in `openbotd/src/policy.rs` in the same change.
+
+---
+
+## Iteration 5 — 2026-08-24. T1-3 finished: the click waits.
+
+**Closed:** F-GT5. `click_and_settle` marks the document, clicks, and watches the mark vanish.
+
+### A test that passes half the time is worse than no test
+
+The first immediate-navigation test asserted only the resulting url. With the fix removed it still
+passed about half the time, because whether `info()` lands before or after the context swaps *is*
+the race being fixed. It would have reported the bug as fixed on exactly the run that mattered.
+
+*Generalises:* **when the defect is a race, assert the thing that cannot happen by luck.**
+`navigated` is only true if the swap was observed; the url is true whenever the timing was kind.
+Look for the deterministic proxy rather than the visible symptom.
+
+Corollary worth keeping: **a mutation that fails one of three tests is not a pass.** M1 failed the
+deferred test and passed the immediate one, and the temptation was to call the mutation caught and
+move on. The one that did not fire was the one with something to say.
+
+### Detect the mechanism, not the symptom
+
+The symptom is "url is wrong". The mechanism is "the JavaScript context was replaced" — which is
+also exactly what invalidates snapshot refs, so one check answers both questions. Choosing the
+mechanism gave `navigated` for free, and `navigated` is what the model actually needs to know.
+
+### When the better mechanism is unavailable, say so at the site
+
+`Page.frameNavigated` is the right way to do this and this CDP connection drops events. The comment
+records that, so the next person does not rediscover the token trick and assume it was preferred.
+
+### The same bug in two places
+
+`tests/browser.rs` had the identical `let Ok(..) = accept().await else { return }` defect fixed in
+`page.rs` last iteration. **After fixing a defect, grep for its shape** — a harness pattern copied
+once is usually copied twice.

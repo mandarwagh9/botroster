@@ -73,6 +73,18 @@ const FORM_PAGE: &str = r#"<!doctype html><html><head><title>sign in</title></he
   <div id="out"></div>
 </body></html>"#;
 
+/// A page whose controls navigate, which is what most real clicks do.
+///
+/// The test server answers every path with this same document, so a navigation
+/// is visible in the URL rather than the content. That is the property under
+/// test: whether the tool reports the page it ended on.
+const NAV_PAGE: &str = r#"<!doctype html><html><head><title>first</title></head>
+<body>
+  <a id="link" href="/second">Go to the second page</a>
+  <button id="soon" onclick="setTimeout(()=>{location.href='/later'},300)">Go in a moment</button>
+  <button id="quiet" onclick="document.title='still here'">Change nothing</button>
+</body></html>"#;
+
 /// Serve `PAGE` on loopback until the returned handle is dropped.
 async fn serve() -> String {
     serve_page(PAGE).await
@@ -82,9 +94,27 @@ async fn serve_page(page: &'static str) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
+        // One failed accept does not end the server. Same defect, same reason
+        // as the one fixed in `openbot-app/tests/page.rs`: this suite runs many
+        // browsers at once, the descriptor limit is a real ceiling, and a
+        // transient EMFILE used to shut the server down for the rest of the
+        // test - after which every navigation got Chrome's error page.
+        let mut consecutive = 0;
         loop {
-            let Ok((mut sock, _)) = listener.accept().await else {
-                return;
+            let (mut sock, _) = match listener.accept().await {
+                Ok(pair) => {
+                    consecutive = 0;
+                    pair
+                }
+                Err(e) => {
+                    consecutive += 1;
+                    if consecutive > 16 {
+                        eprintln!("test server giving up after 16 accept failures: {e}");
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    continue;
+                }
             };
             tokio::spawn(async move {
                 let mut buf = [0u8; 2048];
@@ -940,5 +970,107 @@ async fn a_ref_used_before_any_snapshot_says_to_take_one() {
     assert!(
         shown.contains("no snapshot"),
         "must tell 'you never asked' apart from 'the page moved on': {shown}"
+    );
+}
+
+/// A click that navigates reports the page it arrived on.
+///
+/// The most common click in web automation is a link or a submit button, and
+/// `e.click()` returns as soon as the navigation is *scheduled*. The `info()`
+/// that followed therefore landed in the old execution context and reported the
+/// previous page's url and title — as if the click had done nothing.
+///
+/// The model's recovery from "nothing happened" is to click again. On a live
+/// web app that is a double-submitted form, a double-sent message, a
+/// double-charged cart — and the second one is not gated, because the approval
+/// the person read was for the first.
+#[tokio::test]
+async fn a_click_that_navigates_reports_where_it_landed() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve_page(NAV_PAGE).await;
+    b.navigate(&url).await.expect("navigate");
+
+    let after = b
+        .click_and_settle(&Target::Selector("#link".into()))
+        .await
+        .expect("click the link");
+
+    // `navigated` first, and it is the assertion doing the work here. Asserting
+    // only the url makes an unreliable regression test: with the settle window
+    // removed, this click still reported the right url about half the time,
+    // because whether `info()` lands before or after the context swaps is the
+    // very race being fixed. A test that passes half the time with the defect
+    // present is worse than no test — it reports the bug as fixed on the run
+    // that matters. `navigated` cannot be true unless the swap was observed.
+    assert!(
+        after.navigated,
+        "the page was replaced and the tool did not notice, so every ref from the last snapshot is dead and nothing has said so: {after:?}"
+    );
+    assert!(
+        after.url.ends_with("/second"),
+        "the click navigated and the tool reported where the page used to be, so a model reading it concludes nothing happened and clicks again: {:?}",
+        after.url
+    );
+}
+
+/// A navigation that starts on a timer is waited for too.
+///
+/// Plenty of real controls navigate from a handler rather than synchronously.
+/// Returning before that has settled reports the old page just as confidently.
+#[tokio::test]
+async fn a_click_that_navigates_a_moment_later_is_still_waited_for() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve_page(NAV_PAGE).await;
+    b.navigate(&url).await.expect("navigate");
+
+    let after = b
+        .click_and_settle(&Target::Selector("#soon".into()))
+        .await
+        .expect("click the deferred button");
+
+    assert!(
+        after.url.ends_with("/later"),
+        "a navigation scheduled 300ms after the click was not waited for; got {:?}",
+        after.url
+    );
+}
+
+/// A click that does not navigate does not pay for one, and says so.
+///
+/// The cost of waiting has to be bounded by what actually happened, or filling
+/// a ten-field form becomes ten waits for navigations that never come. This is
+/// also the anti-vacuity test for the two above: a `click_and_settle` that
+/// always waited the full deadline and always reported the current url would
+/// pass both of them.
+#[tokio::test]
+async fn a_click_that_changes_nothing_does_not_wait_for_a_navigation() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve_page(NAV_PAGE).await;
+    b.navigate(&url).await.expect("navigate");
+
+    let started = std::time::Instant::now();
+    let after = b
+        .click_and_settle(&Target::Selector("#quiet".into()))
+        .await
+        .expect("click the quiet button");
+    let took = started.elapsed();
+
+    assert!(
+        !after.navigated,
+        "nothing navigated, and saying it did would invalidate every ref for no reason"
+    );
+    assert_eq!(
+        after.title, "still here",
+        "the handler ran, so the tool must report the page as it is now"
+    );
+    assert!(
+        took < Duration::from_millis(900),
+        "a click that does not navigate waited {took:?} for one; ten of those is a form"
     );
 }

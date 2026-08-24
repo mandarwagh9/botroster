@@ -50,7 +50,7 @@ which is exactly why nobody will report it — and why a routine loses a whole f
 *Durable fix:* the window boundary must be chosen over turn units, not lines. A tail that can split
 a pair is wrong however many lines it keeps.
 
-### T1-3 — the model cannot click what it can see. `done` (F-GT4; F-GT5 navigation-waiting still `open`)
+### T1-3 — the model cannot click what it can see. `done` (F-GT4 and F-GT5)
 `P0` · reach: most users · `reports/guest-tools.md` F-GT4, F-GT5
 
 `browser.read` returns `innerText`; `click`/`fill` require CSS selectors that nothing in the output
