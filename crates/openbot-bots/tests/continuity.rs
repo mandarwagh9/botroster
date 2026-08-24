@@ -376,3 +376,83 @@ fn checking_a_delivery_id_does_not_scan_every_past_delivery() {
         "checking took {took:?}: the whole history is being read"
     );
 }
+
+/// A replayed window never opens on a tool result whose call it left behind.
+///
+/// A tool-using Bot's log is a repeating pair: an assistant message asking for
+/// a tool, then a user message carrying the result. Taking the last N *lines*
+/// of that cuts between the two whenever N lands wrong, and the window then
+/// starts with a `tool_result` referring to a `tool_use` that is no longer in
+/// the request. Both vendors reject that: Anthropic emits the block
+/// unconditionally, and the OpenAI dialect emits a bare `role:"tool"` message.
+///
+/// The suite already understands this hazard from the other end —
+/// `agent_loop.rs` says a transcript with unanswered tool calls "does not break
+/// the run that produced it; it breaks the next run on that Bot, on another
+/// day, with a 400 nobody would trace back". This is the mirror: an orphaned
+/// *result* at the head of the window, which was unguarded.
+///
+/// Every window size is checked rather than one, because the bug is a parity
+/// property — it appears only for the N that cut a pair, so a single N proves
+/// nothing about the rest.
+#[test]
+fn a_replayed_window_never_starts_with_an_orphaned_tool_result() {
+    let home = tempfile::tempdir().unwrap();
+    let bots = BotStore::open(home.path()).unwrap();
+    let bot = bots.create("Tessa", "", "").unwrap();
+
+    // Twenty tool-using turns: ask, use, result. The shape a Bot that actually
+    // does work leaves behind, not a chat log.
+    for i in 0..20 {
+        let id = openbot_agent::model::ToolUseId::new(format!("t{i}"));
+        bots.append(
+            &bot.id,
+            &[
+                openbot_agent::model::Message::user(format!("task {i}")),
+                openbot_agent::model::Message::assistant(vec![Content::ToolUse {
+                    id: id.clone(),
+                    name: "fs.read".into(),
+                    input: json!({ "path": "notes.md" }),
+                }]),
+                openbot_agent::model::Message {
+                    role: openbot_agent::model::Role::User,
+                    content: vec![Content::ToolResult {
+                        id,
+                        content: format!("contents {i}"),
+                        is_error: false,
+                    }],
+                },
+            ],
+        )
+        .unwrap();
+    }
+
+    let mut orphaned = Vec::new();
+    for n in 1..=60 {
+        let window = bots.history(&bot.id, Some(n)).unwrap();
+        // Every id answered inside the window must have been asked inside it.
+        let mut asked = std::collections::HashSet::new();
+        for m in &window {
+            for c in &m.content {
+                match c {
+                    Content::ToolUse { id, .. } => {
+                        asked.insert(id.clone());
+                    }
+                    Content::ToolResult { id, .. } if !asked.contains(id) => {
+                        orphaned.push((n, id.clone()));
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    assert!(
+        orphaned.is_empty(),
+        "{} of 60 window sizes replay a tool result whose call was cut off. Both vendors 400 \
+         this, and it heals on the next run - so it is a routine losing a firing, recorded as \
+         retryable: false, that nobody can reproduce. Sizes: {:?}",
+        orphaned.len(),
+        orphaned.iter().map(|(n, _)| *n).collect::<Vec<_>>()
+    );
+}

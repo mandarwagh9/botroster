@@ -29,7 +29,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
-use openbot_agent::model::Message;
+use openbot_agent::model::{Content, Message, ToolUseId};
 use serde::{Deserialize, Serialize};
 
 /// Maximum number of Bots and groups combined on one account. Matches the
@@ -468,7 +468,9 @@ impl BotStore {
             return Ok(Vec::new());
         }
         if let Some(n) = limit {
-            return Ok(Self::parse_lines(&tail_lines(&path, n)?));
+            return Ok(Self::repair_window(Self::parse_lines(&tail_lines(
+                &path, n,
+            )?)));
         }
         let f = BufReader::new(fs::File::open(&path)?);
         let mut out = Vec::new();
@@ -484,7 +486,106 @@ impl BotStore {
                 Err(e) => tracing::warn!(error = %e, "skipping an unreadable history line"),
             }
         }
-        Ok(out)
+        // The unlimited path is not cut mid-pair, but it does skip lines it
+        // cannot parse, and a skipped line orphans whatever answered it just as
+        // a window boundary would.
+        Ok(Self::repair_window(out))
+    }
+
+    /// Drop tool blocks the window cannot account for.
+    ///
+    /// A conversation window is not a line count, and treating it as one is how
+    /// this broke. A tool-using Bot's log is a repeating pair — an assistant
+    /// message asking for a tool, then a user message carrying the result — and
+    /// taking the last N *lines* of that cuts between the two whenever N lands
+    /// wrong. The window then opens on a `tool_result` whose `tool_use` is one
+    /// line further back, outside the request. Anthropic emits the block
+    /// unconditionally and the OpenAI dialect emits a bare `role:"tool"`
+    /// message, so both vendors answer 400.
+    ///
+    /// With one tool call per turn that is every third window size, and the
+    /// shipped `DEFAULT_HISTORY` of 40 was one of them.
+    ///
+    /// What made it expensive is that it heals. `fresh` is appended, the window
+    /// start advances by one onto the `tool_use` that owns the orphan, and the
+    /// next run is legal — so a person retypes the task and it works, and never
+    /// files anything. A routine gets no second try: it loses the firing,
+    /// records `retryable: false` and a vendor message about a `tool_use_id`
+    /// nobody can act on, and recurs whenever the window lands badly again.
+    /// `agent_loop.rs` already says this about the mirror case, unanswered calls
+    /// at the *end* of a transcript: it "breaks the next run on that Bot, on
+    /// another day, with a 400 nobody would trace back". Both ends are repaired
+    /// here.
+    ///
+    /// The repair drops blocks rather than truncating to the first legal
+    /// message, which keeps the most context: an orphan can also appear in the
+    /// middle, because both read paths skip a line that will not parse, and
+    /// truncating on a mid-window orphan would throw away everything before it.
+    /// A message left holding nothing is dropped, since an empty message is its
+    /// own vendor error.
+    ///
+    /// It lives inside `history` rather than beside it so that no caller can
+    /// forget it. That is the same reasoning as `compact`'s `&mut [Message]`
+    /// signature: make the shape a property of the only function that produces
+    /// it.
+    fn repair_window(messages: Vec<Message>) -> Vec<Message> {
+        use std::collections::HashSet;
+
+        fn keep_non_empty(messages: Vec<Message>, mut f: impl FnMut(&mut Message)) -> Vec<Message> {
+            let mut out = Vec::with_capacity(messages.len());
+            for mut m in messages {
+                f(&mut m);
+                // An empty message is its own vendor error, so a message left
+                // holding nothing goes rather than being sent hollow.
+                if !m.content.is_empty() {
+                    out.push(m);
+                }
+            }
+            out
+        }
+
+        // Two passes, in this order, and not one pass over two precomputed
+        // sets. The first version of this collected `asked` and `answered` up
+        // front and filtered once, which keeps a call whose only answer is a
+        // result the same filter is dropping - leaving exactly the unanswered
+        // call the second half exists to prevent. Dropping a result can orphan
+        // a call, so the calls have to be judged against what actually
+        // survived. The reverse cannot happen: a call is only dropped when
+        // nothing answered it, so no surviving result refers to it, and two
+        // passes reach a fixed point rather than needing a loop.
+
+        // Forward: a result is legal only if its call is already behind it in
+        // this window. Membership is not enough - the call has to come first,
+        // or the model is answering a question it has not been asked.
+        let mut seen: HashSet<ToolUseId> = HashSet::new();
+        let messages = keep_non_empty(messages, |m| {
+            m.content.retain(|c| match c {
+                Content::ToolResult { id, .. } => seen.contains(id),
+                Content::ToolUse { .. } | Content::Text { .. } => true,
+            });
+            for c in &m.content {
+                if let Content::ToolUse { id, .. } = c {
+                    seen.insert(id.clone());
+                }
+            }
+        });
+
+        // Then: a call nobody answered is the failure `agent_loop.rs` guards on
+        // the write side, arriving from the read side instead.
+        let mut answered: HashSet<ToolUseId> = HashSet::new();
+        for m in &messages {
+            for c in &m.content {
+                if let Content::ToolResult { id, .. } = c {
+                    answered.insert(id.clone());
+                }
+            }
+        }
+        keep_non_empty(messages, |m| {
+            m.content.retain(|c| match c {
+                Content::ToolUse { id, .. } => answered.contains(id),
+                Content::ToolResult { .. } | Content::Text { .. } => true,
+            });
+        })
     }
 
     /// Parse whole lines into messages, skipping any that will not read.
@@ -557,6 +658,119 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let s = BotStore::open(d.path()).unwrap();
         (d, s)
+    }
+
+    fn call(id: &str) -> Message {
+        Message::assistant(vec![Content::ToolUse {
+            id: ToolUseId::new(id),
+            name: "fs.read".into(),
+            input: serde_json::json!({}),
+        }])
+    }
+
+    fn result(id: &str) -> Message {
+        Message {
+            role: Role::User,
+            content: vec![Content::ToolResult {
+                id: ToolUseId::new(id),
+                content: "ok".into(),
+                is_error: false,
+            }],
+        }
+    }
+
+    #[test]
+    fn a_window_that_is_already_legal_is_returned_untouched() {
+        // The load-bearing test of the four. Every other assertion about
+        // `repair_window` is satisfied by a function that returns nothing at
+        // all, and a repair that quietly ate the conversation would look like a
+        // fixed bug and be a much worse one: the Bot would answer every task
+        // having forgotten the last forty messages, which is the property this
+        // crate exists to provide.
+        let window = vec![
+            Message::user("do the thing"),
+            call("t1"),
+            result("t1"),
+            Message::assistant(vec![Content::text("done")]),
+        ];
+        assert_eq!(
+            BotStore::repair_window(window.clone()),
+            window,
+            "a well-formed window must survive the repair unchanged"
+        );
+    }
+
+    #[test]
+    fn a_result_whose_call_was_cut_off_the_front_is_dropped() {
+        // The shipped bug: with one tool call per turn this is every third
+        // window size, and DEFAULT_HISTORY of 40 was one of them.
+        let repaired = BotStore::repair_window(vec![
+            result("t0"),
+            Message::user("next task"),
+            call("t1"),
+            result("t1"),
+        ]);
+        assert_eq!(
+            repaired,
+            vec![Message::user("next task"), call("t1"), result("t1")],
+            "the orphan goes and the intact pair behind it stays"
+        );
+    }
+
+    #[test]
+    fn a_call_left_unanswered_at_the_end_is_dropped_too() {
+        // The mirror case, which `agent_loop.rs` guards on the write side: a
+        // vendor rejects a request whose tool calls are unanswered. A run
+        // cancelled mid-call, or a line that would not parse, can leave one
+        // here on the read side where nothing was checking.
+        let repaired = BotStore::repair_window(vec![
+            Message::user("task"),
+            call("t1"),
+            result("t1"),
+            call("t2"),
+        ]);
+        assert_eq!(
+            repaired,
+            vec![Message::user("task"), call("t1"), result("t1")],
+            "the dangling call goes; everything answered stays"
+        );
+    }
+
+    #[test]
+    fn an_orphan_in_the_middle_costs_only_itself() {
+        // Both read paths skip a line they cannot parse, so an orphan can
+        // appear anywhere, not only at the cut. Truncating to the first legal
+        // message would be the easy repair and would throw away every message
+        // before the orphan - which is most of the context, to fix one block.
+        let repaired = BotStore::repair_window(vec![
+            Message::user("first"),
+            call("t1"),
+            result("t1"),
+            result("t2"),
+            Message::user("later"),
+        ]);
+        assert_eq!(
+            repaired,
+            vec![
+                Message::user("first"),
+                call("t1"),
+                result("t1"),
+                Message::user("later"),
+            ],
+            "history before a mid-window orphan must be kept"
+        );
+    }
+
+    #[test]
+    fn a_result_may_not_answer_a_call_that_comes_after_it() {
+        // Presence is not enough; the call has to be earlier in the window.
+        // Checking membership in the whole window rather than in the part
+        // already seen would accept this, and a vendor would not.
+        let repaired = BotStore::repair_window(vec![result("t1"), call("t1")]);
+        assert!(
+            repaired.is_empty(),
+            "the result precedes its call and the call is then unanswered, so both go: {repaired:?}"
+        );
     }
 
     fn msg(role: Role, text: &str) -> Message {

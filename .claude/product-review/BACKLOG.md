@@ -40,7 +40,7 @@ nothing, having been given no reason to think they also needed a crontab entry.
 already handles the "one failed tick is not a reason to stop" case. Not a shell-out to system cron:
 that reintroduces the platform divergence `up` exists to hide.
 
-### T1-2 — a long conversation 400s against every vendor. `open`
+### T1-2 — a long conversation 400s against every vendor. `done`
 `P0` · reach: most users · `reports/agent-model.md` F-AM2
 
 `history(id, Some(40))` takes a raw line tail, so the window frequently starts on a `tool_result`

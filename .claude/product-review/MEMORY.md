@@ -159,3 +159,44 @@ A `git commit -F-` heredoc containing apostrophes failed to parse twice in this 
 message to a file and use `git commit -F <file>`. The second time it silently took a `python`
 block with it, so `MEMORY.md` was not written when I thought it had been — **check that a combined
 command actually ran before trusting its side effects.**
+
+---
+
+## Iteration 3 — 2026-08-24. T1-2: the history window.
+
+**Closed:** T1-2. `history(id, Some(n))` was a raw line tail, so a window could open on a
+`tool_result` whose `tool_use` it had cut off, and both vendors 400 that.
+
+### Measure the blast radius before believing the report
+
+The finding said windows "frequently" land badly. The test said 20 of 60, every third size, and
+`DEFAULT_HISTORY = 40` is one of them. **A number changes what the fix is worth and whether the
+priority was right**; "frequently" would not have told me the shipped default was itself broken.
+Cheap here — the test had to be written anyway, so writing it *first* cost nothing and bought the
+number.
+
+### A self-healing failure is worse than a stable one
+
+The window advances by one on the next append, so the next run succeeds. A person retypes and moves
+on; nobody files it. A routine has no second try and loses the firing. **Rank a bug by who is
+watching when it fires, not by how often it fires** — the unattended path deserves the weight.
+
+### Two passes, and my own test caught why
+
+`repair_window` first computed `asked` and `answered` over the whole window, then filtered once.
+That keeps a call whose only answer is a result the same filter is dropping — creating exactly the
+unanswered call the second half exists to prevent. Dropping a result can orphan a call, so calls
+must be judged against **what survived**, not against the input. The reverse cannot happen, so two
+ordered passes reach a fixed point with no loop.
+
+I nearly cut `a_result_may_not_answer_a_call_that_comes_after_it` as unreachable in a well-formed
+log. It is the test that found the bug. *Generalises:* **write the awkward ordering case even when
+the data cannot currently produce it** — it is testing your algorithm, not your data.
+
+### The anti-vacuity test is the one that matters
+
+Every orphan assertion here is satisfied by a function returning an empty vector, and that repair
+would look like a fixed bug while being far worse: a Bot answering every task having forgotten
+everything. `a_window_that_is_already_legal_is_returned_untouched` is the only one that fails on it.
+**When a fix removes things, the first test to write is the one asserting it does not remove too
+much.**
