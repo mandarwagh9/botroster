@@ -865,7 +865,7 @@ rules = [{ action = \"require_approval\", tool = \"shell.exec\" }]
         let b = policy(with_long.path()).expect("the canonical spelling still works");
         assert_eq!(
             a.rules, b.rules,
-            "the two spellings must produce the same policy, or a person who wrote one and              read the other back would think their rule had changed"
+            "the two spellings must produce the same policy"
         );
     }
 

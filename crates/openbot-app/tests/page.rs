@@ -100,9 +100,35 @@ async fn serve() -> String {
         ("/styles.css".into(), "text/css".into(), css),
     ]);
     tokio::spawn(async move {
+        // One failed `accept` does not end the server.
+        //
+        // This was `let Ok(..) = accept().await else { return }`, so a single
+        // transient error shut the server down permanently and every later
+        // navigation in that test got Chrome's network error page. The suite
+        // runs sixty-nine of these, each with its own Chromium and its own
+        // loopback server, so the descriptor limit is a real ceiling and
+        // `EMFILE` is exactly the transient error this used to treat as fatal.
+        //
+        // Not an infinite retry: a listener that is genuinely gone would spin
+        // hot forever. Consecutive failures are counted and reset by any
+        // success, because the case worth surviving is a burst under load and
+        // the case worth giving up on is a socket that will never accept again.
+        let mut consecutive = 0;
         loop {
-            let Ok((mut sock, _)) = listener.accept().await else {
-                return;
+            let (mut sock, _) = match listener.accept().await {
+                Ok(pair) => {
+                    consecutive = 0;
+                    pair
+                }
+                Err(e) => {
+                    consecutive += 1;
+                    if consecutive > 16 {
+                        eprintln!("test server giving up after 16 accept failures: {e}");
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    continue;
+                }
             };
             let files = Arc::clone(&files);
             tokio::spawn(async move {
@@ -154,6 +180,23 @@ async fn page() -> Option<(Browser, tempfile::TempDir)> {
     let browser = Browser::launch(profile.path()).await.expect("launch");
     let url = serve().await;
     browser.navigate(&url).await.expect("navigate");
+    // Retried once, and only when the navigation demonstrably never happened.
+    //
+    // This suite has flaked three times, on three different tests, always with
+    // `chrome-error://chromewebdata/` as the page's location: Chrome's own
+    // network error page, meaning the request did not complete. Three different
+    // tests with one signature is the harness, not any of them.
+    //
+    // The narrowness is the whole point. A blanket retry would hide real
+    // failures, and a test that passes on the second try is worth less than one
+    // that fails honestly. `on_chrome_error_page` is what keeps this to the one
+    // case that cannot be an assertion failure, and it is tested below rather
+    // than trusted.
+    if on_chrome_error_page(&browser).await {
+        eprintln!("navigation landed on Chrome's error page; retrying once");
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        browser.navigate(&url).await.expect("navigate (retry)");
+    }
     // The page registers its listeners and asks `connected` on load.
     //
     // Five seconds is not a slow-load allowance. Listeners are normally
@@ -194,6 +237,55 @@ async fn page() -> Option<(Browser, tempfile::TempDir)> {
         ),
         last, readiness, listeners, title
     );
+}
+
+/// Did the navigation land on Chrome's network error page?
+///
+/// `chrome-error://chromewebdata/` is what Chrome shows when a request could
+/// not be completed at all — connection refused, reset, empty response. It is
+/// not a page that loaded and misbehaved, so retrying it cannot mask a broken
+/// assertion: there is nothing to assert on.
+///
+/// Anything else is a real answer and is left alone, including a browser that
+/// will not evaluate script, because "cannot ask" is not "navigation failed"
+/// and retrying the first would turn a dead target into a slow one.
+async fn on_chrome_error_page(browser: &Browser) -> bool {
+    matches!(
+        browser.text_of("location.href").await,
+        Ok(href) if is_chrome_error_page(&href)
+    )
+}
+
+/// The classification, split out so it can be tested without a browser.
+///
+/// This predicate is the only thing standing between "retry a navigation that
+/// never happened" and "retry until the assertion passes", so it is the part
+/// that has to be right.
+fn is_chrome_error_page(href: &str) -> bool {
+    href.starts_with("chrome-error://")
+}
+
+#[test]
+fn only_a_navigation_that_never_happened_is_retried() {
+    // The failures seen in this suite.
+    assert!(is_chrome_error_page("chrome-error://chromewebdata/"));
+
+    // Everything a working or a genuinely failing test looks like. If any of
+    // these were retried, a real defect could pass on the second attempt, which
+    // is worse than the flake being fixed.
+    for href in [
+        "http://127.0.0.1:53211/",
+        "http://127.0.0.1:53211/#approvals",
+        "about:blank",
+        "",
+        "https://chrome-error.example.com/",
+        "data:text/html,<p>hi",
+    ] {
+        assert!(
+            !is_chrome_error_page(href),
+            "{href} is a page that loaded; retrying it would hide a real failure"
+        );
+    }
 }
 
 /// An approval the way the shell emits one.

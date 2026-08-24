@@ -200,3 +200,51 @@ would look like a fixed bug while being far worse: a Bot answering every task ha
 everything. `a_window_that_is_already_legal_is_returned_untouched` is the only one that fails on it.
 **When a fix removes things, the first test to write is the one asserting it does not remove too
 much.**
+
+---
+
+## Iteration 3 (continued) — T1-4 and the page-suite flake.
+
+**Closed:** T1-4 (most of it), and carried-forward decision #2 from `CHARTER.md` §4.
+
+### The validation existed; it was filed where nobody looks
+
+`permission ls` refuses every malformed rule and always did. `status` — help text "Is anything
+wrong?" — said nothing, because `applied` reads the config with `load(home).unwrap_or_default()`.
+*Generalises:* **when a check exists and a user still gets bitten, the bug is usually placement, not
+absence.** Look for the swallowed `Result` before writing a new validator.
+
+### A vocabulary split is a product defect, not a docs defect
+
+`--approve ask` everywhere, `action = "require_approval"` in the rules file, and the README's own
+example used `ask` and was rejected by the parser that reads it. The fix is a serde alias, not a
+README edit: **when the product taught someone a word, accepting that word is not leniency.**
+
+### Two seams caught two of my own bugs again
+
+- `every_action_prints_under_a_name_a_config_may_use` indexed `rules[0]`, but `policy` starts from
+  `Policy::default()` and appends the file's rules *after*. It passed for `allow` by coincidence.
+  **A test that passes on one enum variant and not the others is usually indexing wrong, not
+  finding a real asymmetry.**
+- `!shown.contains("config")` failed on a healthy account because "config" is inside "none
+  configured". **Substring tests on rendered output answer a different question than the one asked**
+  — match the row label.
+
+### The flake was a real defect, and I still cannot prove it is fixed
+
+Three occurrences, three different tests, one signature (`chrome-error://chromewebdata/`). The
+harness's loopback server did `let Ok(..) = accept().await else { return }`, so one transient error
+killed it permanently — and sixty-nine concurrent Chromiums make `EMFILE` a live possibility.
+
+*Generalises:* **before adding a retry, look for the thing that is genuinely broken.** The recorded
+plan was "retry on chrome-error", and that was the right shape, but the accept loop was a cause
+rather than a symptom, and only one of those two is worth fixing first.
+
+*And the honesty rule:* **two clean runs is not evidence an intermittent fault is fixed.** An
+intermittent seen three times across many runs shows a clean pair most of the time regardless. Say
+what is actually established — a real defect that produces the observed symptom is gone — and not
+what is merely hoped.
+
+The retry that remains is bounded to a state that cannot be an assertion failure, and the predicate
+is split out and tested in both directions, because the danger of a retry is never the retry: it is
+the classification that decides what gets one.

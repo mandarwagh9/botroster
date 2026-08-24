@@ -388,7 +388,7 @@ mod tests {
         let first = shown.lines().next().unwrap_or_default();
         assert!(
             first.contains("config"),
-            "a broken config must come before the model and hub lines, which are being              rendered from defaults that are not what the file says: {shown}"
+            "a broken config must come before the lines rendered from defaults: {shown}"
         );
         assert!(
             shown.contains("unknown variant"),
