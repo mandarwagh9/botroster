@@ -48,9 +48,18 @@ The demo needs no API key. To point a Bot at a real model, open **Settings**, or
 
 ```sh
 cargo install --path crates/openbot-cli        # once
-openbot up                                     # a hub and a computer
 openbot run --demo --approve auto "prove it"   # a scripted run against real tools
 ```
+
+That is the whole thing. `run` starts a computer if one is not already up, uses it, and stops it
+again — one command, one terminal, no config file. If you want a computer that outlives a single
+command, so a routine can fire or the desktop client can attach to it, start one yourself:
+
+```sh
+openbot up
+```
+
+and everything after that uses it instead of starting its own.
 
 To open the desktop client against the same hub:
 

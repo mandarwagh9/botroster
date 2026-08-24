@@ -123,7 +123,13 @@ tests pass with it enabled. The vocabulary that justified it is corrected across
 
 ## Tier 3 — the first ten minutes
 
-### T3-1 — a first result costs two terminals and nobody says so. `open`
+> **Re-ranked 2026-08-25.** The order below was set by reach × cost-of-living-without *within the
+> product as it is*. Judged against what the product should feel like, that put "five steps and two
+> terminals" underneath "the config tools lie", which was wrong: the first is what everyone meets
+> first, and the second is what they meet only if they get that far. T3-1 was taken out of order for
+> that reason, and the rest of this tier should be read as higher than its position suggests.
+
+### T3-1 — a first result costs two terminals and nobody says so. `done` (F-CD3 and F-CD5; `run` starts a computer if one is not up)
 `P0` · reach: all users · `reports/cli-devex.md` F-CD3, F-CD5
 
 Five steps and two terminals, and nothing warns you until `up` has already taken the first. `run`'s

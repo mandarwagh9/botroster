@@ -416,3 +416,45 @@ connection from the test process. *Generalises:* **after two failed fixes to an 
 stop fixing and start instrumenting.** The third guess is worth less than one conclusive
 observation, and two of my three data points were unusable because nobody had recorded which
 component died.
+
+---
+
+## Iteration 8 — 2026-08-25. One command, one terminal.
+
+**Closed:** T3-1 / F-CD3 / F-CD5. `openbot run` starts a computer when one is not already up.
+
+### The ranking was measuring the wrong thing
+
+`BACKLOG.md` orders by reach × cost-of-living-without, computed *within the product as it is*. That
+put "five steps and two terminals" below "the config tools lie" — but the first is what everyone
+meets first and the second is what they meet only if they get that far. **A backlog ranked inside
+the current product will systematically under-rank the things that stop people entering it**, because
+the people it costs are not yet users and so do not appear in "reach". Re-ranked Tier 3 and said so
+in the file.
+
+### An implementation detail leaking into the first thing anyone types
+
+The hub/guest split is correct and worth keeping — in a deployment the guest runs elsewhere. It was
+never a reason for the split to be the *user's* problem on a laptop. *Generalises:* **a boundary
+that is right for the deployed shape is not automatically right for the first-run shape**, and the
+fix is usually to make the common case implicit rather than to document the split better.
+
+### Reuse the real thing rather than a lightweight version of it
+
+`hub_or_start` constructs `up::Up` and calls `start()`. Writing a smaller in-process hub for this
+path would have been quicker and would have drifted: two ways to bring up a computer, differing in
+what they configure. The only differences are deliberate and commented — ephemeral port, no snapshot
+timer, no routine timer.
+
+### Place the teardown where the exits are
+
+`?` paths unwind and `kill_on_drop` reaps the browser. `std::process::exit` runs no destructors at
+all, so the stop belongs immediately before those calls, not at the end of the happy path.
+**Whenever a function ends with `process::exit`, cleanup written above it in the "normal" place is
+cleanup that never runs.**
+
+### Two tests that separate "worked" from "worked for the reason claimed"
+
+One asserts a fresh install reaches a result in one command; the other asserts the "starting a
+computer" line appeared. Either alone is ambiguous — a hub left running by another test would pass
+the first. Together they pin the mechanism.

@@ -1307,3 +1307,60 @@ fn status_says_nothing_about_a_config_that_loads() {
          word:\n{shown}"
     );
 }
+
+/// One command, one terminal, nothing configured.
+///
+/// This is the first thing anyone types, and it used to fail. `run` connected
+/// to a hub that was not there and reported a bare winsock errno whose remedy
+/// named `openbotd` and `openbot-guest` — two binaries the documented install
+/// does not put on anyone's PATH — while not mentioning `openbot up`, which is
+/// the binary they had just typed. Getting to a first result cost five steps
+/// and two terminals, and nothing said so until the first terminal was gone.
+///
+/// The split is real in a deployment, where the guest runs elsewhere. It was
+/// never a reason for it to be the first thing a person meets.
+///
+/// Deliberately not asserting on the transcript: what the demo script does is
+/// covered elsewhere, and pinning it here would make this fail for reasons that
+/// have nothing to do with whether the command stands on its own.
+#[test]
+fn a_first_run_needs_no_second_terminal_and_no_config() {
+    let home = tempfile::tempdir().unwrap();
+    let out = run(
+        home.path(),
+        &["run", "--demo", "--approve", "auto", "prove it"],
+    );
+    let shown = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.status.success(),
+        "a fresh install could not reach a first result in one command:\n{shown}"
+    );
+    assert!(
+        !shown.contains("could not reach the hub"),
+        "the hub was not started for a command that needed one:\n{shown}"
+    );
+}
+
+/// And it says so while it does it.
+///
+/// Starting a computer takes a second or two, and silence during it reads as a
+/// hang. This is also the assertion that the stack really was started here
+/// rather than found: if a hub were somehow already running, this line would be
+/// absent and the test above would still pass.
+#[test]
+fn a_run_that_starts_its_own_computer_says_it_is_doing_so() {
+    let home = tempfile::tempdir().unwrap();
+    let out = run(
+        home.path(),
+        &["run", "--demo", "--approve", "auto", "prove it"],
+    );
+    let shown = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(
+        shown.contains("starting a computer"),
+        "no sign that a computer was started, so this run either found one or did without:\n{shown}"
+    );
+}

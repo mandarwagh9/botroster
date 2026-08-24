@@ -2510,15 +2510,22 @@ async fn run() -> anyhow::Result<()> {
             }
 
             let acting_as = bot.clone();
-            let (hub, progress) = HubClient::connect_with(&cli.hub, approve::handler(approve))
+            // A computer, whether or not the person started one. See
+            // `up::hub_or_start`: the two-terminal dance was an implementation
+            // detail leaking into the first thing anyone types.
+            let (hub_url, own_stack) = up::hub_or_start(
+                &cli.hub,
+                up::Paths {
+                    home: home.clone(),
+                    workspace: None,
+                },
+                &cli.server,
+                render::Style::detect(),
+            )
+            .await?;
+            let (hub, progress) = HubClient::connect_with(&hub_url, approve::handler(approve))
                 .await
-                .map_err(|e| {
-                    anyhow::anyhow!(
-                        "could not reach the hub at {}: {e}\n\
-                         Start it with `openbotd`, and a guest with `openbot-guest`.",
-                        cli.hub
-                    )
-                })?;
+                .map_err(|e| anyhow::anyhow!("could not reach the hub at {hub_url}: {e}"))?;
             hub.open_session_as(acting_as.as_deref()).await?;
             let tools = hub.bind_server(&cli.server).await.map_err(|e| {
                 anyhow::anyhow!(
@@ -2566,7 +2573,7 @@ async fn run() -> anyhow::Result<()> {
 
             let model_name = model.name().to_owned();
             let mut r = Renderer::new(verbose);
-            r.header(&model_name, &cli.hub, tools.len());
+            r.header(&model_name, &hub_url, tools.len());
             if !waiting.is_empty() {
                 r.handoffs(waiting.len());
             }
@@ -2635,12 +2642,22 @@ async fn run() -> anyhow::Result<()> {
                 let page = html::render(&html::Session {
                     task: &task,
                     model: &model_name,
-                    hub: &cli.hub,
+                    hub: &hub_url,
                     events: &events,
                 });
                 std::fs::write(&path, page)
                     .map_err(|e| anyhow::anyhow!("could not write {}: {e}", path.display()))?;
                 println!("  transcript → {}", path.display());
+            }
+
+            // Tear down a stack this command started, before either exit
+            // below. `std::process::exit` runs no destructors, so the browser
+            // teardown has to happen here; the `?` paths above are covered,
+            // because returning an error unwinds and `kill_on_drop` reaps the
+            // child. Nothing to do when the person started their own hub — it
+            // is not ours to stop.
+            if let Some(stack) = &own_stack {
+                stack.stop().await;
             }
 
             // A step-limited or failed run must not look like success to a

@@ -369,6 +369,67 @@ fn snapshot_on_a_timer(
     })
 }
 
+/// A hub to talk to, started here if there was not one already.
+///
+/// The two-terminal problem, removed rather than documented. `openbot up` in one
+/// window and `openbot run` in another is an implementation detail — the hub and
+/// the guest are separate processes in a real deployment — and it was the first
+/// thing every new person hit. It was not even signposted: `run` failed with a
+/// bare winsock errno whose remedy named `openbotd` and `openbot-guest`, two
+/// binaries the documented install does not put on anyone's PATH, and did not
+/// mention `openbot up`, which is the binary they had just typed.
+///
+/// An already-running hub is used as-is. That matters more than it looks: a
+/// person who ran `up` deliberately has a computer with a browser profile, a
+/// durable volume and possibly a takeover in progress, and a second stack
+/// started underneath them would fight for the volume lock and win or lose at
+/// random. Reachable means reachable — the probe completes a real handshake
+/// rather than testing whether a port accepts, because a port that accepts and
+/// then refuses the protocol is not a hub.
+///
+/// Otherwise one is started on an ephemeral port, for the length of the command.
+/// Ephemeral rather than the default 8443 so it cannot collide with an `up` the
+/// person starts a moment later, and so two of these can run at once.
+///
+/// The caller must hold the returned [`Running`] until the work is done and
+/// then stop it: process exit runs no destructors, so the browser teardown has
+/// to be explicit.
+pub async fn hub_or_start(
+    hub_url: &str,
+    paths: Paths,
+    server_id: &str,
+    style: crate::render::Style,
+) -> anyhow::Result<(String, Option<Running>)> {
+    // Short, because this runs before every command that needs a hub and the
+    // common answer on a fresh machine is "nothing is there". Long enough that
+    // a loaded machine does not get a second stack started underneath it.
+    const PROBE: std::time::Duration = std::time::Duration::from_millis(1500);
+    if let Ok(Ok(_)) = tokio::time::timeout(PROBE, openbot_agent::HubClient::connect(hub_url)).await
+    {
+        return Ok((hub_url.to_owned(), None));
+    }
+
+    // Said out loud, because it takes a moment and silence during it reads as a
+    // hang. Not said when a hub was already there, because then nothing
+    // happened worth reporting.
+    eprintln!("{}", style.dim("  starting a computer for this run…"));
+
+    let running = Up {
+        bind: "127.0.0.1:0".to_owned(),
+        paths,
+        server_id: server_id.to_owned(),
+        // No scheduled snapshots and no routine timer: this stack lives for one
+        // command. A snapshot every 30 minutes never fires, and firing the
+        // routines of a person who asked for one task would be a surprise.
+        snapshot_every: None,
+        snapshot_keep: 0,
+        routines_every: None,
+    }
+    .start()
+    .await?;
+    Ok((running.hub_url.clone(), Some(running)))
+}
+
 impl Up {
     /// Start the hub and one guest, and return once the guest has registered.
     ///
