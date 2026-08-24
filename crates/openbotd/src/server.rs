@@ -7,12 +7,77 @@ use futures_util::{SinkExt, StreamExt};
 use openbot_proto::{Frame, Hello, Principal};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
+use tokio_tungstenite::tungstenite::handshake::server::{
+    ErrorResponse as UpgradeRefusal, Request as UpgradeRequest, Response as UpgradeResponse,
+};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::hub::Hub;
 
 /// How long to let a closing connection's writer flush before giving up.
 const WRITER_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Whether this upgrade came from a web page, by the one header that says so.
+///
+/// # What this defends
+///
+/// Browsers do not apply CORS to WebSocket handshakes. `new
+/// WebSocket("ws://127.0.0.1:8443/v1/tools")` from any page a person visits
+/// reaches this listener, and the handshake here is a plain JSON text frame a
+/// page can send. Nothing further along distinguished that page from the
+/// desktop client: every connection was handed `dev_principal()`, and an
+/// approval is authorised on socket identity — so a page that opens its own
+/// session is the owner of it, and is the one the hub asks for permission.
+///
+/// While a computer is running, that made every page the person browsed able to
+/// read their workspace, drive their logged-in browser, and run `shell.exec` by
+/// approving its own request. `docs/SPEC.md` §11.5 names prompt injection as a
+/// top risk and says approvals are the mitigation; an approval answered by the
+/// attacker is not one.
+///
+/// # Why the check is this shape
+///
+/// A browser is required to send `Origin` on a WebSocket handshake and cannot
+/// be made not to. A native client has no origin to send and sends none. So the
+/// presence of the header — not its value — is the signal, and an allow-list of
+/// origins would be the weaker test: it invites `null`, and it invites someone
+/// to add an entry later without noticing they have re-opened the door.
+///
+/// This is one of two independent halves. A page also cannot set request
+/// headers on a WebSocket, so a credential in the upgrade closes the same path
+/// by a different route; that is the other half, and it defends against a local
+/// process, which this one does not.
+fn browser_origin(req: &UpgradeRequest) -> Option<String> {
+    req.headers()
+        .get("origin")
+        .map(|v| v.to_str().unwrap_or("<unreadable>").to_owned())
+}
+
+/// The upgrade callback: refuse anything that announces itself as a web page.
+// The signature is tungstenite's callback contract, not ours, and its error
+// type is an `http::Response`. Boxing it to satisfy the lint would mean a
+// conversion on the success path too, for a value constructed once per refused
+// connection.
+#[allow(clippy::result_large_err)]
+fn refuse_browsers(
+    req: &UpgradeRequest,
+    response: UpgradeResponse,
+) -> std::result::Result<UpgradeResponse, UpgradeRefusal> {
+    let Some(origin) = browser_origin(req) else {
+        return Ok(response);
+    };
+    tracing::warn!(
+        %origin,
+        "refused a WebSocket upgrade carrying an Origin header. This is what a page in a \
+         browser looks like, and a page must not be able to drive this computer. If a real \
+         client is being refused here, it should not be sending Origin."
+    );
+    let mut refusal = UpgradeRefusal::new(Some(
+        "this endpoint does not accept connections from web pages".to_owned(),
+    ));
+    *refusal.status_mut() = tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN;
+    Err(refusal)
+}
 
 pub struct Server {
     pub hub: Arc<Hub>,
@@ -55,7 +120,9 @@ impl Server {
         // Nagle hurts here: frames are small and latency-sensitive.
         stream.set_nodelay(true).ok();
 
-        let ws = tokio_tungstenite::accept_async(stream).await?;
+        // Refused at the upgrade, before a `Conn` exists and before `register`
+        // is reached. See `browser_origin` for what this is defending.
+        let ws = tokio_tungstenite::accept_hdr_async(stream, refuse_browsers).await?;
         let (mut sink, mut source) = ws.split();
 
         // The client never announces who it is; identity is derived from the
