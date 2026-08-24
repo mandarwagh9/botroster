@@ -21,7 +21,7 @@ use openbotd::server::Server;
 /// Where the two halves keep their state.
 ///
 /// These are intentionally different directories. The control plane's home
-/// holds `secrets.json`; the guest's workspace is inside the sandbox, where
+/// holds `secrets.json`; the guest's workspace is inside the workspace, where
 /// `fs.read` is allow-listed and prompts for nothing. Pointing one at the
 /// other hands the model every stored credential. The guest refuses to start
 /// on such a directory, but a command whose defaults collide would only reveal
@@ -92,7 +92,7 @@ impl Paths {
         if a == b {
             anyhow::bail!(
                 "--home and --workspace are the same directory ({}).\n  \
-                 The first holds secrets.json; the second is inside the sandbox, where \
+                 The first holds secrets.json; the second is inside the workspace, where \
                  fs.read needs no approval. They cannot be the same place.",
                 self.home.display()
             );
@@ -100,7 +100,7 @@ impl Paths {
         // The workspace must not contain the home either, and this is the
         // likely case: `--home` defaults to `./openbot-data`, so
         // `openbot up --workspace .` (a reasonable way to say "work in this
-        // directory") puts the token store one level inside the sandbox. The
+        // directory") puts the token store one level inside the workspace. The
         // guest's own guard looks for `secrets.json` at its root, finds
         // nothing, and serves it; `fs.read` is allow-listed with no approval
         // prompt.
@@ -111,7 +111,7 @@ impl Paths {
             anyhow::bail!(
                 "--workspace ({}) contains --home ({}).\n  \
                  The home holds secrets.json, and everything under the workspace is \
-                 readable by `fs.read` with no approval prompt — so the sandbox would \
+                 readable by `fs.read` with no approval prompt — so the workspace guard would \
                  contain every stored credential. Point one of them somewhere else.",
                 workspace.display(),
                 self.home.display()
@@ -626,7 +626,7 @@ mod tests {
     ///
     /// `--home` defaults to `./openbot-data`, so `openbot up --workspace .` reads
     /// as "work in this directory" and puts the token store inside the
-    /// sandbox. The guest cannot catch it (its guard checks its own root for
+    /// workspace. The guest cannot catch it (its guard checks its own root for
     /// `secrets.json`, which is one level up from where it lands), and
     /// `fs.read` is allow-listed with no approval prompt. Only this layer
     /// knows both paths.
@@ -639,7 +639,7 @@ mod tests {
         };
         let why = p
             .check()
-            .expect_err("the token store would be inside the sandbox");
+            .expect_err("the token store would be inside the workspace");
         let said = why.to_string();
         assert!(said.contains("contains"), "{said}");
         assert!(

@@ -2,7 +2,7 @@
 //! under.
 //!
 //! Confinement is the security-critical part of this file. The guest backs a
-//! remote sandbox shared by every Bot on one account, so a path escape is a
+//! remote workspace shared by every Bot on one account, so a path escape is a
 //! tenant boundary violation. Resolution rejects `..` traversal, absolute
 //! paths outside the root, and symlinks that point out, and it is enforced on
 //! the canonicalised path, because a check on the lexical path is defeated by
@@ -123,7 +123,7 @@ pub struct Workspace {
 /// Refuse to serve a workspace that is also the control plane's home.
 ///
 /// `openbotd --home X` keeps `secrets.json` there. `openbot-guest --workspace X`
-/// would then put every connector token inside the sandbox, where `fs.read`
+/// would then put every connector token inside the workspace, where `fs.read`
 /// (allow-listed, no approval prompt, no trace) hands them to the model on
 /// request. That defeats the point of the broker: credentials the guest can
 /// use but never read.
@@ -904,7 +904,7 @@ mod tests {
     /// including one whose target would be inside the workspace, where
     /// writing through it would be harmless. Allowing that would mean reading
     /// the link target and checking it separately: more code on the path that
-    /// decides whether a write leaves the sandbox, for a case nothing in this
+    /// decides whether a write leaves the workspace, for a case nothing in this
     /// product produces, since the tools never create links.
     ///
     /// Fail closed, and pinned so the narrowing is a recorded decision.

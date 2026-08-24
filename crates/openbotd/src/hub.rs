@@ -1478,7 +1478,7 @@ pub fn required_role(m: Method) -> Option<ConnectionKind> {
     use ConnectionKind::*;
     match m {
         // A person's side of the account. A guest issuing any of these would
-        // not need to escape its sandbox to do harm: it could open its own
+        // not need to escape the workspace to do harm: it could open its own
         // session, drive another computer, or take one over and lock the
         // person out of their own keyboard.
         Method::SessionOpen

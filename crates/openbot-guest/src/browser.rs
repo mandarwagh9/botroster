@@ -125,6 +125,84 @@ pub fn find_browser() -> Option<PathBuf> {
     locate_browser().ok()
 }
 
+/// Whether the operator has asked for Chrome's own sandbox to be turned off.
+///
+/// Opt-in, and deliberately awkward to set by accident: anything but `1` or
+/// `true` leaves the sandbox on.
+fn no_sandbox_requested() -> bool {
+    parse_no_sandbox(std::env::var("OPENBOT_BROWSER_NO_SANDBOX").ok().as_deref())
+}
+
+/// The reading of that variable, with the value passed in rather than read.
+///
+/// Same split as [`resolve_browser`], for the same reason: a test that reads
+/// the process environment has to write it first, which races every other test
+/// in the binary. Passing the value in also stops the test from becoming a
+/// restatement of the implementation — the first version of it re-derived the
+/// comparison inline and would have passed against any function at all.
+fn parse_no_sandbox(value: Option<&str>) -> bool {
+    let Some(v) = value else { return false };
+    let v = v.trim().to_ascii_lowercase();
+    v == "1" || v == "true"
+}
+
+/// The command line for a headless browser.
+///
+/// Split out from the spawn so the flags can be asserted without launching
+/// anything. The flag that matters is the one that is *absent*, and an absence
+/// is unobservable in an integration test that only checks the browser came up.
+///
+/// # Why `--no-sandbox` is not passed by default
+///
+/// It used to be, unconditionally, under a comment reading "the guest is
+/// already a sandbox; Chrome's own sandbox needs privileges a container usually
+/// will not have". The second clause is true and the first is not:
+/// `CLAUDE.md` states plainly that today's guest is an ordinary process running
+/// as the user, not a VM and not a container. So the premise was false, and it
+/// was being used to switch off a real security boundary.
+///
+/// That boundary is the one that matters most here. The renderer is the process
+/// that parses HTML, CSS, images and JavaScript from pages this agent was
+/// pointed at by a model, which may itself have been steered by a page it read
+/// earlier. Chrome's sandbox is what stops a bug in that parsing from becoming
+/// code execution. Without it, a single renderer exploit runs as the user, with
+/// the user's files, the user's SSH keys and — because `shell.exec` inherits
+/// this process's environment — the model credential. The flag traded the
+/// product's strongest defence for a convenience in a deployment shape that
+/// does not exist yet.
+///
+/// It stays available, because the case the old comment described is real: a
+/// container running as root cannot initialise the sandbox and Chrome will
+/// refuse to start. That is what `OPENBOT_BROWSER_NO_SANDBOX=1` is for. Making
+/// it opt-in means the person who needs it is the person who sets it, and knows
+/// what they gave up.
+fn chrome_args(profile: &Path, no_sandbox: bool) -> Vec<String> {
+    let mut args = vec![
+        "--headless=new".to_owned(),
+        // A desktop-sized window, because the default is not one.
+        //
+        // Headless Chrome starts around 800x600, of which roughly 764x429 is
+        // usable, below the 1024px breakpoint most sites use to select a mobile
+        // layout. An agent working a real web app would get the cramped layout,
+        // with controls collapsed behind menus it then has to discover.
+        "--window-size=1280,900".to_owned(),
+        // Port 0 lets the OS choose; Chrome writes the real one to
+        // DevToolsActivePort. Hard-coding a port collides with any other guest
+        // on the host.
+        "--remote-debugging-port=0".to_owned(),
+        format!("--user-data-dir={}", profile.display()),
+        "--no-first-run".to_owned(),
+        "--no-default-browser-check".to_owned(),
+        "--disable-gpu".to_owned(),
+        "--disable-dev-shm-usage".to_owned(),
+    ];
+    if no_sandbox {
+        args.push("--no-sandbox".to_owned());
+    }
+    args.push("about:blank".to_owned());
+    args
+}
+
 pub struct Browser {
     /// `None` when the browser was adopted rather than spawned; see
     /// [`Browser::launch`]. Nothing here owns it, so nothing here may kill it.
@@ -181,28 +259,7 @@ impl Browser {
         let _ = std::fs::remove_file(&port_file);
 
         let child = tokio::process::Command::new(&exe)
-            .arg("--headless=new")
-            // A desktop-sized window, because the default is not one.
-            //
-            // Headless Chrome starts around 800x600, of which roughly 764x429
-            // is usable, below the 1024px breakpoint most sites use to select
-            // a mobile layout. An agent working a real web app would get the
-            // cramped layout, with controls collapsed behind menus it then has
-            // to discover.
-            .arg("--window-size=1280,900")
-            // Port 0 lets the OS choose; Chrome writes the real one to
-            // DevToolsActivePort. Hard-coding a port collides with any other
-            // guest on the host.
-            .arg("--remote-debugging-port=0")
-            .arg(format!("--user-data-dir={}", profile.display()))
-            .arg("--no-first-run")
-            .arg("--no-default-browser-check")
-            .arg("--disable-gpu")
-            // The guest is already a sandbox; Chrome's own sandbox needs
-            // privileges a container usually will not have.
-            .arg("--no-sandbox")
-            .arg("--disable-dev-shm-usage")
-            .arg("about:blank")
+            .args(chrome_args(profile, no_sandbox_requested()))
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             // Reap the browser when this handle goes away. Tokio leaves a
@@ -890,6 +947,75 @@ mod tests {
     #[test]
     fn base64_rejects_junk_rather_than_returning_garbage() {
         assert!(b64_decode("not valid!").is_none());
+    }
+
+    #[test]
+    fn the_browser_keeps_its_own_sandbox_unless_someone_asks_otherwise() {
+        // The renderer parses pages chosen by a model that may have been
+        // steered by an earlier page. Chrome's sandbox is what stops a parsing
+        // bug there from becoming code execution as the user — which, because
+        // `shell.exec` inherits this process's environment, reaches the model
+        // credential. This assertion is on an *absence*, which is exactly why it
+        // has to be made here: a live-browser test that only checks the browser
+        // came up passes identically either way.
+        let args = chrome_args(Path::new("/tmp/p"), false);
+        assert!(
+            !args.iter().any(|a| a == "--no-sandbox"),
+            "the default command line must not disable Chrome's sandbox: {args:?}"
+        );
+    }
+
+    #[test]
+    fn the_sandbox_can_still_be_turned_off_for_a_container_that_needs_it() {
+        // A container running as root cannot initialise the sandbox and Chrome
+        // refuses to start. Removing the escape hatch would trade one broken
+        // deployment for another, so it stays — opt-in, so the person who needs
+        // it is the person who set it.
+        let args = chrome_args(Path::new("/tmp/p"), true);
+        assert!(
+            args.iter().any(|a| a == "--no-sandbox"),
+            "asking for it must still work: {args:?}"
+        );
+    }
+
+    #[test]
+    fn the_page_to_open_stays_last_on_the_command_line() {
+        // Guards the mechanism the two tests above rely on. `about:blank` is a
+        // positional argument, and Chrome reads the first non-flag as the URL:
+        // pushing the conditional flag after it would make Chrome treat
+        // "--no-sandbox" as a second URL and silently stop honouring it, so
+        // both tests would keep passing while the behaviour was gone.
+        for on in [false, true] {
+            let args = chrome_args(Path::new("/tmp/p"), on);
+            assert_eq!(
+                args.last().map(String::as_str),
+                Some("about:blank"),
+                "the URL must stay last (no_sandbox={on}): {args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_an_explicit_yes_turns_the_sandbox_off() {
+        // A variable someone left set to "0" or "no" while debugging must not
+        // quietly disable it on every later run.
+        for (value, expected) in [
+            (Some("1"), true),
+            (Some("true"), true),
+            (Some("TRUE"), true),
+            (Some(" 1 "), true),
+            (Some("0"), false),
+            (Some("false"), false),
+            (Some(""), false),
+            (Some("yes"), false),
+            (None, false),
+        ] {
+            assert_eq!(
+                parse_no_sandbox(value),
+                expected,
+                "OPENBOT_BROWSER_NO_SANDBOX={value:?}"
+            );
+        }
     }
 
     #[test]

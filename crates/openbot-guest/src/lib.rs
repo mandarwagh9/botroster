@@ -2,7 +2,18 @@
 //!
 //! The guest is untrusted: it holds no connector credentials, and it authorises
 //! once at handshake via the credential presented on the WebSocket upgrade.
-//! Everything it can reach on the filesystem is bounded by [`tools::Workspace`].
+//!
+//! The `fs.*` tools are bounded by [`tools::Workspace`], which resolves every
+//! path against the workspace root and refuses the ones that escape it.
+//! **`shell.exec` is not bounded by it.** It starts a shell with the workspace
+//! as its working directory and nothing else: the command may `cd` anywhere the
+//! user can reach, and it inherits this process's environment. Today's guest is
+//! an ordinary process running as the user — see "What does not exist yet" in
+//! `CLAUDE.md` — so the confinement is one tool family's, not the process's.
+//!
+//! This paragraph used to read "everything it can reach on the filesystem is
+//! bounded by `tools::Workspace`", which was the sentence a reader would rely on
+//! when deciding what to point this at.
 
 #![forbid(unsafe_code)]
 

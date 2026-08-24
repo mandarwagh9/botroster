@@ -57,7 +57,7 @@ struct Args {
     /// Confine path resolution to the workspace root: reject `..`,
     /// absolute-outside-root, and symlink escapes.
     ///
-    /// On by default: the guest backs a remote sandbox, which is a tenant
+    /// On by default: the guest backs a remote workspace, which is a tenant
     /// boundary. Turn it off only for local development.
     #[arg(long, env = "OPENBOT_CONFINE_FS", default_value_t = true, action = clap::ArgAction::Set)]
     confine_fs_to_workspace_root: bool,

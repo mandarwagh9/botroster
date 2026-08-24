@@ -116,9 +116,20 @@ echo "== honesty gates =="
 # recorded in isolation-allowlist.txt with the reason it is fine, and anything not on that list
 # fails. The cost is a line of upkeep when the text legitimately changes. The benefit is that a
 # newly written overclaim cannot arrive unnoticed, which the noisy version could not deliver.
+# The scan covers Rust source as well as prose, and that was not the original scope. It read
+# README.md, docs/SPEC.md and the UI only, on the reasoning that shipped *text* is what a user
+# believes. The Guest & Tools review found the hole: `crates/openbot-guest/src/browser.rs` carried
+# the comment "the guest is already a sandbox", and it was not idle prose — it was the stated
+# justification for passing `--no-sandbox` to Chrome, switching off the renderer sandbox in the one
+# process that parses pages a model chose. A false claim in a comment had become a live defect,
+# below the floor of a gate aimed at documentation.
+#
+# The wider scan then showed the claim was not one comment but a vocabulary: fifteen places across
+# five crates called the guest "a sandbox". Nobody wrote a lie; each author read the neighbouring
+# comments and matched them.
 ALLOW=.claude/product-review/isolation-allowlist.txt
 hits=$(grep -rniE '(sandbox|isolat|virtual machine|container)' \
-	README.md docs/SPEC.md crates/openbot-app/ui/ 2>/dev/null || true)
+	README.md docs/SPEC.md crates/openbot-app/ui/ crates/*/src/ 2>/dev/null || true)
 unreviewed=""
 IFS='
 '

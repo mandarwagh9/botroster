@@ -31,3 +31,37 @@ hypervisor-agnostic so a container today and a microVM later	Marked as the desig
 which is the boundary §11.2 and `openbot-guest/tests/isolation.rs`	Names the credential boundary and the test that enforces it. That boundary is real.
 **Credential isolation under real conditions.**	The guest having no code path to the credential store is true today and enforced by isolation.rs. A different property from process containment, and the stronger one.
 `crates/openbot-guest/tests/isolation.rs` walks the workspace's own dependency	Cites the enforcing test. Enforcement, not a claim.
+
+# ================================================================================================
+# Rust source. Added when the scan was widened past prose, after the Guest & Tools review found
+# that "the guest is already a sandbox" in browser.rs was not idle wording — it was the stated
+# reason for passing --no-sandbox to Chrome. Fifteen places across five crates had drifted into
+# calling the guest a sandbox; those were corrected rather than allowlisted, and what remains here
+# is the set that was true all along.
+# ------------------------------------------------------------------------------------------------
+
+# --- Denials and pointers to them. ---------------------------------------------------------------
+local mode, and it is not isolation	The heading of up.rs's module doc. The clearest denial in the codebase.
+See the isolation warning in the README	Points at the denial rather than making a claim.
+see the isolation note in the README	Same, in a runtime message.
+not a VM and not a container. So the premise was false	browser.rs explaining why --no-sandbox stopped being a default. A denial, and the reasoning behind a fix.
+
+# --- Chrome's own sandbox, which is a real process boundary and genuinely in use. ----------------
+# Every row below is about the browser sandboxing its own renderer. Nothing here is a claim about
+# the guest being contained; that is the distinction the file now turns on, so the rows are kept
+# narrow deliberately rather than exempting the file.
+no-sandbox	The Chrome flag itself, and the OPENBOT_BROWSER_NO_SANDBOX variable that now gates it.
+no_sandbox	The Rust identifiers for the same: parse_no_sandbox, no_sandbox_requested, the chrome_args parameter.
+NO_SANDBOX	The environment variable name in prose and in tests.
+Chrome's own sandbox	Names whose sandbox is meant. The whole point of the correction was that it is Chrome's and not ours.
+Chrome's sandbox is what stops	Explains what the renderer sandbox actually defends against.
+disable Chrome's sandbox	A test's failure message.
+leaves the sandbox on	Describes the default after the fix.
+initialise the sandbox	The container-as-root case that keeps the escape hatch justified.
+own_sandbox_unless_someone_asks	Test name: the browser keeps its own sandbox unless asked otherwise.
+the_sandbox_can_still_be_turned_off	Test name for the escape hatch.
+turns_the_sandbox_off	Test name for the variable parsing.
+
+# --- The word naming something else entirely. ----------------------------------------------------
+point cron, systemd or a container scheduler at	Deployment tooling in a --help string. Nothing to do with confinement.
+will run the guest (a container or a microVM) once one exists	openbot-store describing a runtime that does not exist yet, in the future tense, and saying so in the same sentence.

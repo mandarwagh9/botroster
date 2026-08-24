@@ -2,7 +2,8 @@
 //!
 //! The guest can be rebuilt, replaced, or rolled back, and the user's work
 //! has to survive all three. This crate owns that state independently of what
-//! runs the guest (a container or a microVM).
+//! will run the guest (a container or a microVM) once one exists; today it is
+//! an ordinary process.
 //!
 //! # Layout
 //!

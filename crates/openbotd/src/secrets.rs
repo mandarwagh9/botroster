@@ -4,7 +4,7 @@
 //!
 //! > A connector's token never leaves this process. The guest asks the hub to
 //! > call a tool; the hub makes the outbound request with the credential
-//! > attached. The guest, a sandbox running model-directed code that is
+//! > attached. The guest, a process running model-directed code that is
 //! > reachable by prompt injection from any page it visits, is never given the
 //! > token.
 //!

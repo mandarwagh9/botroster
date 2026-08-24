@@ -4,7 +4,7 @@
 //! reasons:
 //!
 //! 1. The guest does not own this state. A Bot's inbox lives with the
-//!    control plane; the guest is a sandbox with a filesystem and a browser.
+//!    control plane; the guest is a workspace with a filesystem and a browser.
 //! 2. A handoff is an action. Putting work in another Bot's queue is
 //!    consequential, and serving it here means it passes the same approval
 //!    gate as a write or a shell command. A client-side implementation would
