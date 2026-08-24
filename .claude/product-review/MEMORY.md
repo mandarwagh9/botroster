@@ -324,3 +324,46 @@ records that, so the next person does not rediscover the token trick and assume 
 `tests/browser.rs` had the identical `let Ok(..) = accept().await else { return }` defect fixed in
 `page.rs` last iteration. **After fixing a defect, grep for its shape** — a harness pattern copied
 once is usually copied twice.
+
+---
+
+## Iteration 6 — 2026-08-25. T1-5: every forwarded call ends.
+
+**Closed:** the hub half of T1-5 / F-RS2. Tier 1 is now clear.
+
+### The protocol already had the answer
+
+`WorkspaceUnavailable`, `Disconnect`, `InFlightCancelled` were defined in `openbot-proto` and had
+**no uses anywhere outside that crate**. Someone designed the failure vocabulary and nothing ever
+spoke it.
+
+*Generalises, and it is the same shape as the routine scheduler:* **an unused type in a protocol
+crate is a strong signal, not dead code.** Grep for the types a protocol defines and never uses —
+each one is a case somebody thought about and left unwired, which is exactly where the silent
+failures live. Two of the six biggest findings this loop have had this shape.
+
+### The good pattern was 350 lines away
+
+`session_bind_server` wraps its request in a 30-second timeout. `tool_call` — the one that runs for
+minutes and reaches a browser — had none. **When a file does something carefully in one place and
+not in another, that is a finding, and the careful version is the design you should copy** rather
+than invent.
+
+### `retain` by one field answers half a question
+
+`disconnect` filtered `calls` and `relays` by `origin`, which is correct and incomplete: a relay has
+two ends. The target end had no cleanup at all. *Generalises:* **when a record names two parties,
+any cleanup that mentions one of them is worth checking against the other.**
+
+### The anti-vacuity test, again
+
+Both failure tests are satisfied by a hub that fails every call instantly. The third test — a
+healthy call that takes 1.2 seconds and must succeed — is the only one that rules that out. This is
+the third iteration running where the test that mattered most was the one asserting the fix did not
+overreach.
+
+### Bind params vs frame session
+
+`session_bind_server` takes `server_id` in params and the session in the *frame*, not in params.
+Putting it in params fails with a bare error. Cost 10 minutes; worth writing down because the test
+harness helpers hide it.

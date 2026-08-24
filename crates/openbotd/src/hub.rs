@@ -33,7 +33,8 @@ use openbot_proto::frames::*;
 use openbot_proto::{
     codes, ConnectionId, ConnectionKind, Frame, Hello, HelloAck, Method, Notification, Outcome,
     Principal, Request, Response, RpcError, RpcId, ServerId, SessionId, ToolCallId, ToolId, UserId,
-    PROTOCOL_VERSION, SCOPE_TOOL_INVOKE,
+    WorkspaceGonePhase, WorkspaceGoneReason, WorkspaceUnavailable, PROTOCOL_VERSION,
+    SCOPE_TOOL_INVOKE,
 };
 use tokio::sync::{mpsc, oneshot, Mutex};
 
@@ -47,6 +48,20 @@ const HUB_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Expiry denies. An approval that times out because nobody was watching
 /// must not become an approval.
 pub const DEFAULT_APPROVAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// How long a forwarded tool call may go unanswered before the hub ends it.
+///
+/// A backstop, not a per-tool budget. The precise case is a tool server that is
+/// still connected and has stopped answering — a wedged browser, a guest
+/// deadlocked on its own lock — where no socket closes and nothing else
+/// notices. A server that *crashes* is caught immediately and exactly by the
+/// disconnect path; this only covers the silence that leaves the socket up.
+///
+/// Deliberately long. The guest's own `shell.exec` allows a caller-supplied
+/// timeout and advertises a maximum of an hour, so anything shorter here would
+/// cancel legitimate work and be worse than the hang it replaces. The value of
+/// a backstop is that it exists and is finite, not that it is tight.
+pub const DEFAULT_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3900);
 
 /// Methods supported beyond the base protocol, advertised in `hello_ack`.
 /// Clients gate fallbacks on membership rather than probing.
@@ -171,6 +186,8 @@ pub struct Hub {
     /// Injectable so the fail-closed path is reachable in a test without
     /// waiting two minutes.
     approval_timeout: std::time::Duration,
+    /// Injectable for the same reason: an hour is not a test.
+    call_timeout: std::time::Duration,
     /// `PreToolUse` hooks, consulted here rather than in the client: a check
     /// the caller evaluates is a check the caller can delete (SPEC §6.0).
     hooks: Option<Arc<dyn PreToolUse>>,
@@ -202,6 +219,7 @@ impl Hub {
             seq: AtomicU64::new(1),
             internal: None,
             approval_timeout: DEFAULT_APPROVAL_TIMEOUT,
+            call_timeout: DEFAULT_CALL_TIMEOUT,
             hooks: None,
             secrets: None,
         }
@@ -253,6 +271,11 @@ impl Hub {
     }
 
     /// How long to wait for an approval before denying.
+    pub fn with_call_timeout(mut self, d: std::time::Duration) -> Self {
+        self.call_timeout = d;
+        self
+    }
+
     pub fn with_approval_timeout(mut self, d: std::time::Duration) -> Self {
         self.approval_timeout = d;
         self
@@ -337,7 +360,7 @@ impl Hub {
     }
 
     /// Drop a connection and everything routed through it.
-    pub async fn disconnect(&self, id: &ConnectionId) {
+    pub async fn disconnect(self: &Arc<Self>, id: &ConnectionId) {
         let mut st = self.state.lock().await;
         let conn = st.conns.remove(id);
         let Some(conn) = conn else { return };
@@ -385,6 +408,14 @@ impl Hub {
         // immediately, which for an approval means denied. Leaving it in
         // place would hold the entry until its timeout for no reason.
         st.hub_calls.retain(|_, (target, _)| target != id);
+        drop(st);
+
+        // The three `retain`s above filter by *origin*, which releases what a
+        // departing harness was waiting on. This is the other direction: a
+        // tool server that died with calls in flight. It runs after the lock is
+        // released because answering takes it again.
+        self.fail_calls_targeting(id, "the tool server's connection dropped")
+            .await;
     }
 
     async fn send(&self, to: &ConnectionId, frame: &Frame) {
@@ -739,20 +770,78 @@ impl Hub {
             return;
         };
 
-        // Retire the call before answering, so a late progress frame is dropped
-        // rather than arriving after the terminal. This runs on success and
-        // failure alike: a failed tool is an ordinary outcome and must not leak.
-        self.state.lock().await.calls.remove(&relay.call_id);
+        self.finish_relay(relay, resp.outcome).await;
+    }
 
+    /// End a forwarded call, whichever of its three endings arrived.
+    ///
+    /// A tool call could only end one way before this existed: the server
+    /// answering. If the server died or simply never replied, the relay stayed
+    /// in the map forever and the harness was told nothing — the Bot stopped
+    /// mid-task, the transcript ended without an error, and `computer status`
+    /// showed a healthy reconnected guest. `Hub::inflight_calls` is documented
+    /// as the leak indicator and this was a leak it reported that nothing acted
+    /// on.
+    ///
+    /// The three endings are the server's response, the server's disconnect,
+    /// and a deadline. They go through one function because the ordering here
+    /// is load-bearing and easy to get subtly different in three places: the
+    /// call is retired *before* the answer is sent, so a progress frame that
+    /// arrives late is dropped rather than delivered after the terminal.
+    ///
+    /// Runs on success and failure alike. A failed tool is an ordinary outcome
+    /// and must not leak either.
+    async fn finish_relay(self: &Arc<Self>, relay: Relay, outcome: Outcome) {
+        self.state.lock().await.calls.remove(&relay.call_id);
         self.send(
             &relay.origin_conn,
             &Frame::Response(Response {
                 jsonrpc: "2.0".into(),
                 id: relay.origin_id,
-                outcome: resp.outcome,
+                outcome,
             }),
         )
         .await;
+    }
+
+    /// Answer every call still waiting on a connection that has gone away.
+    ///
+    /// `disconnect` cleaned up `calls` and `relays` by *origin*, which releases
+    /// the entries belonging to a harness that left. A relay whose **target**
+    /// disappeared — the tool server crashing, which is the common case, since
+    /// it drives a browser — matched neither filter and was left in the map
+    /// with nobody coming to answer it.
+    ///
+    /// `WorkspaceUnavailable` was defined in the protocol for exactly this, with
+    /// a `Disconnect` reason and an `InFlightCancelled` phase, and had no uses
+    /// anywhere outside `openbot-proto`.
+    async fn fail_calls_targeting(self: &Arc<Self>, gone: &ConnectionId, reason: &str) {
+        let orphaned: Vec<Relay> = {
+            let mut st = self.state.lock().await;
+            let keys: Vec<String> = st
+                .relays
+                .iter()
+                .filter(|(_, r)| r.target == *gone)
+                .map(|(k, _)| k.clone())
+                .collect();
+            keys.iter().filter_map(|k| st.relays.remove(k)).collect()
+        };
+        if orphaned.is_empty() {
+            return;
+        }
+        tracing::warn!(
+            conn = %gone, calls = orphaned.len(),
+            "the tool server went away with calls in flight; failing them"
+        );
+        let err = WorkspaceUnavailable {
+            reason: WorkspaceGoneReason::Disconnect,
+            phase: WorkspaceGonePhase::InFlightCancelled,
+            detail: Some(reason.to_owned()),
+        }
+        .to_rpc_error();
+        for relay in orphaned {
+            self.finish_relay(relay, Outcome::Error(err.clone())).await;
+        }
     }
 
     // ── method handlers ───────────────────────────────────────────────
@@ -1229,6 +1318,7 @@ impl Hub {
         };
 
         let fwd_id = self.next("fwd");
+        let fwd_id_for_deadline = fwd_id.clone();
         {
             let mut st = self.state.lock().await;
             st.relays.insert(
@@ -1256,6 +1346,40 @@ impl Hub {
         )
         .in_session(sid);
         self.send(&server_conn, &Frame::Request(fwd)).await;
+
+        // The backstop. A server that crashes is answered at once by the
+        // disconnect path; this is for one that stays connected and stops
+        // answering, where no socket closes and nothing else ever notices.
+        //
+        // A task per call rather than one sweeper: the relay id it closes over
+        // is the whole of its state, it exits on the deadline either way, and a
+        // sweeper would need its own interval, its own cancellation, and a
+        // reason to exist that a `sleep` does not already cover.
+        {
+            let hub = Arc::clone(self);
+            let key = fwd_id_for_deadline;
+            let wait = self.call_timeout;
+            tokio::spawn(async move {
+                tokio::time::sleep(wait).await;
+                // Gone by now in the ordinary case, and `finish_relay` is only
+                // reached if this task is the one that removed it, so a call
+                // that has already been answered cannot be answered twice.
+                let relay = hub.state.lock().await.relays.remove(&key);
+                if let Some(relay) = relay {
+                    tracing::warn!(
+                        id = %key, ?wait,
+                        "a tool server accepted a call and never answered; failing it"
+                    );
+                    let err = WorkspaceUnavailable {
+                        reason: WorkspaceGoneReason::IdleTimeout,
+                        phase: WorkspaceGonePhase::InFlightCancelled,
+                        detail: Some(format!("no answer from the tool server in {wait:?}")),
+                    }
+                    .to_rpc_error();
+                    hub.finish_relay(relay, Outcome::Error(err)).await;
+                }
+            });
+        }
 
         // No immediate reply: the response arrives via on_response.
         None

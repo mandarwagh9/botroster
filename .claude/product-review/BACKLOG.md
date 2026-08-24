@@ -73,7 +73,7 @@ not recognise, sixty lines below a doc comment saying that is worse than having 
 does not understand. Four findings, one root cause: validation exists and is excellent, and is filed
 where nobody looks for it.
 
-### T1-5 — a dead tool server hangs the run forever. `open`
+### T1-5 — a dead tool server hangs the run forever. `done` (hub side; agent-side timeout and `tool.cancel` wiring still `open`)
 `P0` · reach: some users, total when hit · `reports/runtime-security.md` F-RS2 · `reports/agent-model.md` F-AM1
 
 No timeout on a forwarded `tool.call`, no cancel path, no disconnect propagation.
