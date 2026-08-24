@@ -1229,3 +1229,81 @@ fn an_empty_search_is_refused() {
     let err = fails(home.path(), &["search", "   "]);
     assert!(err.contains("nothing to look for"), "{err}");
 }
+
+/// Whether `status` printed a row under this label.
+///
+/// Matching the label rather than the substring: "config" appears inside "none
+/// configured", which is on the model line of every home without a model, so a
+/// substring test for the absence of a config row fails on a healthy account.
+fn has_row(shown: &str, label: &str) -> bool {
+    shown
+        .lines()
+        .any(|l| l.split_whitespace().next() == Some(label))
+}
+
+/// `status` notices a `config.toml` the hub would refuse to start on.
+///
+/// The command's one-line help is "Is anything wrong?", and it answered no
+/// about a file that will not parse. `ModelOverrides::applied` reads the config
+/// with `load(home).unwrap_or_default()`, so an unparseable file silently
+/// became the shipped defaults, and every line `status` printed described
+/// settings nobody had chosen.
+///
+/// Driven through the binary rather than the renderer. `status::render` is unit
+/// tested for both states, and it would keep passing while `gather` swallowed
+/// the error — the two halves are only connected out here, which is the seam
+/// this file exists for.
+///
+/// The config below is the README's own `[permission]` example as it shipped:
+/// `action = "ask"`, rejected by the parser that reads it. `ask` is an accepted
+/// spelling now, so the example is written with a genuinely unknown action to
+/// keep testing the property rather than that one historical typo.
+#[test]
+fn status_reports_a_config_the_hub_would_refuse() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        home.path().join("config.toml"),
+        "[permission]\nrules = [{ tool = \"shell.exec\", action = \"maybe\" }]\n",
+    )
+    .unwrap();
+
+    let out = run(home.path(), &["status"]);
+    let shown = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        shown.contains("config"),
+        "`status` said nothing about a config.toml that will not load, while reporting on \
+         settings it invented to replace it:\n{shown}"
+    );
+    assert!(
+        shown.contains("maybe") || shown.contains("unknown variant"),
+        "the reason has to reach the screen, or the next step is a guess:\n{shown}"
+    );
+}
+
+/// And a config that loads is not announced.
+///
+/// Without this, a `status` that printed the warning unconditionally would
+/// satisfy the test above. This screen is a list of what is wrong; a reassuring
+/// row on every run is how people stop reading the rows that matter.
+#[test]
+fn status_says_nothing_about_a_config_that_loads() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        home.path().join("config.toml"),
+        "[permission]\nrules = [{ tool = \"shell.exec\", action = \"ask\" }]\n",
+    )
+    .unwrap();
+
+    let out = run(home.path(), &["status"]);
+    let shown = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(
+        !has_row(&shown, "config"),
+        "a working config should be silent. `ask` is an accepted spelling of \
+         `require_approval`, because every other surface in this product teaches that \
+         word:\n{shown}"
+    );
+}

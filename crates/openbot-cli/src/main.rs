@@ -2138,9 +2138,22 @@ async fn run() -> anyhow::Result<()> {
                         .map(|w| format!(" when {}={}", w.key, w.glob))
                         .unwrap_or_default();
                     render::outln!(
-                        "{:>2}  {:<16} {}{}{}",
+                        // 16 was the width of "requireapproval". The longest
+                        // action is "require_approval" at 16, so that column
+                        // had exactly no gap after it once the name was
+                        // spelled correctly.
+                        "{:>2}  {:<17} {}{}{}",
                         i + 1,
-                        format!("{:?}", r.action).to_lowercase(),
+                        // Serialised, not `Debug`-lowercased. The two agree
+                        // for `allow` and `deny` and not for the one in the
+                        // middle: `{:?}` gives "RequireApproval", which
+                        // lowercases to "requireapproval" - a word no file may
+                        // contain and no error message mentions, printed by the
+                        // command people run to check what they wrote.
+                        serde_json::to_value(r.action)
+                            .ok()
+                            .and_then(|v| v.as_str().map(str::to_owned))
+                            .unwrap_or_else(|| format!("{:?}", r.action).to_lowercase()),
                         r.tool,
                         when,
                         r.reason

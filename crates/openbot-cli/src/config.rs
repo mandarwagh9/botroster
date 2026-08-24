@@ -841,6 +841,68 @@ rules = [{ tool = \"shell.exec\", decision = \"allow\", pattern = \"git *\" }]
         );
     }
 
+    /// `ask` and `require_approval` are the same rule.
+    ///
+    /// Not a courtesy alias. The product uses both words for this and gives a
+    /// person no way to know which surface wants which: `run --approve ask`,
+    /// `routine tick --approve ask` and the approval dialog all say ask, and
+    /// only the rules file said `require_approval`. The README's own example
+    /// said `ask` and was rejected by the parser that reads it, which is how
+    /// this was found.
+    #[test]
+    fn ask_and_require_approval_are_the_same_rule() {
+        let with_ask = home_with(
+            "[permission]
+rules = [{ action = \"ask\", tool = \"shell.exec\" }]
+",
+        );
+        let with_long = home_with(
+            "[permission]
+rules = [{ action = \"require_approval\", tool = \"shell.exec\" }]
+",
+        );
+        let a = policy(with_ask.path()).expect("`ask` is the word the rest of the product teaches");
+        let b = policy(with_long.path()).expect("the canonical spelling still works");
+        assert_eq!(
+            a.rules, b.rules,
+            "the two spellings must produce the same policy, or a person who wrote one and              read the other back would think their rule had changed"
+        );
+    }
+
+    /// The name a rule is printed under is a name a rule may be written under.
+    ///
+    /// `permission ls` used to render `{:?}` lowercased, which turns
+    /// `RequireApproval` into "requireapproval" — a word no config may contain
+    /// and no error message mentions, printed by the one command people run to
+    /// check what they wrote. Anything round-tripping through serde is
+    /// necessarily a legal spelling.
+    #[test]
+    fn every_action_prints_under_a_name_a_config_may_use() {
+        use openbotd::policy::Action;
+        for action in [Action::Allow, Action::RequireApproval, Action::Deny] {
+            let shown = serde_json::to_value(action).unwrap();
+            let shown = shown.as_str().expect("an action serialises to a string");
+            let home = home_with(&format!(
+                "[permission]
+rules = [{{ action = \"{shown}\", tool = \"fs.read\" }}]
+"
+            ));
+            let parsed = policy(home.path())
+                .unwrap_or_else(|e| panic!("`{shown}` is printed but not accepted: {e}"));
+            // The last rule, not the first: `policy` starts from
+            // `Policy::default()` and appends the file's rules after it, so
+            // index 0 is a shipped default. Indexing 0 made this pass for
+            // `allow` by coincidence and fail for the other two, which is how
+            // the layout came to light.
+            let mine = parsed.rules.last().expect("the file's rule was appended");
+            assert_eq!(mine.action, action, "`{shown}` read back as something else");
+            assert_eq!(
+                mine.tool, "fs.read",
+                "the appended rule is the one under test"
+            );
+        }
+    }
+
     /// A rule that cannot be parsed stops the hub too. Skipping it would
     /// leave a person believing something is forbidden when it is not.
     #[test]

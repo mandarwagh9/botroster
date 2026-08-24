@@ -20,6 +20,14 @@ use std::path::Path;
 use crate::render::Style;
 
 pub struct Status {
+    /// Whether `config.toml` parses and its rules are all understood.
+    ///
+    /// Checked with the same call `openbot up` makes, so this screen and the
+    /// thing it reports on cannot disagree. They did: `applied` reads the file
+    /// with `load(home).unwrap_or_default()`, so a file that will not parse
+    /// silently became the defaults, and a command whose one-line help is "Is
+    /// anything wrong?" answered by listing a model nobody had configured.
+    pub config: Result<(), String>,
     pub hub_url: String,
     pub hub: Result<Vec<String>, String>,
     pub model: Option<String>,
@@ -78,6 +86,13 @@ pub async fn gather(hub_url: &str, home: &Path, opts: &crate::config::ModelOverr
         Err(_) => Err("no answer in 3s".into()),
     };
 
+    // Before anything else, because every line below is read through it: the
+    // rules govern what a Bot may do, and a file that does not parse is not a
+    // conservative fallback but a different policy from the one on disk.
+    let config = crate::config::policy(home)
+        .map(|_| ())
+        .map_err(|e| e.to_string());
+
     let settings = opts.applied(home);
     let key_env = settings.api_key_env.trim().to_owned();
     // Asked the way a run asks, rather than re-implemented here. Two things
@@ -123,6 +138,7 @@ pub async fn gather(hub_url: &str, home: &Path, opts: &crate::config::ModelOverr
     }
 
     Status {
+        config,
         hub_url: hub_url.to_owned(),
         hub,
         model: settings.id.clone(),
@@ -205,6 +221,23 @@ pub fn render(s: &Status, st: Style) -> String {
             value
         ));
     };
+
+    // First, and only when broken. A working config needs no line - this screen
+    // is a list of what is wrong - but a broken one has to come before the model
+    // and permission lines, because those are being rendered from defaults that
+    // are not what the file says.
+    if let Err(why) = &s.config {
+        row(
+            &mut out,
+            "config",
+            format!(
+                "{}
+{}",
+                st.red("will not load — nothing below reflects your file"),
+                st.dim(&format!("                {why}"))
+            ),
+        );
+    }
 
     match &s.hub {
         Ok(servers) if servers.is_empty() => row(
@@ -339,8 +372,53 @@ pub fn render(s: &Status, st: Style) -> String {
 mod tests {
     use super::*;
 
+    /// A config that will not load is the first thing this screen says.
+    ///
+    /// The command's one-line help is "Is anything wrong?", and it answered no
+    /// about a `config.toml` the hub refuses to start on: `applied` reads the
+    /// file with `load(home).unwrap_or_default()`, so an unparseable file
+    /// silently became the defaults and every line below was rendered from
+    /// settings nobody had chosen. Found by writing the README's own
+    /// `[permission]` example to a home, which the parser rejects.
+    #[test]
+    fn a_config_that_will_not_load_is_reported_before_anything_else() {
+        let mut s = base();
+        s.config = Err("[permission] rule 1: unknown variant `ask`".into());
+        let shown = render(&s, Style::plain());
+        let first = shown.lines().next().unwrap_or_default();
+        assert!(
+            first.contains("config"),
+            "a broken config must come before the model and hub lines, which are being              rendered from defaults that are not what the file says: {shown}"
+        );
+        assert!(
+            shown.contains("unknown variant"),
+            "the reason has to travel with the warning, or the next step is a guess: {shown}"
+        );
+    }
+
+    /// And a config that loads gets no line at all.
+    ///
+    /// This screen is a list of what is wrong. A reassuring "config ok" row on
+    /// every run is how people stop reading the rows that matter — and without
+    /// this, a renderer that printed the warning unconditionally would pass the
+    /// test above.
+    #[test]
+    fn a_config_that_loads_says_nothing() {
+        let shown = render(&base(), Style::plain());
+        // By label, not by substring: "config" is inside "none configured" on
+        // the model line, so a substring test here answers a different
+        // question and fails on a perfectly healthy account.
+        assert!(
+            !shown
+                .lines()
+                .any(|l| l.split_whitespace().next() == Some("config")),
+            "a working config should be silent: {shown}"
+        );
+    }
+
     fn base() -> Status {
         Status {
+            config: Ok(()),
             hub_url: "ws://127.0.0.1:8443/v1/tools".into(),
             hub: Ok(vec!["openbot-workspace".into()]),
             model: Some("grok-4-5".into()),

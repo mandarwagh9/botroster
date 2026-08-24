@@ -60,7 +60,7 @@ ever emits. The model is asked to guess selectors for a page it has only seen as
 *Durable fix:* perception and action must share one coordinate system — read emits stable handles,
 act takes them. This is the difference between a browser tool that demos and one that works.
 
-### T1-4 — `config.toml` is the control surface and the tools around it lie. `open`
+### T1-4 — `config.toml` is the control surface and the tools around it lie. `done` (F-CD2, F-CD6, F-CD10 partial; F-CD1 `config set` data loss still `open`)
 `P0` · reach: most users · `reports/cli-devex.md` F-CD1, F-CD2, F-CD6, F-CD10
 
 The README's own example is rejected by the parser that reads it (`action = "ask"` versus

@@ -150,7 +150,7 @@ api_key_env = "XAI_API_KEY"
 
 [permission]
 rules = [
-  { tool = "shell.exec", action = "ask", reason = "runs a command on the computer" },
+  { tool = "shell.exec", action = "require_approval", reason = "runs a command on the computer" },
   { tool = "fs.write", action = "allow", when = { key = "path", glob = "notes/*" } },
 ]
 ```

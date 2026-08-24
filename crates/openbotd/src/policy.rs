@@ -25,6 +25,20 @@ pub enum Verdict {
 #[serde(rename_all = "snake_case")]
 pub enum Action {
     Allow,
+    /// Stop and ask the person who owns the session.
+    ///
+    /// `ask` is accepted as well, and is not a courtesy alias: the product uses
+    /// both words for this and a person can only guess which one a given
+    /// surface wants. `openbot run --approve ask`, `routine tick --approve ask`
+    /// and the approval dialog all say ask; only the rules file said
+    /// `require_approval`, and the README's own example said `ask` and was
+    /// rejected by the parser that reads it. Writing the word the rest of the
+    /// product taught you is not a mistake worth an error.
+    ///
+    /// `require_approval` stays canonical, so it is what serialises and what
+    /// `permission ls` prints, and a file written either way reads back the
+    /// same.
+    #[serde(alias = "ask")]
     RequireApproval,
     Deny,
 }
