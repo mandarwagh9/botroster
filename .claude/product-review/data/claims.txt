@@ -1,0 +1,217 @@
+crates/openbot-agent/src/agent.rs:43:/// How many recent messages are never compacted.
+crates/openbot-agent/src/agent.rs:56:/// Contents are replaced, never messages removed. Every `tool_use` must keep
+crates/openbot-agent/src/agent.rs:65:/// it to a `Vec`. `compaction_never_breaks_a_tool_call_from_its_result` holds
+crates/openbot-agent/src/agent.rs:253:    ///   silently never fires.
+crates/openbot-agent/src/agent.rs:339:/// Delivered at a step boundary, never mid-tool-call: a tool that has been
+crates/openbot-agent/src/agent.rs:366:    /// What was said but never reached the turn.
+crates/openbot-agent/src/agent.rs:372:    /// the person believes it landed and the Bot never heard it.
+crates/openbot-agent/src/hub_client.rs:59:/// the path by which a person's answer gets back. A harness that never
+crates/openbot-agent/src/hub_client.rs:60:/// implements it simply never gets gated results.
+crates/openbot-agent/src/hub_client.rs:124:    /// stop instead of retrying something that can never be allowed.
+crates/openbot-agent/src/providers/http.rs:320:/// cost nothing", which never accumulates and never trips the cap, and the
+crates/openbot-agent/src/providers/http.rs:326:/// it is silently not a cap, and the warning for exactly that case can never
+crates/openbot-agent/src/providers/http.rs:498:/// The naive inverse, used only for a name that was never offered.
+crates/openbot-agent/src/providers/http.rs:502:/// this turns it into `linear.create_issue`, a tool the hub has never heard
+crates/openbot-agent/src/providers/http.rs:504:/// a real model, while `openbot call` still worked because it never goes through
+crates/openbot-agent/src/providers/http.rs:864:    /// (which tests for `None`) never fires.
+crates/openbot-agent/tests/agent_loop.rs:106:    /// such as a model that never answers at all.
+crates/openbot-agent/tests/agent_loop.rs:567:/// A model that never answers, so the only way out is the stop button.
+crates/openbot-agent/tests/agent_loop.rs:939:/// and OpenAI always send ids; a gateway or local server answering in their
+crates/openbot-agent/tests/secrets.rs:35:/// Never in a log, never in an event, never in the model's context.
+crates/openbot-agent/tests/vendor.rs:624:/// tool the hub has never heard of, making every connector unreachable from a
+crates/openbot-agent/tests/vendor.rs:625:/// real model while `openbot call` (which never goes through a provider) still
+crates/openbot-agent/tests/vendor.rs:670:/// A name that was never offered still comes back as something the hub can
+crates/openbot-agent/tests/vendor.rs:698:/// Two different tools must never share one wire name.
+crates/openbot-app/src/lib.rs:308:    /// The agent's own name for it (`path`, `command`, `url`), never a label
+crates/openbot-app/src/lib.rs:386:/// this build cannot classify is presented as a refusal, never as an allow.
+crates/openbot-app/src/lib.rs:408:/// and `config.toml` keeps the name and never the value.
+crates/openbot-app/src/lib.rs:572:/// enough that a computer which will never answer is reported rather than left
+crates/openbot-app/src/lib.rs:630:/// A failure here is an error and never an empty list. An empty sidebar looks
+crates/openbot-app/src/lib.rs:648:    /// The Bot it landed on, echoed back so the header is never a guess.
+crates/openbot-app/src/lib.rs:1002:/// The docs' auto-review list: what always stops for a person, what may
+crates/openbot-app/src/lib.rs:1041:/// Every credential the hub holds: names and fingerprints, never values.
+crates/openbot-app/src/lib.rs:1058:/// as an event, or echoed in the error if this fails. It never enters a
+crates/openbot-app/src/lib.rs:1059:/// transcript and is never sent to a model; the hub substitutes it into an
+crates/openbot-app/src/lib.rs:1545:/// `pub` for the tests: what this drops never reaches the window, so the
+crates/openbot-app/src/lib.rs:2071:    /// dialog that truncates gets a command approved that was never read.
+crates/openbot-app/src/lib.rs:2125:    /// and it gets no invented name: labelling it something the agent never
+crates/openbot-app/tests/defaults.rs:226:/// crates that never reference each other. An update the adapter sends and
+crates/openbot-app/tests/defaults.rs:228:/// no error, no log, just a message that never reaches the window.
+crates/openbot-app/tests/page.rs:142:/// browser there is a failure rather than a green run over tests that never
+crates/openbot-app/tests/page.rs:332:/// than of a five-minute timeout) and never put in front of a person as
+crates/openbot-app/tests/page.rs:569:/// rendered: one source, so it can never offer a teammate the sidebar does
+crates/openbot-app/tests/page.rs:894:/// than a second fetch, so it can never offer a teammate the sidebar does not
+crates/openbot-app/tests/page.rs:1249:/// anything they did not already know. The surprise is never the Bot; it is
+crates/openbot-app/tests/page.rs:1437:/// is asking about a call that will never be made, and answering it does
+crates/openbot-app/tests/page.rs:1476:/// covered by `shell_live.rs`, which checks the value never comes back out of
+crates/openbot-app/tests/page.rs:2245:/// The credential's name, never its value. A connector list that showed the
+crates/openbot-app/tests/page.rs:2865:/// never stops a keyboard: without focus management, raising an approval
+crates/openbot-app/tests/page.rs:2881:/// anything, so the two are asserted together and never apart.
+crates/openbot-app/tests/page.rs:4215:/// holds the same rule in `a_credential_is_never_left_in_the_window`; this is
+crates/openbot-app/tests/page.rs:4426:/// paste a real one where it was never needed, and then to believe it mattered.
+crates/openbot-app/tests/page.rs:4559:/// client-side convenience; `allow_always` is a hub-side session grant that
+crates/openbot-app/tests/page.rs:4614:/// A credential request is never auto-answered.
+crates/openbot-app/tests/page.rs:4655:/// clicks; it may never be on without the window saying so. A stored flag that
+crates/openbot-app/tests/shell_live.rs:73:    /// `allow_once`, `allow_always`, `reject_once`: the protocol's own kinds.
+crates/openbot-app/tests/shell_live.rs:361:/// Every chunk says which conversation it belongs to, and a thought is never
+crates/openbot-app/tests/shell_live.rs:1538:/// What it must never be is a tilde. Nothing expands one on the way to a
+crates/openbot-app/ui/main.js:87:/// chrome and always visible. The record — whatever the runtime, the hub or the
+crates/openbot-app/ui/main.js:135:/// does nothing: an overlay stops a pointer and never stops a keyboard, so
+crates/openbot-app/ui/main.js:139:/// Focus lands on the box, never on a control inside it, except where a
+crates/openbot-app/ui/main.js:284:/// so a new tool is shown rather than hidden. The full text is always on the
+crates/openbot-app/ui/main.js:489:/// Keyed on the id, never the name. `openbot bot set --rename` keeps the id
+crates/openbot-app/ui/main.js:496:/// manage per Bot is a worse default than a colour that is simply always
+crates/openbot-app/ui/main.js:533:/// Falls back to the name when a lookup misses, so a mark is always drawn:
+crates/openbot-app/ui/main.js:678:/// show none; never show the frame of one that is not there.
+crates/openbot-app/ui/main.js:784:/// a status pill in the corner, a decision that never reached the Bot (the
+crates/openbot-app/ui/main.js:820:/// The value is read from the input at the moment of sending and never put
+crates/openbot-app/ui/main.js:858:/// answers, never what is asked.
+crates/openbot-app/ui/main.js:861:/// and still refuses anything a `deny` rule covers; a client has never been
+crates/openbot-app/ui/main.js:865:/// In memory only, off whenever the window opens, and cleared on disconnect.
+crates/openbot-app/ui/main.js:901:/// persisting this: it may be on before anybody clicks, but it may never be on
+crates/openbot-app/ui/main.js:915:/// The narrowest grant, always. `renderDialog` documents that the shell orders
+crates/openbot-app/ui/main.js:1398:/// suggestion rather than a fact. Having chosen a provider you almost always
+crates/openbot-app/ui/main.js:1444:/// is an invitation to paste a real one somewhere it was never needed, and then
+crates/openbot-app/ui/main.js:1747:/// never the Bot; it is the routine that ran every morning, or that the
+crates/openbot-app/ui/main.js:2133:/// sidebar already has, so the palette can never offer a teammate the sidebar
+crates/openbot-app/ui/main.js:2223:/// they come from the sidebar's own DOM, so this menu can never offer a
+crates/openbot-app/ui/main.js:2290:/// Each entry carries two strings, and they are not always the same one:
+crates/openbot-bots/src/lib.rs:361:    /// can answer, and keeping it means a sidebar entry that fails whenever it
+crates/openbot-bots/src/lib.rs:629:    /// entry that fails whenever it is opened.
+crates/openbot-bots/src/lib.rs:1047:    /// The window almost never lands on a line boundary, so the first line it
+crates/openbot-bots/src/lib.rs:1077:    /// The window `tail_lines` reads almost never lands on a line boundary, so
+crates/openbot-bots/src/lib.rs:1080:    /// smaller ask takes from the end and never reaches the fragment. The
+crates/openbot-bots/src/lib.rs:2151:/// Named because `the_tail_never_returns_half_a_line` derives from it the one
+crates/openbot-bots/src/lib.rs:2272:    /// would be marked as having run and the firing would silently never
+crates/openbot-bots/src/lib.rs:2301:    /// wait until tomorrow, because a routine that has never completed is only
+crates/openbot-bots/src/lib.rs:2536:    /// so a machine ticking away on its own never counts as somebody watching.
+crates/openbot-bots/src/lib.rs:3260:    /// A path that is not present never matches. Treating a missing field as a
+crates/openbot-bots/src/lib.rs:3330:    /// Whether this trigger fires for `event`. Schedules never do.
+crates/openbot-cli/src/acp/mod.rs:136:/// §6.0), and a client selecting `allow_always` cannot satisfy a call that a
+crates/openbot-cli/src/acp/mod.rs:140:/// # Why `reject_always` is not offered
+crates/openbot-cli/src/acp/mod.rs:143:/// `AllowAlways` and a single `Deny`. There is no "deny always", because a
+crates/openbot-cli/src/acp/mod.rs:171:/// from another process, and a client that echoes back an id OPENBOT never
+crates/openbot-cli/src/acp/mod.rs:490:    /// An id OPENBOT never sent is not a decision. It arrives as a string from
+crates/openbot-cli/src/acp/mod.rs:504:    /// `reject_always`, OPENBOT has no durable deny to back it with.
+crates/openbot-cli/src/acp/serve.rs:102:/// rejects is a second turn, never a second message.
+crates/openbot-cli/src/acp/serve.rs:160:/// `session/new` mints a fresh id so it can never collide. `session/load`
+crates/openbot-cli/src/acp/serve.rs:220:/// mapping is stable, so the same project always reaches the same Bot and its
+crates/openbot-cli/src/acp/serve.rs:262:/// client never sends them, but one that does is told, and told in the task.
+crates/openbot-cli/src/acp/serve.rs:268:/// of guessing at a screenshot it never saw.
+crates/openbot-cli/src/acp/serve.rs:620:/// which is the one place the value must never be.
+crates/openbot-cli/src/acp/serve.rs:624:/// OPENBOT never offered, a missing `_meta`, a `_meta` holding something that
+crates/openbot-cli/src/acp/serve.rs:1467:    /// A message that never reached the turn must not be reported as
+crates/openbot-cli/src/acp/serve.rs:1471:    /// person their instruction landed when the Bot never saw it.
+crates/openbot-cli/src/acp/serve.rs:1729:    /// client that has never heard of the extension still sees the two options
+crates/openbot-cli/src/approve.rs:133:/// argument of the broker (the Bot can use the value and can never read it),
+crates/openbot-cli/src/approve.rs:135:/// person has never been told about.
+crates/openbot-cli/src/approve.rs:381:    /// Bot will never see it) are the two things a prompt can omit while still
+crates/openbot-cli/src/config.rs:41:    /// permissive rule can never widen a restrictive one: adding an `allow`
+crates/openbot-cli/src/config.rs:42:    /// can only reduce prompts, never reduce safety.
+crates/openbot-cli/src/config.rs:57:    /// Environment variable holding the key, never the key itself.
+crates/openbot-cli/src/config.rs:122:/// If a rule cannot be understood. Rules are never silently skipped; see
+crates/openbot-cli/src/config.rs:326:/// store existed to start looking. This way round, `export` always does what it
+crates/openbot-cli/src/config.rs:334:/// `config.toml` still records the name and never the value.
+crates/openbot-cli/src/config.rs:605:    /// never has to mutate the environment — which would race the other tests
+crates/openbot-cli/src/config.rs:654:    /// A keyless endpoint never consults the store.
+crates/openbot-cli/src/config.rs:790:    /// `pattern` must be an error, never ignored. It is the upstream format's
+crates/openbot-cli/src/main.rs:271:    /// at the moment of the call. The guest never receives one, so a Bot that
+crates/openbot-cli/src/main.rs:272:    /// reads a malicious web page cannot exfiltrate a token it was never given.
+crates/openbot-cli/src/main.rs:276:    /// never widen a restrictive one: adding an allow can only ever reduce
+crates/openbot-cli/src/main.rs:277:    /// prompts, never reduce safety.
+crates/openbot-cli/src/main.rs:793:        /// Which Bot owns it. A routine always has exactly one owner.
+crates/openbot-cli/src/main.rs:2690:/// write the mark must never stop the command that was asked for.
+crates/openbot-cli/src/main.rs:2936:/// Relative, never `file:///`. The path goes into the task, the task becomes
+crates/openbot-cli/src/render.rs:484:/// transcript and almost never what someone scrolling back wants, which is
+crates/openbot-cli/src/render.rs:589:/// Left-align within `width`, always leaving at least one trailing space.
+crates/openbot-cli/src/render.rs:602:/// Truncate by characters, never bytes: a byte slice through a multi-byte
+crates/openbot-cli/src/up.rs:143:    /// Beside the workspace, never inside it: `fs.read` is allow-listed and
+crates/openbot-cli/src/watch.rs:106:/// `an_approval_is_never_shown_to_a_bystander` in openbotd), so a Bot typing
+crates/openbot-cli/src/watch.rs:107:/// into the same page at the same moment is never put to this handler.
+crates/openbot-cli/src/watch.rs:108:/// `browser.type` reaching here is always a person's own keystroke, which is
+crates/openbot-cli/src/watch.rs:536:    /// The viewer answers for keystrokes, never for a credential.
+crates/openbot-cli/tests/acp_live.rs:71:    /// the response, or never sees the notification at all. Everything before
+crates/openbot-cli/tests/acp_live.rs:227:/// not left for the person to infer from an answer that never mentions their
+crates/openbot-cli/tests/cli_live.rs:161:/// every browser tool fail with "the browser never published a debugging
+crates/openbot-cli/tests/cli_live.rs:574:/// `openbot-guest` may never reach `openbotd` (`crates/openbot-guest/tests/
+crates/openbot-cli/tests/cli_live.rs:626:/// `openbot-guest` may never reach `openbotd`, so the catalogue is the only
+crates/openbot-cli/tests/common/up.rs:11:/// would leave the write end open, the reader would never see EOF, and
+crates/openbot-cli/tests/hooks_live.rs:16:/// Write a hook script that always denies, and return the path to run it by.
+crates/openbot-desktop/src/engine.rs:43:    /// `--demo`: one scripted reply, no tools, no key. The shell never sets
+crates/openbot-desktop/src/engine.rs:48:    /// shell never sets this; the tests do.
+crates/openbot-desktop/src/engine.rs:50:    /// `--demo-secret`: ask once for a credential, no model. The shell never
+crates/openbot-desktop/src/engine.rs:62:    /// never the key. So a window that collects a key has exactly one place to
+crates/openbot-desktop/src/engine.rs:87:/// the engine's driver task is waiting on; answering never needs the engine
+crates/openbot-desktop/src/engine.rs:111:/// It holds the question, never the answer. The value goes straight from the
+crates/openbot-desktop/src/engine.rs:410:/// an agent that has never heard of openbot sees an unmodified request.
+crates/openbot-desktop/src/engine.rs:889:    /// outstanding `session/prompt` with `cancelled`; the client always gets
+crates/openbot-desktop/src/secrets.rs:30:/// never read back.
+crates/openbot-desktop/src/secrets.rs:68:/// If the binary cannot be run or refuses the name. The error never contains
+crates/openbot-desktop/src/settings.rs:22:    /// The credential names it needs, never a value. Nothing in this product
+crates/openbot-desktop/src/settings.rs:159:/// environment variable to read the key from and never holds the key itself —
+crates/openbot-desktop/src/settings.rs:232:/// The value goes over **stdin**, never as an argument. Command-line arguments
+crates/openbot-desktop/src/settings.rs:314:    /// zero or "never".
+crates/openbot-desktop/src/viewer.rs:71:/// If the binary cannot be run, exits early, or never announces an address.
+crates/openbot-desktop/tests/common/up.rs:36:/// leaves the write end open, the reader never sees EOF, and `cargo test`
+crates/openbot-desktop/tests/engine_live.rs:316:/// makes that invisible: the Bot remembers, but the window never asks.
+crates/openbot-desktop/tests/engine_live.rs:318:/// turn against a live stack, a second engine that has never seen that
+crates/openbot-desktop/tests/engine_live.rs:892:/// records, and that file holds the name and never the value — a key in a
+crates/openbot-desktop/tests/engine_live.rs:897:/// file it wrote never contains the value.
+crates/openbot-desktop/tests/engine_live.rs:970:/// model is refused for want of a key that was never needed.
+crates/openbot-desktop/tests/skills_live.rs:70:/// parsing. If this never reached the window, the window would be the place
+crates/openbot-desktop/tests/start_live.rs:14:/// A free port, so a test never fights the default one or another test.
+crates/openbot-desktop/tests/start_live.rs:124:/// listening on the port accepts the connection and never completes the
+crates/openbot-guest/src/browser.rs:53:    /// path is quoted back because the mistake is almost always visible in it.
+crates/openbot-guest/src/browser.rs:84:/// test in the binary — and it asserted nothing, so the race never surfaced as
+crates/openbot-guest/src/browser.rs:151:    /// fail with "the browser never published a debugging port", and every
+crates/openbot-guest/src/browser.rs:362:    /// page that never fires it would hang forever. Polling has a ceiling.
+crates/openbot-guest/src/browser.rs:704:/// is deleted whenever this returns `None`, a stale one never survives a
+crates/openbot-guest/src/browser.rs:784:/// and the only symptom is the debugging-port file never appearing, which
+crates/openbot-guest/src/client.rs:80:///   never started) and returns, so a bad launch is visible immediately rather
+crates/openbot-guest/src/client.rs:81:///   than retrying an address that will never answer.
+crates/openbot-guest/src/lib.rs:26:/// Location of the browser profile for a plain workspace: beside it, never
+crates/openbot-guest/src/lib.rs:61:/// the next guest then waits out its full launch timeout for a port that never
+crates/openbot-guest/src/lib.rs:65:///   orchestrator send, and `ctrl_c` never sees it.
+crates/openbot-guest/src/tools.rs:44:/// never touch it, but once launched it is kept, so a session's cookies and
+crates/openbot-guest/src/tools.rs:129:/// use but never read.
+crates/openbot-guest/src/tools.rs:439:/// Truncate on a char boundary so the result is always valid UTF-8.
+crates/openbot-guest/src/tools.rs:787:    /// such a machine; CI runs on Ubuntu and macOS, where it always works, so
+crates/openbot-guest/src/tools.rs:788:    /// the property is never left unchecked everywhere at once.
+crates/openbot-guest/src/tools.rs:908:    /// product produces, since the tools never create links.
+crates/openbot-guest/src/tools.rs:929:    /// one level down, where a root-only marker check would never look and
+crates/openbot-proto/src/approval.rs:145:/// crates that never link against each other (`openbot acp` is a separate
+crates/openbot-proto/src/frames.rs:146:/// Streamed progress. A notification: zero or more per call, always before
+crates/openbot-proto/src/lib.rs:56:    /// Derived by the hub from the upgrade credential; never announced by the client.
+crates/openbot-proto/src/lib.rs:139:/// layout is wrong whenever the other option was chosen, and wrong silently: a
+crates/openbot-proto/src/lib.rs:152:    /// The client never announces its own identity.
+crates/openbot-proto/src/lib.rs:236:    /// routing the owner already established; never forwarded to the server.
+crates/openbot-proto/src/lib.rs:447:    /// in time. A terminal outcome alongside ok and error: the tool never ran.
+crates/openbot-proto/src/lib.rs:451:    /// Intentionally distinct from [`FORBIDDEN`]: that means "you may never do
+crates/openbot-store/src/lib.rs:251:    /// allow-listed and never prompts, turning a read-only tool into a
+crates/openbot-store/src/lib.rs:291:    /// either the old index or the new one, never a truncated file.
+crates/openbot-store/src/lib.rs:425:    /// guarantees the name always describes the contents. Held by
+crates/openbot-store/src/lib.rs:426:    /// `blobs_always_match_their_own_hash_under_concurrent_writes`.
+crates/openbot-store/src/lib.rs:571:    /// must never be able to discard recent work.
+crates/openbotd/src/hooks.rs:57:    /// for a hook that logs or notifies, never one that decides.
+crates/openbotd/src/hub.rs:122:    /// client forge a tool's result (a read that never happened, a write
+crates/openbotd/src/hub.rs:127:    /// back off a success payload would leak the entry whenever a tool fails,
+crates/openbotd/src/hub.rs:179:    /// Held by the control plane and never by the guest: `secret.request` is
+crates/openbotd/src/hub.rs:405:    /// would stop the connection reading, so the answer could never arrive
+crates/openbotd/src/hub.rs:438:    ///   and the caller is told nothing arrived, never that it was fine.
+crates/openbotd/src/policy.rs:107:    /// Tools the person approved with "always allow" for the lifetime of the session.
+crates/openbotd/src/policy.rs:110:    /// outranks allow: an extra allow rule would never lift the gate it was
+crates/openbotd/src/policy.rs:112:    /// the precedence a person means by "always allow": it overrides the
+crates/openbotd/src/policy.rs:113:    /// prompt, never an outright refusal.
+crates/openbotd/src/policy.rs:184:    /// operator has accepted the risk explicitly; never a default.
+crates/openbotd/src/policy.rs:243:    /// Record an "always allow" answer for the rest of the session.
+crates/openbotd/src/secrets.rs:197:    /// uses a credential and never reads one; an upstream error must not be
+crates/openbotd/src/secrets.rs:205:    /// Reads the store on each call. This runs on an error path, never in a
+crates/openbotd/src/server.rs:140:/// keep and ship) would write that credential to disk in clear text whenever a
+crates/openbotd/src/server.rs:144:/// redacted; the only safe rule is to report structure and never a value.
+crates/openbotd/src/server.rs:204:    /// A frame that failed to decode is described, never quoted.
+crates/openbotd/tests/approval_owner.rs:217:/// never happened, a write reported as done, a command whose output it chose.
+crates/openbotd/tests/approval_owner.rs:498:/// the question is never put to it. This test holds that assumption for it.
+crates/openbotd/tests/reconnect.rs:88:/// already accepted open, so the guest would never notice anything happened.
+crates/openbotd/tests/support/mod.rs:66:/// A server that accepts the connection and then never answers, for testing
+crates/openbotd/tests/takeover.rs:125:    /// A cheap, always-permitted tool call, used to ask "can I still act?".
+crates/openbotd/tests/takeover.rs:460:/// harness cannot skip the hook by not calling it, because it never called it.

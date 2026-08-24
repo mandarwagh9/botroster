@@ -43,6 +43,16 @@ const NAV_TIMEOUT: Duration = Duration::from_secs(45);
 pub enum BrowserError {
     #[error("no Chromium-family browser found; set OPENBOT_BROWSER to its path")]
     NotFound,
+    /// `OPENBOT_BROWSER` was set and there is nothing at that path.
+    ///
+    /// Separate from [`BrowserError::NotFound`] because the two need opposite
+    /// advice and used to give the same. Someone whose browser is somewhere
+    /// unusual sets this variable, mistypes the path, and is told "no browser
+    /// found; set OPENBOT_BROWSER to its path" — which is the thing they just
+    /// did, so the message reads as if the variable were being ignored. The
+    /// path is quoted back because the mistake is almost always visible in it.
+    #[error("OPENBOT_BROWSER points at {0}, and there is nothing there; correct it or unset it to search the usual install locations")]
+    OverrideMissing(PathBuf),
     #[error("launching the browser failed: {0}")]
     Launch(String),
     #[error("the browser connection closed")]
@@ -57,13 +67,34 @@ pub enum BrowserError {
 
 type Result<T> = std::result::Result<T, BrowserError>;
 
-/// Locate a browser: an explicit override first, then the usual installs.
-pub fn find_browser() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("OPENBOT_BROWSER") {
-        let p = PathBuf::from(p);
+/// Locate a browser, or say why not: an explicit override first, then the usual
+/// installs.
+///
+/// [`find_browser`] is the same search with the reason discarded, kept because
+/// most callers are skip-guards that only want to know whether a browser exists.
+/// Anything that reports to a person should use this one.
+pub fn locate_browser() -> Result<PathBuf> {
+    resolve_browser(std::env::var_os("OPENBOT_BROWSER").map(PathBuf::from))
+}
+
+/// The search itself, with the override passed in rather than read.
+///
+/// Split out so the behaviour can be tested without `set_var`. The test that
+/// used to cover this mutated the process environment, which races every other
+/// test in the binary — and it asserted nothing, so the race never surfaced as
+/// a failure. A pure function is testable from several threads at once.
+fn resolve_browser(override_path: Option<PathBuf>) -> Result<PathBuf> {
+    if let Some(p) = override_path {
         // An explicit override that does not exist is a mistake to report, not
         // a reason to silently run a different browser than the one asked for.
-        return p.exists().then_some(p);
+        // It used to return None here, which the caller could only turn into
+        // NotFound — silently, and with advice to set the variable that was
+        // already set.
+        return if p.exists() {
+            Ok(p)
+        } else {
+            Err(BrowserError::OverrideMissing(p))
+        };
     }
     const CANDIDATES: &[&str] = &[
         // Linux, where a deployed guest runs.
@@ -78,7 +109,20 @@ pub fn find_browser() -> Option<PathBuf> {
         r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
         r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
     ];
-    CANDIDATES.iter().map(PathBuf::from).find(|p| p.exists())
+    CANDIDATES
+        .iter()
+        .map(PathBuf::from)
+        .find(|p| p.exists())
+        .ok_or(BrowserError::NotFound)
+}
+
+/// Locate a browser: an explicit override first, then the usual installs.
+///
+/// Returns `None` for both "nothing installed" and "the override points
+/// nowhere". Callers that show the outcome to a person want
+/// [`locate_browser`], which distinguishes them.
+pub fn find_browser() -> Option<PathBuf> {
+    locate_browser().ok()
 }
 
 pub struct Browser {
@@ -129,7 +173,9 @@ impl Browser {
             return Self::attach(port, None).await;
         }
 
-        let exe = find_browser().ok_or(BrowserError::NotFound)?;
+        // `locate_browser`, not `find_browser`: this is the path whose error a
+        // person reads, and the two failures need opposite advice.
+        let exe = locate_browser()?;
         // Nothing answered, so whatever is in there is stale and would be read
         // as this run's port.
         let _ = std::fs::remove_file(&port_file);
@@ -848,11 +894,51 @@ mod tests {
 
     #[test]
     fn an_explicit_browser_path_is_honoured_when_it_exists() {
-        // Absent everything, discovery must not panic.
-        let _ = find_browser();
-        std::env::set_var("OPENBOT_BROWSER", "/definitely/not/here");
-        // A bad override falls through to discovery rather than failing hard.
-        let _ = find_browser();
-        std::env::remove_var("OPENBOT_BROWSER");
+        // The name of this test was a claim nothing checked. The version it
+        // replaces called the search twice, discarded both results, and set an
+        // override to a path that does not exist — so the one case the name
+        // promises, an override that *does* exist, was never exercised at all.
+        let real = std::env::current_exe().expect("the test binary exists");
+        let found = resolve_browser(Some(real.clone())).expect("an existing override is honoured");
+        assert_eq!(found, real, "the override must be returned unchanged");
+    }
+
+    #[test]
+    fn an_override_pointing_nowhere_says_so_instead_of_no_browser_found() {
+        // The bug this pins: a missing override became None, the caller turned
+        // None into NotFound, and NotFound tells you to "set OPENBOT_BROWSER to
+        // its path". Someone who mistyped that variable was advised to do the
+        // thing they had just done, with no hint that the variable was even
+        // being read. CLAUDE.md points people here when their browser is
+        // somewhere unusual, so this lands on exactly the users already having
+        // the hardest time.
+        let bad = PathBuf::from("/definitely/not/here/chrome");
+        let err = resolve_browser(Some(bad.clone())).expect_err("a missing override is an error");
+        assert!(
+            matches!(err, BrowserError::OverrideMissing(ref p) if *p == bad),
+            "expected OverrideMissing({bad:?}), got {err:?}"
+        );
+        let shown = err.to_string();
+        assert!(
+            shown.contains("OPENBOT_BROWSER") && shown.contains("not/here"),
+            "the message must name the variable and quote the path back: {shown}"
+        );
+        assert!(
+            !shown.contains("no Chromium-family browser found"),
+            "this is the message that made the two cases indistinguishable: {shown}"
+        );
+    }
+
+    #[test]
+    fn an_absent_override_falls_through_to_the_usual_install_locations() {
+        // Whether a browser is installed on the machine running this is not
+        // knowable, so this asserts the property that holds either way: with no
+        // override, the answer is never OverrideMissing. Without this, a
+        // resolver that reported OverrideMissing unconditionally would pass the
+        // two tests above.
+        assert!(
+            !matches!(resolve_browser(None), Err(BrowserError::OverrideMissing(_))),
+            "with no override set, the override branch must not be reachable"
+        );
     }
 }
