@@ -83,7 +83,7 @@ No timeout on a forwarded `tool.call`, no cancel path, no disconnect propagation
 
 ## Tier 2 — the security story is not yet what the README implies
 
-### T2-1 — the hub authenticates nobody. `open`
+### T2-1 — the hub authenticates nobody. `doing` (Origin half done; the per-home token still `open` — it is what defends against a local process)
 `P0` · reach: all users · `crates/openbotd/src/server.rs:62`
 
 `let principal = dev_principal()` — no token, no `Origin` check, on a fixed `127.0.0.1:8443`. Any
@@ -97,7 +97,7 @@ sends one, so this closes the browser vector at zero cost to every real client. 
 generated at start, written `0600` beside the home, presented in `hello`. The gate is perfectly
 built and then asked to trust whoever knocks.
 
-### T2-2 — `shell.exec` hands over the credential the crate graph protects. `open`
+### T2-2 — `shell.exec` hands over the credential the crate graph protects. `done` (environment half; the filesystem half needs a real isolation boundary and is recorded as such in isolation.rs)
 `P0` · reach: all users · `reports/guest-tools.md` F-GT1
 
 `isolation.rs` proves no crate edge from the guest to `openbotd` and panics with "this is the reason

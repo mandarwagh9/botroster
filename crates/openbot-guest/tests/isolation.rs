@@ -132,10 +132,17 @@ fn the_guest_cannot_reach_the_credential_store() {
             "the guest can now reach the credential store, via {}.\n\
              `openbotd::secrets` holds the tokens in plaintext, and the guest is \
              the side that runs model-chosen tool calls against untrusted \
-             pages. Keeping those apart is not a convention; it is the reason \
-             a prompt injection cannot exfiltrate a credential. If this \
-             dependency is genuinely needed, the thing it needs belongs in a \
-             crate that does not carry secrets.",
+             pages. Keeping those apart removes one whole class of accident: no \
+             `use` means no code path, so no future tool can read the store by \
+             mistake. If this dependency is genuinely needed, the thing it needs \
+             belongs in a crate that does not carry secrets.\n\
+             What this does NOT do, and used to claim it did: stop a prompt \
+             injection exfiltrating a credential. `shell.exec` runs as the user, \
+             and `current_dir` is not confinement — `cat ~/.openbot/secrets.json` \
+             is one approved command away. The environment half of that is \
+             closed (see `shell_env` in `tools.rs`); the filesystem half needs \
+             an isolation boundary this project does not have yet, and \
+             `CLAUDE.md` says not to write copy implying it does.",
             path.join(" → ")
         );
     }

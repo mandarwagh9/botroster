@@ -367,3 +367,52 @@ overreach.
 `session_bind_server` takes `server_id` in params and the session in the *frame*, not in params.
 Putting it in params fails with a bare error. Cost 10 minutes; worth writing down because the test
 harness helpers hide it.
+
+---
+
+## Iteration 7 — 2026-08-25. Tier 2: the door, and what walks through it.
+
+**Closed:** the Origin half of T2-1, and the environment half of T2-2.
+
+### Two independent halves beat one clever check
+
+A browser cannot suppress `Origin`, and a browser cannot set request headers. Either fact alone
+closes the drive-by path; together they also cover a local process, which neither does alone.
+*Generalises:* **when a threat has two structural properties you can test, test both** — the second
+costs little and covers the case where the first turns out to be softer than you thought.
+
+The check is on the *presence* of `Origin`, not its value. An allow-list of origins is the weaker
+test: it invites `null`, and it invites someone to add an entry later without noticing they have
+reopened the door.
+
+### Verify what a security change breaks before shipping it
+
+The Origin check would have broken the product if anything legitimate connected from a page. It does
+not: the viewer is `browser → HTTP → openbot watch → WebSocket → hub`, and the Tauri UI has no
+`WebSocket` at all. **Checking that took two greps and was the difference between a fix and an
+outage.**
+
+### An allow-list is wrong in the safe direction
+
+`shell.exec` needed an environment filter. A deny-list has to be right about every name a credential
+might have and is wrong the first time it guesses; an allow-list is wrong by withholding something a
+command wanted. **When both designs will be wrong sometimes, pick the one whose failure is a missing
+variable rather than a leaked key.**
+
+`sh -lc` → `sh -c` mattered as much as the filter: a login shell sources profiles, which can
+re-export what the allow-list withheld and can `cd` out of the only confinement the tool has.
+
+### Correct the claim when you can only fix half
+
+The environment vector is closed; `cat ~/.openbot/secrets.json` still works. `isolation.rs` now says
+which half is which instead of claiming both. **A partial fix plus an accurate claim is a good
+state; a partial fix under the old claim is worse than no fix**, because it reads as done.
+
+### The flake came back, which was the point of saying it might
+
+Fourth occurrence, fourth test, after two plausible fixes. Rather than guess again, the failure path
+now reports whether the retry ran and whether the harness's own server still accepts a plain TCP
+connection from the test process. *Generalises:* **after two failed fixes to an intermittent fault,
+stop fixing and start instrumenting.** The third guess is worth less than one conclusive
+observation, and two of my three data points were unusable because nobody had recorded which
+component died.

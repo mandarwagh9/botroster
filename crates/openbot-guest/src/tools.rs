@@ -439,6 +439,89 @@ fn base_catalog() -> Vec<ToolDescription> {
     ]
 }
 
+/// Names a shell command is allowed to inherit, and nothing else.
+///
+/// `shell.exec` used to hand the child this process's entire environment,
+/// because `tokio::process::Command` inherits by default and nothing here said
+/// otherwise. `openbot up` runs the hub, the credential store and the guest in
+/// one process, so on the documented install — export `XAI_API_KEY` and run —
+/// `env` printed the model key to a model-chosen command.
+///
+/// `crates/openbot-guest/tests/isolation.rs` panics with "the guest can now
+/// reach the credential store... this is the reason a prompt injection cannot
+/// exfiltrate a credential". That invariant is real and worth keeping, and it
+/// is a property of `Cargo.toml`: no crate edge means no `use`. It says nothing
+/// about a process that inherits the secrets anyway, and the stated purpose was
+/// therefore not achieved.
+///
+/// An allow-list rather than a deny-list, because a deny-list has to be right
+/// about every name a credential might have — `*_TOKEN`, `*_KEY`, `*_SECRET`,
+/// and whatever the next service calls it — and is wrong the first time it
+/// guesses. This is wrong in the safe direction instead: a command that needed
+/// something is told nothing, rather than a credential being handed over.
+///
+/// `PATH` is inherited rather than fixed, and that is deliberate. The parent was
+/// started from the person's own shell, so its `PATH` already carries whatever
+/// their profile set up — the `node` from a version manager, a `~/.local/bin`.
+/// Dropping `-l` without keeping `PATH` would make most real commands fail to
+/// find their tools.
+///
+/// `OPENBOT_SHELL_ENV` names extra variables to pass through, comma separated.
+/// The escape hatch is deliberate and deliberately explicit: a person who wants
+/// `GITHUB_TOKEN` visible to their scripts can say so by name, once, rather than
+/// having every variable exposed by default because one of them was needed.
+fn shell_env() -> Vec<(String, String)> {
+    // Enough for a shell to run and for programs to behave: where to find
+    // binaries, where home is, what the locale and terminal are, where to put
+    // temporary files. On Windows, cmd.exe needs rather more of this than a
+    // POSIX shell does, and refuses to start without some of it.
+    const COMMON: &[&str] = &[
+        "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TERM", "TZ", "TMPDIR",
+    ];
+    const WINDOWS: &[&str] = &[
+        "SystemRoot",
+        "SystemDrive",
+        "windir",
+        "COMSPEC",
+        "PATHEXT",
+        "TEMP",
+        "TMP",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "ProgramData",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+        "NUMBER_OF_PROCESSORS",
+        "OS",
+        "PROCESSOR_ARCHITECTURE",
+    ];
+
+    let mut names: Vec<String> = COMMON.iter().map(|s| (*s).to_owned()).collect();
+    if cfg!(windows) {
+        names.extend(WINDOWS.iter().map(|s| (*s).to_owned()));
+    }
+    if let Ok(extra) = std::env::var("OPENBOT_SHELL_ENV") {
+        names.extend(
+            extra
+                .split(',')
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .map(str::to_owned),
+        );
+    }
+
+    let mut out = Vec::new();
+    for name in names {
+        if let Ok(v) = std::env::var(&name) {
+            out.push((name, v));
+        }
+    }
+    out
+}
+
 /// Which element an acting tool was aimed at.
 ///
 /// `ref` wins when both are given, because a ref is the one the snapshot
@@ -730,10 +813,21 @@ pub async fn invoke(
                 c
             } else {
                 let mut c = tokio::process::Command::new("sh");
-                c.arg("-lc").arg(&command);
+                // `-c`, not `-lc`. A login shell sources /etc/profile and
+                // ~/.profile, which undoes both defences below: the profile can
+                // re-export the very variables `shell_env` just withheld, and a
+                // profile containing a `cd` moves the command out of
+                // `current_dir(ws.root())`, which is the only confinement this
+                // tool has. It also stops profile banners landing in the output
+                // the model reads as the command's result.
+                c.arg("-c").arg(&command);
                 c
             };
             cmd.current_dir(ws.root());
+            cmd.env_clear();
+            for (k, v) in shell_env() {
+                cmd.env(k, v);
+            }
             // Kill the child when the wait ends. Dropping the `output()`
             // future on timeout does not stop the process: tokio leaves a
             // child running unless told otherwise. Without this the model is

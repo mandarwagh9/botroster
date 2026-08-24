@@ -66,3 +66,4 @@ turns_the_sandbox_off	Test name for the variable parsing.
 point cron, systemd or a container scheduler at	Deployment tooling in a --help string. Nothing to do with confinement.
 will run the guest (a container or a microVM) once one exists	openbot-store describing a runtime that does not exist yet, in the future tense, and saying so in the same sentence.
 a container scheduler at this rather than baking a daemon into the CLI	The `routine tick` doc comment, quoted in up.rs to record that the new timer is one of those schedulers rather than an overturning of that decision. Deployment tooling.
+`crates/openbot-guest/tests/isolation.rs` panics with "the guest can now	The `shell_env` doc comment in tools.rs quoting that test's own message, to explain which half of the claim the environment allow-list closes and which half it does not. The quote is the thing being corrected, not a claim.

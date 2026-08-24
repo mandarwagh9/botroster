@@ -192,7 +192,9 @@ async fn page() -> Option<(Browser, tempfile::TempDir)> {
     // that fails honestly. `on_chrome_error_page` is what keeps this to the one
     // case that cannot be an assertion failure, and it is tested below rather
     // than trusted.
+    let mut retried = false;
     if on_chrome_error_page(&browser).await {
+        retried = true;
         eprintln!("navigation landed on Chrome's error page; retrying once");
         tokio::time::sleep(Duration::from_millis(250)).await;
         browser.navigate(&url).await.expect("navigate (retry)");
@@ -227,15 +229,40 @@ async fn page() -> Option<(Browser, tempfile::TempDir)> {
         .text_of("Object.keys(window.__listeners || {}).sort().join(',') || '(none)'")
         .await;
     let title = browser.text_of("document.title || '(no title)'").await;
+
+    // Is the loopback server this page came from still accepting?
+    //
+    // This is the question the previous three occurrences could not answer, and
+    // the reason a fourth was no more informative than the first. Chrome's
+    // error page says "the request did not complete" and nothing about why.
+    // A plain TCP connect, from this process, separates the two candidates
+    // conclusively: the harness's own server having died, or something in
+    // Chrome. Guessing between those is what produced two fixes that could not
+    // be shown to work.
+    let server = match url.trim_start_matches("http://").split('/').next() {
+        Some(addr) => match tokio::time::timeout(
+            Duration::from_secs(2),
+            tokio::net::TcpStream::connect(addr.to_owned()),
+        )
+        .await
+        {
+            Ok(Ok(_)) => "accepting connections".to_owned(),
+            Ok(Err(e)) => format!("REFUSED: {e}"),
+            Err(_) => "did not accept within 2s".to_owned(),
+        },
+        None => "could not parse the address".to_owned(),
+    };
     panic!(
         concat!(
             "the page never finished loading after 5s (it normally takes ~2ms).\n",
             "  last check: {0:?}\n",
             "  readyState/url: {1:?}\n",
             "  listeners: {2:?}\n",
-            "  title: {3:?}"
+            "  title: {3:?}\n",
+            "  navigation retried: {4}\n",
+            "  test server ({5}): {6}"
         ),
-        last, readiness, listeners, title
+        last, readiness, listeners, title, retried, url, server
     );
 }
 
