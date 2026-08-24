@@ -86,3 +86,76 @@ Seven first-party captures of our own client. Dull answer, and the rule still ap
 that arrived with an unconfirmed origin arrived precisely because nobody thought a picture counted.
 **A rule with an unwritten exception for the boring cases is not a rule**, and it fails on exactly
 the case it was written for.
+
+---
+
+## Iteration 2 — 2026-08-24. Six departments, and two of the top items shipped.
+
+**Reviews in:** 78 findings across six reports, triaged into one ranked order in `BACKLOG.md`.
+**Closed:** T2-4 (Chrome's own sandbox), T1-1 (routines never fired).
+
+### The pattern across all six reports
+
+Three of the top five findings are **features that are complete and never invoked**. Not
+half-built — the routine scheduler parses cron, computes due-ness and executes, all correctly, and
+nothing called it. `DIRECTION.md` was adopted as launch decision #1 and never implemented.
+`context_budget` has one caller in the workspace and it is a test.
+
+*Generalises:* **a component with passing unit tests and no caller looks exactly like a working
+feature from inside the code.** Every test of the routine machinery passed, forever, while the
+feature did nothing at all. The question that finds this class is not "is it correct" but "who calls
+it", and no test here asked it. The live test now added asks it the only way that works — start the
+shipped binary, wait on a wall clock, assert something was recorded.
+
+### A false comment became a live vulnerability
+
+`browser.rs` said "the guest is already a sandbox" and used that as the reason to pass
+`--no-sandbox` to Chrome. The premise contradicted `CLAUDE.md` outright, and the consequence was
+that the renderer parsing model-chosen pages ran with its own boundary switched off.
+
+*Generalises:* **a wrong comment is not a documentation problem, it is a latent code problem.** The
+next person to touch that line reads the comment and writes code consistent with it. Fifteen places
+across five crates called the guest a sandbox; nobody lied, each author matched their neighbours.
+Correct the vocabulary, not just the sentence.
+
+The gate had the matching blind spot: G5 scanned prose only, reasoning that shipped text is what a
+user believes. The defect lived one floor below, in a comment. **Aim an honesty gate at what a
+future author will read, not only at what a user will read.**
+
+### The end-to-end run caught a bug in my own fix
+
+The timer built `openbot --home H routine tick`. `--home` is not a global argument, so clap rejects
+it in the root position and the child would have errored once a minute forever. **The unit test
+passed** — it asserted the joined argument list contained `"--home H"`, which was true and
+irrelevant.
+
+*Generalises, and it is iteration 1's lesson arriving from a different direction:* **a test that
+string-matches what the code just produced tests nothing** — it restates the implementation. The fix
+was to hand the arguments to the real `clap` parser and destructure the result, so it fails on
+anything the binary would reject. Cheap rule: if the assertion would still pass when the production
+code is replaced by the literal it emits, the test is a mirror.
+
+### A test can pass through the wrong seam
+
+`routines_line` was unit tested for both states, and deleting the one line in `banner` that *calls*
+it left the test green. Unit-testing a renderer proves the renderer and says nothing about whether
+anyone renders it.
+
+*Generalises:* extracting a function to make it testable **creates a new untested seam — the call
+site.** Test the seam, not only the extracted half. Covered now by a live test reading the banner
+`up` actually printed.
+
+### A run that fails is still proof
+
+The live test asserts a run was **recorded**, not that it succeeded. No model is configured, so it
+records a failure — and a recorded failure proves the clock ticked, which is the property that did
+not exist. Asserting success would have needed a model and would have been testing the agent.
+**Pick the weakest assertion that still separates the bug from its absence.** It is cheaper, it is
+faster, and it does not drift into testing something else.
+
+### Housekeeping
+
+A `git commit -F-` heredoc containing apostrophes failed to parse twice in this session. Write the
+message to a file and use `git commit -F <file>`. The second time it silently took a `python`
+block with it, so `MEMORY.md` was not written when I thought it had been — **check that a combined
+command actually ran before trusting its side effects.**
