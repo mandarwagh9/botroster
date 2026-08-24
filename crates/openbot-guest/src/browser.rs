@@ -53,6 +53,24 @@ pub enum BrowserError {
     /// path is quoted back because the mistake is almost always visible in it.
     #[error("OPENBOT_BROWSER points at {0}, and there is nothing there; correct it or unset it to search the usual install locations")]
     OverrideMissing(PathBuf),
+    /// A `ref` was used before anything had handed one out.
+    ///
+    /// Separate from [`BrowserError::NoSuchElement`] because the remedy is
+    /// different and a model will not guess it: nothing is wrong with the page,
+    /// the refs simply do not exist yet on it.
+    #[error(
+        "no snapshot has been taken of this page, so e{0} refers to nothing; call browser.snapshot first"
+    )]
+    NoSnapshot(usize),
+    /// The ref existed, and the element it named is gone.
+    ///
+    /// Almost always a navigation: refs live in the page's own JavaScript
+    /// context and do not survive one. Saying so is the difference between a
+    /// model re-snapshotting and a model guessing selectors.
+    #[error(
+        "e{0} is no longer on the page — the page changed since the snapshot; call browser.snapshot again"
+    )]
+    StaleRef(usize),
     #[error("launching the browser failed: {0}")]
     Launch(String),
     #[error("the browser connection closed")]
@@ -66,6 +84,135 @@ pub enum BrowserError {
 }
 
 type Result<T> = std::result::Result<T, BrowserError>;
+
+/// What an acting tool was aimed at.
+///
+/// Two ways of naming one element, kept as separate inputs rather than one
+/// string that is sniffed. A selector and a ref are not distinguishable by
+/// looking: `e1` is a legal CSS type selector, so a heuristic would eventually
+/// resolve someone's real selector as a ref and act on a different element than
+/// they named. Guessing is cheap to write and impossible to debug from the
+/// outside, which is the wrong trade for the layer that clicks things.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    /// A CSS selector, for what a ref cannot express.
+    Selector(String),
+    /// The 1-based number from a `browser.snapshot` ref: `e3` is `Ref(3)`.
+    Ref(usize),
+}
+
+impl Target {
+    /// JavaScript binding `e` to the element, or to a sentinel string saying
+    /// why it could not.
+    ///
+    /// Sentinels rather than `null` so the three failures stay apart all the
+    /// way to the person reading the error: never snapshotted, snapshotted but
+    /// out of range, and snapshotted but the element has since left the page
+    /// need three different next steps.
+    fn resolve_js(&self) -> String {
+        match self {
+            Self::Selector(s) => {
+                format!(
+                    "const e=document.querySelector({})||'missing'",
+                    js_string(s)
+                )
+            }
+            Self::Ref(n) => format!(
+                "const R=window.__openbot_refs;\
+                 const e=!R?'nosnapshot':(!R[{}]?'missing':(!R[{}].isConnected?'stale':R[{}]))",
+                n.saturating_sub(1),
+                n.saturating_sub(1),
+                n.saturating_sub(1)
+            ),
+        }
+    }
+
+    /// Turn the sentinel back into the error that names the remedy.
+    fn check(&self, outcome: Option<&str>) -> Result<()> {
+        match (outcome, self) {
+            (Some("ok"), _) => Ok(()),
+            (Some("nosnapshot"), Self::Ref(n)) => Err(BrowserError::NoSnapshot(*n)),
+            (Some("stale"), Self::Ref(n)) => Err(BrowserError::StaleRef(*n)),
+            (_, Self::Ref(n)) => Err(BrowserError::NoSuchElement(format!("e{n}"))),
+            (_, Self::Selector(s)) => Err(BrowserError::NoSuchElement(s.clone())),
+        }
+    }
+}
+
+/// Walk the page for things a person could act on, and name each one.
+///
+/// A `Runtime.evaluate` rather than CDP's `Accessibility.getFullAXTree`, which
+/// returns the whole tree including everything unactionable and would need
+/// filtering back down to roughly this. This walks the elements that accept
+/// input directly, which is the set the acting tools can address.
+///
+/// Elements are stashed on `window.__openbot_refs` so a later `click` resolves
+/// the identical node rather than re-running a selector that may now match
+/// something else.
+const SNAPSHOT_JS: &str = r#"(limit)=>{
+  const txt = n => n ? (n.textContent||'').replace(/\s+/g,' ').trim() : '';
+  const nameOf = e => {
+    const al = e.getAttribute('aria-label');
+    if (al && al.trim()) return al.trim();
+    const lb = e.getAttribute('aria-labelledby');
+    if (lb) {
+      const t = lb.split(/\s+/).map(i=>txt(document.getElementById(i))).filter(Boolean).join(' ');
+      if (t) return t;
+    }
+    if (e.id) { const t = txt(document.querySelector('label[for="'+CSS.escape(e.id)+'"]')); if (t) return t; }
+    const anc = e.closest ? e.closest('label') : null;
+    if (anc) { const t = txt(anc); if (t) return t; }
+    for (const a of ['placeholder','alt','title']) {
+      const v = e.getAttribute(a);
+      if (v && v.trim()) return v.trim();
+    }
+    if (e.tagName==='INPUT' && ['submit','button','reset'].includes((e.type||'').toLowerCase()) && e.value) return e.value;
+    return txt(e).slice(0,120);
+  };
+  const roleOf = e => {
+    const r = e.getAttribute('role');
+    if (r) return r.trim();
+    const tag = e.tagName.toLowerCase();
+    if (tag==='a') return 'link';
+    if (tag==='button') return 'button';
+    if (tag==='select') return 'combobox';
+    if (tag==='textarea') return 'textbox';
+    if (tag==='summary') return 'disclosure';
+    if (tag==='input') {
+      const t = (e.type||'text').toLowerCase();
+      if (t==='checkbox'||t==='radio') return t;
+      if (['submit','button','reset','image'].includes(t)) return 'button';
+      if (t==='search') return 'searchbox';
+      return 'textbox';
+    }
+    if (e.isContentEditable) return 'textbox';
+    return 'generic';
+  };
+  const visible = e => {
+    const r = e.getBoundingClientRect();
+    if (r.width<=0 || r.height<=0) return false;
+    const s = getComputedStyle(e);
+    return s.visibility!=='hidden' && s.display!=='none' && s.opacity!=='0';
+  };
+  const sel = 'a[href],button,input,select,textarea,summary,[role],[onclick],[contenteditable=""],[contenteditable="true"]';
+  // `visible` already excludes `input[type=hidden]`, which the UA stylesheet
+  // gives `display:none` and therefore a zero-sized rect. An explicit filter
+  // for it was here and was dead: removing it changed nothing, and removing
+  // both let the hidden csrf field through. Dead code that looks load-bearing
+  // is worse than none, because the next person maintains it.
+  const all = [...document.querySelectorAll(sel)].filter(visible);
+  const kept = all.slice(0, limit);
+  window.__openbot_refs = kept;
+  const out = kept.map((e,i) => {
+    const o = { ref: 'e'+(i+1), role: roleOf(e), name: nameOf(e) };
+    if (e.value !== undefined && typeof e.value === 'string' && o.role !== 'button') o.value = e.value.slice(0,120);
+    if (e.tagName==='A' && e.href) o.href = e.href;
+    if (e.disabled) o.disabled = true;
+    if (e.checked) o.checked = true;
+    return o;
+  });
+  return JSON.stringify({ elements: out, truncated: all.length > kept.length, total: all.length });
+}"#;
 
 /// Locate a browser, or say why not: an explicit override first, then the usual
 /// installs.
@@ -463,32 +610,70 @@ impl Browser {
         Ok(serde_json::from_str(v.as_str().unwrap_or("[]")).unwrap_or(json!([])))
     }
 
-    pub async fn click(&self, selector: &str) -> Result<()> {
-        let expr = format!(
-            "(()=>{{const e=document.querySelector({});if(!e)return 'missing';e.click();return 'ok';}})()",
-            js_string(selector)
-        );
-        match self.eval(&expr).await?.as_str() {
-            Some("ok") => Ok(()),
-            _ => Err(BrowserError::NoSuchElement(selector.to_owned())),
-        }
+    /// What the page offers to act on, with a name for each thing.
+    ///
+    /// The gap this closes: `read` returned `innerText` and `click`/`fill`
+    /// demanded CSS selectors, and nothing in the reading emitted one. A model
+    /// was being asked to guess `input[name="q"]` for a page it had only ever
+    /// seen as a wall of text, and to pay for each wrong guess twice — once in
+    /// a turn, once in an approval prompt a person has to read, because
+    /// `browser.click` and `browser.fill` are both `ask`. A ten-field form was
+    /// not reachable that way.
+    ///
+    /// Perception and action now share one coordinate system, which is the
+    /// arrangement every usable agent browser converges on. Each interactive
+    /// element gets a `ref` — `e1`, `e2` — and the acting tools take one.
+    ///
+    /// The refs live in the page's own context, so they do not survive a
+    /// navigation. That is a feature rather than a limitation to hide: a ref
+    /// that silently rebound to whatever now occupies its index would click the
+    /// wrong thing on the new page, which is worse than any error. `isConnected`
+    /// is checked at use, and the failure says to snapshot again.
+    ///
+    /// Names are computed the way a screen reader would: `aria-label`, then
+    /// `aria-labelledby`, then an associated `<label>`, then `placeholder`,
+    /// `alt`, a button's `value`, its text, and finally `title`. That order is
+    /// not arbitrary — it is the order that produces the name a person would
+    /// use for the control, which is the name a model will look for.
+    pub async fn snapshot(&self, limit: usize) -> Result<Value> {
+        let expr = format!("({SNAPSHOT_JS})({limit})");
+        let v = self.eval(&expr).await?;
+        let s = v.as_str().unwrap_or("{}");
+        Ok(serde_json::from_str(s).unwrap_or(json!({})))
     }
 
-    pub async fn fill(&self, selector: &str, text: &str) -> Result<()> {
+    /// Click, by selector or by a ref the snapshot handed out.
+    pub async fn click_target(&self, target: &Target) -> Result<()> {
+        let expr = format!(
+            "(()=>{{{};if(typeof e==='string')return e;e.click();return 'ok';}})()",
+            target.resolve_js()
+        );
+        target.check(self.eval(&expr).await?.as_str())
+    }
+
+    /// Type into a field, by selector or by ref.
+    pub async fn fill_target(&self, target: &Target, text: &str) -> Result<()> {
         // Setting `.value` alone leaves most frameworks unaware anything
         // changed, so dispatch the events a real keystroke would produce.
         let expr = format!(
-            "(()=>{{const e=document.querySelector({});if(!e)return 'missing';\
+            "(()=>{{{};if(typeof e==='string')return e;\
              e.focus();e.value={};\
              e.dispatchEvent(new Event('input',{{bubbles:true}}));\
              e.dispatchEvent(new Event('change',{{bubbles:true}}));return 'ok';}})()",
-            js_string(selector),
+            target.resolve_js(),
             js_string(text)
         );
-        match self.eval(&expr).await?.as_str() {
-            Some("ok") => Ok(()),
-            _ => Err(BrowserError::NoSuchElement(selector.to_owned())),
-        }
+        target.check(self.eval(&expr).await?.as_str())
+    }
+
+    pub async fn click(&self, selector: &str) -> Result<()> {
+        self.click_target(&Target::Selector(selector.to_owned()))
+            .await
+    }
+
+    pub async fn fill(&self, selector: &str, text: &str) -> Result<()> {
+        self.fill_target(&Target::Selector(selector.to_owned()), text)
+            .await
     }
 
     /// PNG bytes of the visible page.

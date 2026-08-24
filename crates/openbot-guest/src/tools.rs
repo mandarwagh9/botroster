@@ -282,29 +282,47 @@ fn browser_catalog() -> Vec<ToolDescription> {
             json!({ "type": "object", "properties": {}, "required": [] }),
         ),
         ToolDescription::new(
+            "browser.snapshot",
+            "List what can be acted on, each with a ref like e1. Pass a ref to browser.click or browser.fill instead of guessing a CSS selector. Navigation invalidates refs; snapshot again after the page changes.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "How many elements at most (default 150)."
+                    }
+                },
+                "required": []
+            }),
+        ),
+        ToolDescription::new(
             "browser.links",
             "List the links on the current page as text and href.",
             json!({ "type": "object", "properties": {}, "required": [] }),
         ),
         ToolDescription::new(
             "browser.click",
-            "Click the first element matching a CSS selector.",
+            "Click something. Give either a ref from browser.snapshot, or a CSS selector.",
             json!({
                 "type": "object",
-                "properties": { "selector": { "type": "string" } },
-                "required": ["selector"]
+                "properties": {
+                    "ref": { "type": "string", "description": "A ref from browser.snapshot, like e3." },
+                    "selector": { "type": "string", "description": "A CSS selector, if you have no ref." }
+                },
+                "required": []
             }),
         ),
         ToolDescription::new(
             "browser.fill",
-            "Type text into the first input matching a CSS selector.",
+            "Type text into a field. Give either a ref from browser.snapshot, or a CSS selector.",
             json!({
                 "type": "object",
                 "properties": {
-                    "selector": { "type": "string" },
+                    "ref": { "type": "string", "description": "A ref from browser.snapshot, like e2." },
+                    "selector": { "type": "string", "description": "A CSS selector, if you have no ref." },
                     "text": { "type": "string" }
                 },
-                "required": ["selector", "text"]
+                "required": ["text"]
             }),
         ),
         ToolDescription::new(
@@ -421,6 +439,46 @@ fn base_catalog() -> Vec<ToolDescription> {
     ]
 }
 
+/// Which element an acting tool was aimed at.
+///
+/// `ref` wins when both are given, because a ref is the one the snapshot
+/// actually handed out and a selector alongside it is a model hedging. Neither
+/// is an error rather than a default: silently clicking the first thing on the
+/// page would be a destructive guess, and these tools are gated by an approval
+/// a person has already read and agreed to.
+fn target_of(args: &Value) -> std::result::Result<browser::Target, ToolError> {
+    if let Some(r) = args.get("ref").and_then(|v| v.as_str()) {
+        let r = r.trim();
+        let n = r
+            .strip_prefix('e')
+            .and_then(|d| d.parse::<usize>().ok())
+            .filter(|n| *n > 0)
+            .ok_or_else(|| {
+                ToolError::Failed(format!(
+                    "`{r}` is not a ref. Refs come from browser.snapshot and look like e1, e2."
+                ))
+            })?;
+        return Ok(browser::Target::Ref(n));
+    }
+    if let Some(sel) = args.get("selector").and_then(|v| v.as_str()) {
+        if !sel.trim().is_empty() {
+            return Ok(browser::Target::Selector(sel.to_owned()));
+        }
+    }
+    Err(ToolError::Failed(
+        "give either `ref` (from browser.snapshot, like e3) or `selector` (a CSS selector). browser.snapshot lists what is on the page and what each thing is called."
+            .into(),
+    ))
+}
+
+/// How to name that element back in the result.
+fn target_label(t: &browser::Target) -> String {
+    match t {
+        browser::Target::Selector(s) => s.clone(),
+        browser::Target::Ref(n) => format!("e{n}"),
+    }
+}
+
 fn arg_str(args: &Value, key: &str) -> Result<String, ToolError> {
     args.get(key)
         .and_then(|v| v.as_str())
@@ -497,27 +555,39 @@ pub async fn invoke(
             Ok(json!({ "links": links }))
         }
 
-        "browser.click" => {
-            let sel = arg_str(args, "selector")?;
+        "browser.snapshot" => {
+            let limit = args
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(150)
+                .clamp(1, 1000) as usize;
             let b = ctx.browser().await?;
-            b.click(&sel)
+            b.snapshot(limit)
+                .await
+                .map_err(|e| ToolError::Failed(e.to_string()))
+        }
+
+        "browser.click" => {
+            let target = target_of(args)?;
+            let b = ctx.browser().await?;
+            b.click_target(&target)
                 .await
                 .map_err(|e| ToolError::Failed(e.to_string()))?;
             let info = b
                 .info()
                 .await
                 .map_err(|e| ToolError::Failed(e.to_string()))?;
-            Ok(json!({ "clicked": sel, "url": info.url, "title": info.title }))
+            Ok(json!({ "clicked": target_label(&target), "url": info.url, "title": info.title }))
         }
 
         "browser.fill" => {
-            let sel = arg_str(args, "selector")?;
+            let target = target_of(args)?;
             let text = arg_str(args, "text")?;
             let b = ctx.browser().await?;
-            b.fill(&sel, &text)
+            b.fill_target(&target, &text)
                 .await
                 .map_err(|e| ToolError::Failed(e.to_string()))?;
-            Ok(json!({ "filled": sel, "chars": text.chars().count() }))
+            Ok(json!({ "filled": target_label(&target), "chars": text.chars().count() }))
         }
 
         "browser.click_at" => {

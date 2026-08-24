@@ -248,3 +248,42 @@ what is merely hoped.
 The retry that remains is bounded to a state that cannot be an assertion failure, and the predicate
 is split out and tested in both directions, because the danger of a retry is never the retry: it is
 the classification that decides what gets one.
+
+---
+
+## Iteration 4 — 2026-08-24. T1-3: perception and action share a coordinate system.
+
+**Closed:** T1-3 (F-GT4). `browser.snapshot` hands out refs; `click`/`fill` take them.
+
+### The defect was a missing correspondence, not a missing feature
+
+`read` returned `innerText`; `click` demanded CSS selectors; nothing emitted one. Both halves
+worked. Neither was wrong on its own. *Generalises:* **some of the worst defects are relationships,
+not components** — no per-component review finds them, because every component passes. The question
+that finds them is "can the output of A be used as the input to B", and it has to be asked
+explicitly.
+
+### Two mutations that did not fire, and both were real information
+
+- Removing `isConnected` left the navigation test green, because a navigation replaces the whole JS
+  context — refs are *gone*, not stale, so that path reports "no snapshot". My assertion only
+  checked that the message mentioned `browser.snapshot`, which both messages do. **When two
+  mechanisms produce a similar-looking message, an assertion on the shared part tests neither.**
+  The genuinely stale case is an SPA re-render, and it now has its own test.
+- Removing the explicit hidden-input filter changed nothing: the visibility filter already covers
+  it. **A mutation that does not fire sometimes means the code is redundant, not that the test is
+  weak.** Check which before strengthening the test — I deleted dead code that looked load-bearing.
+
+### Separate inputs beat a sniffed string
+
+`ref` and `selector` are distinct fields because `e1` is a legal CSS type selector, so any heuristic
+eventually resolves a real selector as a ref and acts on the wrong element. **Ambiguity that only
+shows up on someone else's input is the worst kind**, and it is free to avoid at the schema.
+
+### Repo lints worth remembering
+
+- `messages.rs` rejects multi-line string literals whose continuation bakes in the file's
+  indentation. Backslash continuations written through a script keep getting lost; **write those
+  strings on one line** and let rustfmt leave them alone.
+- `every_tool_the_computer_offers_has_a_rule_of_its_own` catches a new tool with no policy rule.
+  Adding a tool means adding a rule in `openbotd/src/policy.rs` in the same change.

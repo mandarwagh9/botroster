@@ -146,6 +146,12 @@ impl Default for Policy {
                 Rule::allow("browser.open"),
                 Rule::allow("browser.read"),
                 Rule::allow("browser.links"),
+                // Same class as `read`: it describes the page the Bot already
+                // has open and changes nothing. It also has to be `allow` for
+                // the acting tools to be usable at all — `click` and `fill`
+                // are `ask`, and a snapshot that prompted would mean two
+                // approvals per interaction, one of them for looking.
+                Rule::allow("browser.snapshot"),
                 Rule::allow("browser.screenshot"),
                 // The live viewer's frame stream. Same risk class as a
                 // screenshot (pixels of a page the agent already opened), and

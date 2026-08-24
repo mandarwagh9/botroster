@@ -10,7 +10,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use openbot_guest::browser::{find_browser, Browser};
+use openbot_guest::browser::{find_browser, Browser, Target};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const PAGE: &str = r#"<!doctype html><html><head><title>openbot test page</title></head>
@@ -49,6 +49,28 @@ const INPUT_PAGE: &str = r#"<!doctype html><html><head><title>input</title>
     f.addEventListener('keydown', e => log('keydown:' + e.key));
     f.addEventListener('input', e => log('input:' + e.target.value));
   </script>
+</body></html>"#;
+
+/// A sign-in form of the kind an agent is actually asked to complete.
+///
+/// Every field is labelled a different legal way, because that is the part a
+/// snapshot has to get right: a real page does not label all its inputs the
+/// same way, and a walker that only understands `<label for>` produces a list
+/// where half the entries are blank and the model is back to guessing.
+const FORM_PAGE: &str = r#"<!doctype html><html><head><title>sign in</title></head>
+<body>
+  <h1>Sign in</h1>
+  <form id="f" onsubmit="document.getElementById('out').innerText='submitted:'+
+      document.getElementById('email').value+'/'+document.querySelector('[name=pw]').value;return false">
+    <label for="email">Email address</label>
+    <input id="email" type="text">
+    <input name="pw" type="password" placeholder="Password">
+    <label><input id="news" type="checkbox"> Send me news</label>
+    <button type="submit" aria-label="Sign in to your account">Go</button>
+    <button type="button" disabled>Cannot press</button>
+  </form>
+  <input type="hidden" name="csrf" value="secret">
+  <div id="out"></div>
 </body></html>"#;
 
 /// Serve `PAGE` on loopback until the returned handle is dropped.
@@ -694,4 +716,229 @@ async fn a_browser_that_dies_mid_session_is_replaced_rather_than_kept() {
         .expect("navigate the new one");
     assert_eq!(info.title, "openbot test page");
     replacement.shutdown().await;
+}
+
+/// A form can be completed using only what the page reported about itself.
+///
+/// This is the whole point of the snapshot, and it is stated as an end-to-end
+/// property rather than a list of fields, because the defect it replaces was not
+/// a missing feature but a missing *correspondence*: `read` returned `innerText`
+/// and `click`/`fill` demanded CSS selectors, and nothing in the reading ever
+/// emitted one. A model could see the page or act on it, never both.
+///
+/// So this test is forbidden from using knowledge a model would not have. No
+/// selector from `FORM_PAGE` appears below the snapshot call; the refs come from
+/// the page's own report of itself, chosen by the accessible name a person would
+/// use. If that correspondence breaks, the fields cannot be found here either.
+#[tokio::test]
+async fn a_form_can_be_filled_from_the_snapshot_alone() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve_page(FORM_PAGE).await;
+    b.navigate(&url).await.expect("navigate");
+
+    let snap = b.snapshot(150).await.expect("snapshot");
+    let elements = snap["elements"]
+        .as_array()
+        .expect("elements is a list")
+        .clone();
+
+    // Pick fields the way a model would: by the name a person would use.
+    let by_name = |want: &str| -> Target {
+        let found = elements
+            .iter()
+            .find(|e| e["name"].as_str().unwrap_or_default().contains(want))
+            .unwrap_or_else(|| {
+                panic!(
+                    "nothing in the snapshot is called {want:?}. A model has no other way to find \
+                     this field, so it cannot fill the form:\n{snap:#}"
+                )
+            });
+        let r = found["ref"].as_str().expect("every element carries a ref");
+        Target::Ref(r.trim_start_matches('e').parse().expect("refs are e<n>"))
+    };
+
+    // Labelled by `<label for>`, by `placeholder`, and by `aria-label`. Three
+    // legal ways, all of which a real page uses somewhere.
+    let email = by_name("Email address");
+    let password = by_name("Password");
+    let submit = by_name("Sign in to your account");
+
+    b.fill_target(&email, "someone@example.com")
+        .await
+        .expect("fill the email field found by name");
+    b.fill_target(&password, "hunter2")
+        .await
+        .expect("fill the password field found by name");
+    b.click_target(&submit)
+        .await
+        .expect("press the button found by name");
+
+    let out = b
+        .text_of("document.getElementById('out').innerText")
+        .await
+        .expect("read the result");
+    assert_eq!(
+        out, "submitted:someone@example.com/hunter2",
+        "the form did not receive what the snapshot said it would; refs and elements have drifted"
+    );
+}
+
+/// The listing says what each thing is, and leaves out what cannot be used.
+///
+/// A list of refs with empty names would satisfy the test above whenever the
+/// ordering happened to line up, and would be useless on any real page. These
+/// are the properties that make the listing worth reading at all.
+#[tokio::test]
+async fn the_snapshot_says_what_each_thing_is() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve_page(FORM_PAGE).await;
+    b.navigate(&url).await.expect("navigate");
+    let snap = b.snapshot(150).await.expect("snapshot");
+    let elements = snap["elements"]
+        .as_array()
+        .expect("elements is a list")
+        .clone();
+
+    let find = |name: &str| {
+        elements
+            .iter()
+            .find(|e| e["name"].as_str().unwrap_or_default().contains(name))
+            .unwrap_or_else(|| panic!("no element named {name:?} in {snap:#}"))
+            .clone()
+    };
+
+    assert_eq!(find("Email address")["role"], "textbox");
+    assert_eq!(find("Sign in to your account")["role"], "button");
+    assert_eq!(
+        find("Send me news")["role"],
+        "checkbox",
+        "a checkbox wrapped in its own label must still be found and named by it"
+    );
+    assert_eq!(
+        find("Cannot press")["disabled"],
+        true,
+        "a disabled control has to say so, or a model spends a turn and an approval on it"
+    );
+
+    // A hidden input is not something anyone can act on, and listing it costs
+    // tokens while inviting the model to try.
+    assert!(
+        !elements
+            .iter()
+            .any(|e| e["value"].as_str() == Some("secret")),
+        "the hidden csrf input is in the snapshot: {snap:#}"
+    );
+}
+
+/// A ref does not survive a navigation, and the error names the way out.
+///
+/// The dangerous version is a ref that silently rebinds to whatever now
+/// occupies its index, clicking the wrong thing on the new page having been
+/// approved for the old one.
+///
+/// Worth being precise about which failure this is: a navigation replaces the
+/// page's whole JavaScript context, so `__openbot_refs` is not stale, it is
+/// *gone*, and this path reports "no snapshot". The genuinely stale case —
+/// refs intact, element removed — is a client-rendered app re-rendering, and
+/// has its own test below. Two different mechanisms that look identical from
+/// the outside, which is why asserting only "the message mentions
+/// browser.snapshot" left the `isConnected` check untested.
+#[tokio::test]
+async fn a_ref_does_not_survive_a_navigation_and_says_so() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let form = serve_page(FORM_PAGE).await;
+    b.navigate(&form).await.expect("navigate");
+    b.snapshot(150).await.expect("snapshot");
+
+    // Somewhere else entirely, which has its own clickable things at the same
+    // indexes.
+    let other = serve().await;
+    b.navigate(&other).await.expect("navigate away");
+
+    let err = b
+        .click_target(&Target::Ref(1))
+        .await
+        .expect_err("a ref from the previous page must not resolve on this one");
+    let shown = err.to_string();
+    assert!(
+        shown.contains("browser.snapshot"),
+        "the error has to name the way out, or the model goes back to guessing: {shown}"
+    );
+}
+
+/// An element removed without a navigation is reported as stale, not clicked.
+///
+/// This is the case `isConnected` exists for, and the one a real page produces
+/// constantly: a client-rendered app re-renders a list, the old nodes are
+/// detached, and the refs still point at them. Clicking a detached node
+/// succeeds silently in JavaScript and does nothing at all, so without this
+/// check the tool reports success for an action that never reached the page —
+/// which is the failure mode this whole crate keeps trying to avoid.
+#[tokio::test]
+async fn a_ref_to_a_removed_element_is_stale_rather_than_a_silent_no_op() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve_page(FORM_PAGE).await;
+    b.navigate(&url).await.expect("navigate");
+    let snap = b.snapshot(150).await.expect("snapshot");
+
+    let submit = snap["elements"]
+        .as_array()
+        .expect("elements")
+        .iter()
+        .find(|e| {
+            e["name"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Sign in to your account")
+        })
+        .expect("the submit button was in the snapshot")["ref"]
+        .as_str()
+        .expect("a ref")
+        .trim_start_matches('e')
+        .parse()
+        .expect("e<n>");
+
+    // The page rewrites itself, as a client-rendered app does on every render.
+    // No navigation: `__openbot_refs` survives and its entries are detached.
+    b.text_of("(()=>{document.getElementById('f').remove();return 'gone'})()")
+        .await
+        .expect("remove the form");
+
+    let err = b
+        .click_target(&Target::Ref(submit))
+        .await
+        .expect_err("the element is detached, so this must not report success");
+    let shown = err.to_string();
+    assert!(
+        shown.contains("no longer on the page"),
+        "a detached node must be reported as stale, not as missing and not as success: {shown}"
+    );
+}
+
+/// A ref nobody handed out is a different problem from a stale one.
+#[tokio::test]
+async fn a_ref_used_before_any_snapshot_says_to_take_one() {
+    let Some(b) = browser().await else {
+        return;
+    };
+    let url = serve_page(FORM_PAGE).await;
+    b.navigate(&url).await.expect("navigate");
+
+    let err = b
+        .click_target(&Target::Ref(1))
+        .await
+        .expect_err("no snapshot has been taken");
+    let shown = err.to_string();
+    assert!(
+        shown.contains("no snapshot"),
+        "must tell 'you never asked' apart from 'the page moved on': {shown}"
+    );
 }
