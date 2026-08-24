@@ -98,6 +98,16 @@ enum Command {
         /// take yourself.
         #[arg(long, default_value_t = 48)]
         snapshot_keep: usize,
+
+        /// How often to run routines that are due, in minutes. 0 turns it off.
+        ///
+        /// Turn it off if you point cron or systemd at `openbot routine tick`
+        /// yourself; two schedulers on one home means a routine can fire twice.
+        /// One minute by default because a routine's schedule is only ever as
+        /// precise as the check interval, and a person who asks for 09:00 means
+        /// 09:00 rather than some time in the next half hour.
+        #[arg(long, default_value_t = 1)]
+        routines_every: u64,
     },
 
     /// Give the Bot a task.
@@ -1911,6 +1921,7 @@ async fn run() -> anyhow::Result<()> {
             workspace,
             snapshot_every,
             snapshot_keep,
+            routines_every,
         } => {
             let r = up::Up {
                 bind,
@@ -1919,6 +1930,8 @@ async fn run() -> anyhow::Result<()> {
                 snapshot_every: (snapshot_every > 0)
                     .then(|| std::time::Duration::from_secs(snapshot_every * 60)),
                 snapshot_keep,
+                routines_every: (routines_every > 0)
+                    .then(|| std::time::Duration::from_secs(routines_every * 60)),
             }
             .start()
             .await?;

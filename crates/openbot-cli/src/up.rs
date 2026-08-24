@@ -220,6 +220,113 @@ pub struct Up {
     pub snapshot_every: Option<std::time::Duration>,
     /// How many scheduled snapshots to keep.
     pub snapshot_keep: usize,
+    /// How often to run whatever routines are due, or `None` to leave it to an
+    /// external scheduler.
+    pub routines_every: Option<std::time::Duration>,
+}
+
+/// Run the routines that are due, on a timer, for as long as this hub is up.
+///
+/// Without this, routines did not run. Not "ran unreliably" — the cron parsed,
+/// `due` computed the right answer, `tick` executed correctly, and nothing
+/// anywhere called `tick`. `up.rs` did not contain the word "routine". Someone
+/// could create a 9am digest in the window, close the laptop, and never learn
+/// that the feature had no clock; the desktop client starts the runtime by
+/// running `openbot up` (`openbot-desktop/src/hub.rs`), so this was every
+/// desktop user.
+///
+/// # Why this spawns the CLI instead of calling the code
+///
+/// `routine tick` says of itself: "Composable by design: point cron, systemd or
+/// a container scheduler at this rather than baking a daemon into the CLI."
+/// That decision is a good one and this does not overturn it — `up` becomes one
+/// of those schedulers, which is the usage the sentence describes. `tick` is
+/// still a plain command anyone can point cron at, and this timer is off in one
+/// flag for people who do.
+///
+/// Running it as a child process is not a shortcut around extracting the code.
+/// A routine run drives a model and a shell for minutes at a time and can hang
+/// on either. In-process, a wedged routine holds a task inside the supervisor
+/// that is also serving the hub; as a child it is isolable, killable, and its
+/// panic is an exit code rather than an aborted runtime. That separation is
+/// worth more than the process it costs once a minute.
+///
+/// Ticks never overlap, because the loop awaits the child before arming the
+/// next interval. A routine that takes ten minutes delays the next check rather
+/// than starting a second copy of itself, which is the safer of the two — the
+/// only thing worse than a digest that does not arrive is two of them.
+///
+/// Failures are logged and the timer keeps going, matching
+/// [`snapshot_on_a_timer`]: a model that was overloaded at 09:00 is a reason to
+/// miss one firing, not to stop being a scheduler for the rest of the day.
+/// The command line the timer runs.
+///
+/// Separated from the spawn so it can be asserted without starting a hub or a
+/// model. `--approve deny` is stated rather than left to the default: `tick`
+/// resolves `ask` to deny today because an unattended run cannot prompt, and
+/// this is the caller that most needs that to stay true, so it says so itself.
+fn tick_args(home: &Path, hub_url: &str) -> Vec<String> {
+    // `--home` goes *after* `routine`, not before it. Unlike `--hub` it is not
+    // a global argument, so the root-position form clap rejects outright:
+    //
+    //     $ openbot --home H routine tick
+    //     error: unexpected argument '--home' found
+    //
+    // The first version of this built exactly that, and the unit test below
+    // passed anyway, because asserting that a joined argument list contains the
+    // substring "--home H" says nothing about whether clap will accept it in
+    // that position. It was caught by running the built binary, which is what
+    // CONTRIBUTING.md means by checking anything with a face in the shipped
+    // binary rather than only in a library test. The test now runs the real
+    // parser.
+    vec![
+        "routine".to_owned(),
+        "--home".to_owned(),
+        home.display().to_string(),
+        "--hub".to_owned(),
+        hub_url.to_owned(),
+        "tick".to_owned(),
+        "--approve".to_owned(),
+        "deny".to_owned(),
+    ]
+}
+
+fn routines_on_a_timer(
+    exe: std::path::PathBuf,
+    home: std::path::PathBuf,
+    hub_url: String,
+    every: std::time::Duration,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(every);
+        // The first tick fires immediately. Unlike the snapshot timer, that is
+        // wanted here: a hub coming back after downtime should find out what it
+        // missed now rather than one interval from now, and `tick` reports a
+        // missed count rather than replaying each firing.
+        loop {
+            tick.tick().await;
+            let mut cmd = tokio::process::Command::new(&exe);
+            cmd.args(tick_args(&home, &hub_url));
+            cmd.kill_on_drop(true);
+            match cmd.output().await {
+                Ok(out) if out.status.success() => {
+                    let said = String::from_utf8_lossy(&out.stdout);
+                    let said = said.trim();
+                    // "nothing due" is the common case and would otherwise fill
+                    // the log with one line a minute forever.
+                    if !said.is_empty() && said != "nothing due" {
+                        tracing::info!(ran = %said, "routines");
+                    }
+                }
+                Ok(out) => tracing::warn!(
+                    code = ?out.status.code(),
+                    stderr = %String::from_utf8_lossy(&out.stderr).trim(),
+                    "routine tick failed; will try again next interval"
+                ),
+                Err(e) => tracing::warn!(error = %e, "could not run routine tick"),
+            }
+        }
+    })
 }
 
 /// Snapshot the volume on a timer, trimming only what this timer took.
@@ -302,6 +409,27 @@ impl Up {
             // nowhere to put one.
             _ => None,
         };
+
+        // Started after the hub is listening, because the child connects back
+        // to it. `current_exe` rather than a name on PATH: the desktop client
+        // ships this binary as a Tauri sidecar, where it is not on PATH at all
+        // and is not called `openbot`.
+        let routines = match (self.routines_every, std::env::current_exe()) {
+            (Some(every), Ok(exe)) => Some(routines_on_a_timer(
+                exe,
+                self.paths.home.clone(),
+                hub_url.clone(),
+                every,
+            )),
+            (Some(_), Err(e)) => {
+                // Worth a warning rather than a failed boot: everything else
+                // this process does still works, and a hub that refuses to
+                // start because it could not find itself is the worse outcome.
+                tracing::warn!(error = %e, "cannot locate this binary; routines will not run on a timer");
+                None
+            }
+            (None, _) => None,
+        };
         // Held for the life of the process: while a guest is writing here,
         // nothing may roll the directory out from under it.
         let attached = workspace.hold()?;
@@ -339,6 +467,8 @@ impl Up {
             legacy,
             snapshot_every: snapshots.as_ref().and(self.snapshot_every),
             snapshots,
+            routines_every: routines.as_ref().and(self.routines_every),
+            routines,
             _attached: attached,
         })
     }
@@ -362,6 +492,12 @@ pub struct Running {
     /// How often the computer is being snapshotted, if it is.
     pub snapshot_every: Option<std::time::Duration>,
     snapshots: Option<tokio::task::JoinHandle<()>>,
+    /// How often routines are being checked, if they are. `None` means an
+    /// external scheduler owns it, which the banner has to say — a person who
+    /// turned the timer off and a person whose routines silently never run see
+    /// exactly the same thing otherwise, which is the bug this shipped with.
+    pub routines_every: Option<std::time::Duration>,
+    routines: Option<tokio::task::JoinHandle<()>>,
     /// Held so the browser can be torn down on Ctrl-C. Process exit runs no
     /// destructors, so `kill_on_drop` does not cover the way people actually
     /// stop this; it has to be done explicitly.
@@ -377,6 +513,13 @@ impl Running {
         // Stop taking snapshots before tearing the computer down, so the last
         // one is not of a workspace mid-shutdown.
         if let Some(t) = &self.snapshots {
+            t.abort();
+        }
+        // Aborting only stops the timer; a routine already running is a child
+        // process, and `kill_on_drop` on a future being dropped mid-await ends
+        // it. A half-finished routine is recorded as a failed run and stays
+        // due, which is the same outcome as a machine losing power.
+        if let Some(t) = &self.routines {
             t.abort();
         }
         self.guest.shutdown().await;
@@ -395,6 +538,28 @@ async fn wait_until_ready(hub_url: &str, server_id: &str) -> anyhow::Result<()> 
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
     anyhow::bail!("the guest never registered with the hub")
+}
+
+/// The banner's routines line, for both states.
+///
+/// Extracted so a test can read it without starting a hub. Always rendered and
+/// never omitted: a routine that has no clock and a scheduler somebody turned
+/// off look identical from the outside, and that ambiguity is exactly what let
+/// the missing clock ship. One line resolves it.
+fn routines_line(every: Option<std::time::Duration>, s: crate::render::Style) -> String {
+    match every {
+        Some(every) => format!(
+            "  {}every {}m{}\n",
+            s.dim("routines     "),
+            every.as_secs() / 60,
+            s.dim(" \u{b7} openbot routine ls")
+        ),
+        None => format!(
+            "  {}{}\n",
+            s.dim("routines     "),
+            s.yellow("not checked here \u{2014} point cron at `openbot routine tick`")
+        ),
+    }
 }
 
 /// What to print once it is up. Kept here so the wording is testable.
@@ -445,6 +610,12 @@ pub fn banner(r: &Running, s: crate::render::Style) -> String {
             s.dim(" · openbot computer snapshots")
         ));
     }
+    // Always a line, both ways. Routines used to have no clock at all, and the
+    // symptom was silence: a person who set a 9am digest saw exactly what a
+    // person whose scheduler was broken saw, which is nothing. Saying which of
+    // the two is true costs one line and is the difference between a feature
+    // that is off and a feature that is missing.
+    out.push_str(&routines_line(r.routines_every, s));
     if let Some(note) = &r.legacy {
         out.push_str(&format!("\n  {} {note}\n", s.yellow("note:")));
     }
@@ -472,6 +643,64 @@ pub fn banner(r: &Running, s: crate::render::Style) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_routine_timer_runs_tick_against_this_home_and_this_hub() {
+        // The bug was not that these arguments were wrong. It was that nothing
+        // was ever run, so there were no arguments: `up.rs` did not contain the
+        // word "routine". The two that matter are `--home` and `--hub` — a tick
+        // aimed at the default home while the hub runs on another one reports
+        // "nothing due" forever and looks exactly like a working scheduler.
+        use clap::Parser as _;
+
+        let args = tick_args(Path::new("/tmp/h"), "ws://127.0.0.1:9/v1/tools");
+
+        // Parsed by the real parser, not matched as strings. The first version
+        // of this asserted that the joined list contained "--home /tmp/h", which
+        // it did, in a position clap rejects: `--home` is not a global argument,
+        // so the root-position form fails with "unexpected argument". The test
+        // passed and the timer would have errored once a minute forever.
+        let parsed = crate::Cli::try_parse_from(std::iter::once("openbot".to_owned()).chain(args))
+            .expect("the timer must build a command line this binary accepts");
+
+        let crate::Command::Routine {
+            home,
+            cmd: crate::RoutineCmd::Tick { approve, .. },
+        } = parsed.cmd
+        else {
+            panic!("expected `routine tick`, got {:?}", parsed.cmd);
+        };
+        assert_eq!(
+            home,
+            Path::new("/tmp/h"),
+            "must tick the home this hub is serving, not the default"
+        );
+        assert_eq!(
+            parsed.hub, "ws://127.0.0.1:9/v1/tools",
+            "must reach the hub this process is running, not the default"
+        );
+        assert!(
+            matches!(approve, crate::ApproveMode::Deny),
+            "an unattended run cannot answer a prompt, so it must not ask"
+        );
+    }
+
+    #[test]
+    fn the_banner_says_which_of_the_two_silences_you_are_looking_at() {
+        // A routine that never fires and a scheduler deliberately turned off
+        // produce the same observable: nothing happens. That ambiguity is what
+        // let the missing clock go unnoticed, so the banner has to resolve it
+        // in both directions or it only half exists.
+        let s = crate::render::Style::plain();
+        let on = super::routines_line(Some(std::time::Duration::from_secs(60)), s);
+        let off = super::routines_line(None, s);
+        assert!(on.contains("every 1m"), "{on}");
+        assert!(
+            off.contains("routine tick"),
+            "if this hub is not the scheduler, say what is: {off}"
+        );
+        assert_ne!(on, off, "the two states must not read identically");
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn the_timer_snapshots_and_trims_only_its_own() {

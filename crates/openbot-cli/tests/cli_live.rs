@@ -662,3 +662,78 @@ fn every_namespace_served_is_one_a_connector_cannot_claim() {
          after one and a model would see two tools with a single wire name: {unreserved:?}"
     );
 }
+
+/// The banner says whether this hub is the routine scheduler.
+///
+/// Covers the call site rather than the renderer. `up::routines_line` is unit
+/// tested for both states, and deleting the one line in `banner` that calls it
+/// left that test green — the mutation was invisible from inside the module.
+#[test]
+fn the_banner_says_whether_this_hub_is_checking_routines() {
+    let Some(up) = common::up::Up::start() else {
+        return;
+    };
+    let banner = std::fs::read_to_string(&up.log).unwrap_or_default();
+    assert!(
+        banner.contains("routines"),
+        "`up` announced a hub without saying whether routines are checked here. A person \
+         whose routines never fire and a person who turned the scheduler off see the same \
+         nothing; the banner is what separates them.\n{banner}"
+    );
+}
+
+/// A routine that is due actually runs, with nobody typing anything.
+///
+/// This is the regression test for a feature that was complete and inert. The
+/// cron parsed, `due` computed the right answer and `tick` executed correctly,
+/// and nothing called `tick`: `up.rs` did not contain the word "routine". The
+/// desktop client starts the runtime with `openbot up`, so it was every desktop
+/// user, and the symptom was silence.
+///
+/// Slow because it is real, in the way `CLAUDE.md` means: it starts the shipped
+/// binary and waits for a wall-clock timer. No model is configured, so the run
+/// is recorded as a failure — which is the point. **A recorded run of any kind
+/// proves the clock ticked**, and that is the property that did not exist.
+/// Asserting on success would need a model and would test the agent instead.
+#[test]
+fn a_due_routine_runs_without_anyone_asking() {
+    let Some(up) = common::up::Up::start() else {
+        return;
+    };
+    up.ok(&["bot", "new", "tester"]);
+    up.ok(&[
+        "routine",
+        "new",
+        "tester",
+        "digest",
+        "--cron",
+        "* * * * *",
+        "--instructions",
+        "say hi",
+    ]);
+    assert!(
+        up.ok(&["routine", "show", "tester", "digest"])
+            .contains("never run"),
+        "the routine should not have run before the timer reached it; if it already had, \
+         this test cannot tell a working scheduler from a broken one"
+    );
+
+    // The timer's default interval is one minute, so this waits just over one.
+    // Polling rather than sleeping the whole budget keeps the common case fast.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(100);
+    while std::time::Instant::now() < deadline {
+        if !up
+            .ok(&["routine", "show", "tester", "digest"])
+            .contains("never run")
+        {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(3));
+    }
+    panic!(
+        "a routine due every minute never ran in 100 seconds. `openbot up` is not \
+         calling `routine tick`, which is the state this test exists to prevent \
+         returning to.\nbanner:\n{}",
+        std::fs::read_to_string(&up.log).unwrap_or_default()
+    );
+}

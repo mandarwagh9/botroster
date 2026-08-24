@@ -29,7 +29,7 @@ The architecture is sound and the perimeter is missing.
 
 ## Tier 1 — the product does not do what it says
 
-### T1-1 — routines never fire. `open`
+### T1-1 — routines never fire. `done`
 `P0` · reach: everyone who creates a routine · `reports/parity.md` §3, `crates/openbot-cli/src/up.rs:236`
 
 The cron parses, the due-check works, `tick` runs what is due, and **nothing calls `tick`**. The only

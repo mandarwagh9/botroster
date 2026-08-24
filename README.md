@@ -63,6 +63,18 @@ Ctrl-C stops everything. It runs the hub and one guest in a single process, whic
 trying it and wrong for anything else; `openbotd` and `openbot-guest` run separately when the guest
 belongs somewhere other than your machine.
 
+It is also the clock your routines run on. While it is up it checks every minute for routines that
+have come due and runs them, which is why the banner says either `routines every 1m` or that
+nothing here is checking. If you would rather schedule them yourself, turn the timer off and point
+cron or systemd at the same command it calls:
+
+```sh
+openbot up --routines-every 0     # this hub is not the scheduler
+openbot routine tick              # what cron should run instead, every minute
+```
+
+Two schedulers on one home means a routine can fire twice, so pick one.
+
 Everything lives in `~/.openbot` by default, and the window and the command line read the same
 one, so a Bot you make in either shows up in the other.
 

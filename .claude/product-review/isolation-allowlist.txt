@@ -65,3 +65,4 @@ turns_the_sandbox_off	Test name for the variable parsing.
 # --- The word naming something else entirely. ----------------------------------------------------
 point cron, systemd or a container scheduler at	Deployment tooling in a --help string. Nothing to do with confinement.
 will run the guest (a container or a microVM) once one exists	openbot-store describing a runtime that does not exist yet, in the future tense, and saying so in the same sentence.
+a container scheduler at this rather than baking a daemon into the CLI	The `routine tick` doc comment, quoted in up.rs to record that the new timer is one of those schedulers rather than an overturning of that decision. Deployment tooling.

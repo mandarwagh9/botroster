@@ -41,6 +41,8 @@ pub struct Up {
     pub hub: String,
     /// The control plane's home, shared with every command this harness runs.
     pub home: std::path::PathBuf,
+    /// Where the banner was written. Read it to assert on what `up` announced.
+    pub log: std::path::PathBuf,
     pub _dir: tempfile::TempDir,
 }
 
@@ -82,6 +84,7 @@ impl Up {
             child,
             hub,
             home,
+            log,
             _dir: dir,
         })
     }
