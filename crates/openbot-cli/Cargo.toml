@@ -27,6 +27,8 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true }
 serde_json = { workspace = true }
+reqwest = { workspace = true }
+futures-util = { workspace = true }
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
 agent-client-protocol = { workspace = true }

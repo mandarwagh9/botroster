@@ -169,8 +169,18 @@ dropped is a security failure, not a warning.
 
 #### A model on this computer
 
-An empty `api_key_env` means the endpoint wants no credential, which is the usual arrangement for a
-model served on localhost. No account, no key, and nothing leaves the machine:
+If Ollama or LM Studio is already running here with a model downloaded, you do not have to configure
+anything: `openbot` finds it and offers to keep it, and `openbot run` borrows it for the run if you
+have not chosen one. Only loopback addresses are ever probed — this does not go looking on your
+network.
+
+```sh
+openbot                            # finds it, asks once, remembers
+```
+
+Behind that is an ordinary configuration you can also write yourself. An empty `api_key_env` means
+the endpoint wants no credential, which is the usual arrangement for a model served on localhost.
+No account, no key, and nothing leaves the machine:
 
 ```sh
 openbot config set --model qwen3:1.7b --dialect openai --base-url http://localhost:11434/v1 --api-key-env ''

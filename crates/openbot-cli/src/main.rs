@@ -8,6 +8,7 @@
 mod acp;
 mod approve;
 mod config;
+mod discover;
 mod html;
 mod render;
 mod status;
@@ -61,8 +62,10 @@ struct Cli {
     #[command(flatten)]
     model_opts: config::ModelOverrides,
 
+    /// Optional, so that bare `openbot` can be the way in rather than a wall
+    /// of forty subcommands. See `welcome`.
     #[command(subcommand)]
-    cmd: Command,
+    cmd: Option<Command>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -938,7 +941,11 @@ async fn run() -> anyhow::Result<()> {
     let server = cli.server.clone();
     let model_opts = cli.model_opts.clone();
 
-    match cli.cmd {
+    let Some(cmd) = cli.cmd else {
+        return welcome().await;
+    };
+
+    match cmd {
         Command::Acp {
             bot,
             home,
@@ -2540,6 +2547,12 @@ async fn run() -> anyhow::Result<()> {
             } else if demo {
                 Arc::new(demo_script(demo_url.as_deref()))
             } else {
+                // Nothing configured is not the same as nothing available. A
+                // great many people who would try this already have Ollama or
+                // LM Studio running with a model downloaded; telling them to go
+                // and get an account is asking them to configure what is
+                // already on the machine. See `discover`.
+                let model_opts = adopt_local_model_if_needed(&home, model_opts.clone()).await;
                 config::build(&home, &model_opts, false, "")?
             };
 
@@ -2680,6 +2693,193 @@ async fn run() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// What `openbot` on its own does.
+///
+/// It used to print forty subcommands, which is the least useful thing a
+/// program can say to somebody who has just installed it: every one of them is
+/// equally plausible and none of them is the next step. This is that screen
+/// replaced by the two facts that decide what to do next — whether there is a
+/// model, and what to type.
+///
+/// The setup it offers is the one that needs no account: a model already
+/// running on this machine. When there is one, saying yes is the whole of the
+/// configuration, and `openbot config set --model … --dialect … --base-url …
+/// --api-key-env ''` never has to be read or typed.
+///
+/// Writing to the config happens only on a yes, and only at a terminal. A
+/// person piping this somewhere has not been asked anything and must not have
+/// their configuration written for them.
+async fn welcome() -> anyhow::Result<()> {
+    use std::io::{IsTerminal, Write};
+
+    let st = render::Style::detect();
+    // `--home` is declared on each subcommand, with `env = "OPENBOT_HOME"`, and
+    // there is no subcommand here — so the variable has to be read directly or
+    // this screen reports on a different home than every other command uses.
+    let home = std::env::var("OPENBOT_HOME")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(DEFAULT_HOME.as_str()));
+
+    println!();
+    if let Some(model) = config::configured_model(&home) {
+        println!("  {}  {}", st.dim("model "), model);
+        println!("  {}  {}", st.dim("home  "), home.display());
+        println!();
+        // Padded rather than spaced inside the literal: a run of spaces in a
+        // string is what `messages.rs` looks for when catching a literal that
+        // has picked up this file's indentation, and it cannot tell alignment
+        // from a wrapped line. `{:<24}` says what is meant anyway.
+        for (cmd, what) in [
+            ("openbot run \"...\"", "give it a task"),
+            ("openbot status", "is anything wrong?"),
+            ("openbot --help", "everything else"),
+        ] {
+            println!("  {}", st.dim(&format!("{cmd:<24}{what}")));
+        }
+        println!();
+        return Ok(());
+    }
+
+    println!("  {}", st.dim("No model configured yet."));
+    let found = discover::local_model().await;
+    let Some(found) = found else {
+        // Two honest routes, shortest first, and no list of forty commands.
+        println!();
+        println!("  A model on this machine needs no account and sends nothing off it:");
+        println!(
+            "    {}",
+            st.dim("install Ollama, then:  ollama pull qwen3:1.7b")
+        );
+        println!(
+            "    {}",
+            st.dim("then run `openbot` again and it will be found")
+        );
+        println!();
+        println!("  Or point it at a provider you already pay for:");
+        println!(
+            "    {}",
+            st.dim("openbot config set --model grok-4-5 --api-key-env XAI_API_KEY")
+        );
+        println!();
+        println!(
+            "  {}",
+            st.dim("openbot run --demo --approve auto \"prove it\"   # no model needed")
+        );
+        println!();
+        return Ok(());
+    };
+
+    println!(
+        "  Found {} running here, serving {}.",
+        found.served_by, found.model
+    );
+    if !std::io::stdin().is_terminal() {
+        // Nothing was asked, so nothing is decided. Printing the command keeps
+        // this usable from a script without writing to anyone's config.
+        println!();
+        println!(
+            "  {}",
+            st.dim(&format!("use it:  {}", found.to_config_command()))
+        );
+        println!();
+        return Ok(());
+    }
+
+    print!("  Use it? [Y/n] ");
+    std::io::stdout().flush().ok();
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    let answer = answer.trim().to_ascii_lowercase();
+    if !(answer.is_empty() || answer == "y" || answer == "yes") {
+        println!();
+        println!(
+            "  {}",
+            st.dim(&format!("when you want it:  {}", found.to_config_command()))
+        );
+        println!();
+        return Ok(());
+    }
+
+    let mut c = config::load(&home)?;
+    c.model.id = Some(found.model.clone());
+    c.model.dialect = "openai".to_owned();
+    c.model.base_url = found.base_url.clone();
+    // Empty means "this endpoint wants no credential", which is the whole point
+    // of a model on localhost. Absent would send the next run looking for a key.
+    c.model.api_key_env = String::new();
+    config::save(&home, &c)?;
+
+    println!();
+    println!("  {} {}", st.green("ready ·"), found.model);
+    println!(
+        "  {}",
+        st.dim(&format!("saved to {}", config::path(&home).display()))
+    );
+    println!();
+    println!(
+        "  {}",
+        st.dim("openbot run \"summarise the notes in the workspace\"")
+    );
+    println!();
+    Ok(())
+}
+
+/// Borrow a model that is already running here, when none is configured.
+///
+/// Only when none is: an explicit `--model`, or one in `config.toml`, is a
+/// decision somebody made, and quietly using something else because it happened
+/// to be listening would be the worst kind of helpful.
+///
+/// The adoption lasts for this command. Writing it into `config.toml` would be
+/// a decision made on the person's behalf, and they may well have opened this
+/// terminal intending to use a frontier model. The command that would make it
+/// permanent is printed instead, so the choice stays theirs and costs one
+/// paste.
+///
+/// Announced on stderr, not stdout: `openbot run` output is piped into things.
+async fn adopt_local_model_if_needed(
+    home: &std::path::Path,
+    opts: config::ModelOverrides,
+) -> config::ModelOverrides {
+    if opts.model.is_some() || config::configured_model(home).is_some() {
+        return opts;
+    }
+    let Some(found) = discover::local_model().await else {
+        return opts;
+    };
+
+    let st = render::Style::detect();
+    let others = match found.also {
+        0 => String::new(),
+        1 => " (1 other available)".to_owned(),
+        n => format!(" ({n} others available)"),
+    };
+    eprintln!(
+        "  {} {} via {}{}",
+        st.dim("no model configured; using"),
+        found.model,
+        found.served_by,
+        st.dim(&others)
+    );
+    eprintln!(
+        "  {}",
+        st.dim(&format!("keep it:  {}", found.to_config_command()))
+    );
+
+    config::ModelOverrides {
+        model: Some(found.model),
+        dialect: Some("openai".to_owned()),
+        base_url: Some(found.base_url),
+        // Empty, not absent: it is the configured answer meaning "this endpoint
+        // wants no credential". Leaving it unset would send the run looking for
+        // a key that a model on localhost never needed.
+        api_key_env: Some(String::new()),
+        ..opts
+    }
 }
 
 /// Read a credential from standard input.

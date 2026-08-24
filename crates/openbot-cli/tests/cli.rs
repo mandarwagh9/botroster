@@ -1364,3 +1364,84 @@ fn a_run_that_starts_its_own_computer_says_it_is_doing_so() {
         "no sign that a computer was started, so this run either found one or did without:\n{shown}"
     );
 }
+
+/// `openbot` on its own says what to do next, not what exists.
+///
+/// It used to print forty subcommands, which is the least useful thing a
+/// program can say to somebody who has just installed it: every one is equally
+/// plausible and none is the next step.
+#[test]
+fn bare_openbot_says_what_to_do_next() {
+    let home = tempfile::tempdir().unwrap();
+    let out = std::process::Command::new(OPENBOT)
+        .env("OPENBOT_HOME", home.path())
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("openbot ran");
+    let shown = String::from_utf8_lossy(&out.stdout).to_string();
+
+    assert!(
+        out.status.success(),
+        "bare `openbot` failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        shown.contains("model"),
+        "says nothing about the one thing that decides whether anything works:\n{shown}"
+    );
+    // The demo needs no model and no account, so it is the one suggestion that
+    // is certain to work from here. Whether a local model was found or not, a
+    // person must leave this screen with something they can type.
+    assert!(
+        shown.contains("openbot run") || shown.contains("openbot config set"),
+        "no next command anywhere on the screen:\n{shown}"
+    );
+    assert!(
+        !shown.contains("Commands:"),
+        "still printing the subcommand list, which is the thing being replaced:\n{shown}"
+    );
+}
+
+/// It reports on the home every other command would use.
+///
+/// `--home` is declared on each subcommand with `env = "OPENBOT_HOME"`, and
+/// there is no subcommand here, so the variable has to be read directly. The
+/// first version did not, and cheerfully reported "no model configured" about a
+/// home that had one.
+#[test]
+fn bare_openbot_reads_the_same_home_as_everything_else() {
+    let home = tempfile::tempdir().unwrap();
+    let saved = run(home.path(), &["config", "set", "--model", "some-model-42"]);
+    assert!(saved.status.success());
+
+    let out = std::process::Command::new(OPENBOT)
+        .env("OPENBOT_HOME", home.path())
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("openbot ran");
+    let shown = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(
+        shown.contains("some-model-42"),
+        "reported on a different home than `config set` had just written:\n{shown}"
+    );
+}
+
+/// Piped, it decides nothing.
+///
+/// A person who ran this from a script has not been asked anything, and must
+/// not have their configuration written for them. The command that would do it
+/// is printed instead.
+#[test]
+fn bare_openbot_writes_no_config_when_nobody_was_asked() {
+    let home = tempfile::tempdir().unwrap();
+    let out = std::process::Command::new(OPENBOT)
+        .env("OPENBOT_HOME", home.path())
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("openbot ran");
+    assert!(out.status.success());
+    assert!(
+        !home.path().join("config.toml").exists(),
+        "wrote config.toml without anyone agreeing to it"
+    );
+}

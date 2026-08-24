@@ -724,12 +724,22 @@ mod tests {
         let parsed = crate::Cli::try_parse_from(std::iter::once("openbot".to_owned()).chain(args))
             .expect("the timer must build a command line this binary accepts");
 
+        // `cmd` is an `Option` now that bare `openbot` is a screen rather than a
+        // usage error, so a command line the timer builds must still parse into
+        // `Some(...)` — a version that parsed to `None` would be one that ran
+        // the welcome screen once a minute.
+        // Rendered before the move, because `Command` is not `Clone` and the
+        // failure message is worth more than the borrow.
+        let shown = format!("{:?}", parsed.cmd);
+        let Some(cmd) = parsed.cmd else {
+            panic!("the timer built a command line with no subcommand at all: {shown}");
+        };
         let crate::Command::Routine {
             home,
             cmd: crate::RoutineCmd::Tick { approve, .. },
-        } = parsed.cmd
+        } = cmd
         else {
-            panic!("expected `routine tick`, got {:?}", parsed.cmd);
+            panic!("expected `routine tick`, got {shown}");
         };
         assert_eq!(
             home,

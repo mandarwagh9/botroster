@@ -458,3 +458,48 @@ cleanup that never runs.**
 One asserts a fresh install reaches a result in one command; the other asserts the "starting a
 computer" line appeared. Either alone is ambiguous — a hub left running by another test would pass
 the first. Together they pin the mechanism.
+
+---
+
+## Iteration 9 — 2026-08-25. Zero-config onboarding.
+
+**Built:** `discover` (local model probing), bare `openbot` as a welcome screen, `run` adopting a
+local model when none is configured. Direction chosen by the operator over three alternatives.
+
+### The product could do the thing it was asking the person to do
+
+Both onboarding screens were the program instructing somebody to go and configure what was already
+running on their machine. *Generalises:* **every "set this first" message is worth one question —
+could the program find out?** Often the answer is a 700ms loopback probe.
+
+### Borrow for one command; ask before writing
+
+Adopting a model for a run is a convenience. Writing to `config.toml` is a decision, and the person
+may have opened that terminal meaning to use something else. So: `run` borrows and prints the
+command that would make it permanent; bare `openbot` asks and saves, and only at a terminal.
+**The surface where a decision is being made is the surface that may persist one.**
+
+### Discovery must never override an explicit choice
+
+An explicit `--model` or a configured one is checked *before* probing. Quietly using something else
+because it happened to be listening is the worst kind of helpful.
+
+### Only loopback, and say why in the code
+
+A tool that probes the machines around it is doing something its user did not ask for. That is a
+sentence in the module doc, not just a fact about the constant list — the next person adding a probe
+needs to meet the reasoning, not infer it.
+
+### `--home` is per-subcommand, so a no-subcommand path has none
+
+The welcome screen read `DEFAULT_HOME` and reported "no model configured" about a home that had one,
+because `OPENBOT_HOME` reaches other commands through clap's `env =` on their own `--home` flag.
+**Any new code path that skips the subcommand layer has to re-resolve everything that layer was
+providing.**
+
+### Repo lints met this iteration
+
+- `messages.rs` also rejects a *run of spaces inside a single-line literal* — it cannot tell column
+  alignment from a wrapped line. Build aligned columns with `{:<24}` padding instead.
+- `readme.rs` rejects a documented command with no subcommand. Correct until bare `openbot` became
+  one; the test was taught, not weakened.

@@ -187,6 +187,14 @@ fn every_readme_command_is_one_the_binary_accepts() {
         let args = split(line);
         let rest = &args[1..]; // drop "openbot"
         let path = subcommand_path(rest, &known);
+        // `openbot` on its own is a command now: it reports what is configured
+        // and, when nothing is, offers a model already running on the machine.
+        // Before that it printed the subcommand list, so a bare invocation in
+        // the README really was a mistake and this check really did want to
+        // catch it.
+        if rest.iter().all(|a| a.starts_with('-')) {
+            continue;
+        }
         if path.is_empty() {
             problems.push(format!("`{line}`: no such subcommand"));
             continue;

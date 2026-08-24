@@ -389,6 +389,15 @@ pub fn key_available(home: &Path, key_env: &str) -> bool {
 ///
 /// `demo` short-circuits to a scripted stand-in so a deployment can be checked
 /// without a key. `fallback` is the canned reply that stand-in gives.
+/// The model id `config.toml` names, if it names one.
+///
+/// Read separately from [`build`] because "is anything configured" and "give me
+/// a working model" are different questions, and only the first one can be
+/// asked before deciding whether to go looking for a local one.
+pub fn configured_model(home: &Path) -> Option<String> {
+    load(home).ok()?.model.id
+}
+
 pub fn build(
     home: &Path,
     overrides: &ModelOverrides,
@@ -402,10 +411,18 @@ pub fn build(
 
     let id = s.id.ok_or_else(|| {
         anyhow::anyhow!(
-            "no model configured.\n\
-             Set one once:  openbot config set --model grok-4-5\n\
-             Or per run:    --model grok-4-5\n\
-             Or check a deployment without a key:  --demo"
+            // Reached only after `discover` has already looked and found
+            // nothing, so it can say so rather than implying configuration is
+            // the only route. The local option is first because it is the one
+            // that needs no account, and because a person who has just been
+            // told "nothing is running here" is one `ollama pull` from done.
+            "no model configured, and none is running on this machine.\n\
+             The shortest way needs no account and no key: install Ollama, then\n\
+             `ollama pull qwen3:1.7b`, and run this again — it will be found.\n\
+             Or name one you already pay for:\n\
+             \x20   openbot config set --model grok-4-5 --api-key-env XAI_API_KEY\n\
+             Or just this once:  --model grok-4-5\n\
+             Or check a deployment without one:  --demo"
         )
     })?;
     let key = resolve_key(home, &s.api_key_env)?;
