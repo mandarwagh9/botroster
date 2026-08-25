@@ -21,6 +21,46 @@ const OPENBOT: &str = env!("CARGO_BIN_EXE_openbot");
 /// is where it is declared; `home_is_accepted_after_the_leaf_too` covers the
 /// other. Inserting it here rather than at every call site keeps the tests
 /// reading like the commands a person types.
+/// A hub address nothing is listening on.
+///
+/// `run` below used to `env_remove("OPENBOT_HUB_URL")` under the comment
+/// "never inherit a developer's hub or key into a test" — and removing the
+/// variable falls back to the compiled default, `ws://127.0.0.1:8443`, which
+/// is exactly the developer's hub. The guard removed the variable and landed
+/// on the thing it was guarding against.
+///
+/// It is not hypothetical: `a_run_that_starts_its_own_computer_says_it_is_doing_so`
+/// fails on any machine running an installed OPENBOT, because the run finds
+/// that hub and correctly declines to start a second one. Its own doc comment
+/// predicted this — *"if a hub were somehow already running, this line would
+/// be absent"* — and it is not an exotic situation for a person developing
+/// this product.
+///
+/// Nothing needs to *be* at this address. `up::ensure` probes the URL, and
+/// starts its own stack on an ephemeral port when the probe fails; the URL's
+/// only job is to be somewhere no hub answers. Chosen by binding port zero and
+/// letting go, then checked rather than assumed: if anything did answer, every
+/// test here would quietly talk to a stranger.
+fn nowhere_hub() -> &'static str {
+    static ADDR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ADDR.get_or_init(|| {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("a port to borrow")
+            .local_addr()
+            .expect("its address")
+            .port();
+        assert!(
+            std::net::TcpStream::connect_timeout(
+                &format!("127.0.0.1:{port}").parse().expect("a loopback address"),
+                std::time::Duration::from_millis(200),
+            )
+            .is_err(),
+            "something is listening on the port these tests picked to be empty ({port});              every run would connect to it instead of starting its own stack"
+        );
+        format!("ws://127.0.0.1:{port}/v1/tools")
+    })
+}
+
 fn run(home: &Path, args: &[&str]) -> Output {
     let (cmd, rest) = args.split_first().expect("a command");
     let out = std::process::Command::new(OPENBOT)
@@ -30,8 +70,10 @@ fn run(home: &Path, args: &[&str]) -> Output {
         .args(rest)
         // Colour codes would make every assertion below fragile.
         .env("NO_COLOR", "1")
-        // Never inherit a developer's hub or key into a test.
-        .env_remove("OPENBOT_HUB_URL")
+        // Never inherit a developer's hub or key into a test — and never fall
+        // back to the compiled default either, which is the same hub. See
+        // `nowhere_hub`.
+        .env("OPENBOT_HUB_URL", nowhere_hub())
         .env_remove("OPENBOT_HOME")
         .output()
         .unwrap_or_else(|e| panic!("could not run {OPENBOT}: {e}"));
