@@ -351,10 +351,21 @@ let openStep = null;
 function appendChunk(chunk) {
   if (!chunk || !chunk.text) return;
 
+  // Anything arriving is the end of waiting for it, whatever it turns out to
+  // be. One place, rather than one per kind: a row this function does not know
+  // about yet would otherwise appear underneath a line still claiming nothing
+  // had come back.
+  closeWaiting();
+
   // A result completes the open step in place rather than adding a row.
   if (chunk.kind === "result" && openStep) {
     completeStep(openStep, chunk);
     openStep = null;
+    // And straight back to waiting: a tool result is what the model was
+    // waiting for, so the next thing happening is another model call. If the
+    // turn is in fact over, the row is taken down a moment later by the same
+    // `finally` that took down the last one.
+    if (busy) openWaiting("waiting for the model");
     followLog();
     return;
   }
@@ -515,6 +526,57 @@ function stepMark(state) {
 /// This is the WHAT IS SAFE line of the error doctrine, on the one surface
 /// where silence is worst: a person looking at an abandoned `shell.exec` needs
 /// to know whether to run it again.
+/// The turn is running and nothing has come back yet, said where the reading is.
+///
+/// The whole design of this state used to be `setStatus("thinking…")`: one
+/// twelve-pixel word in the top-right corner, roughly nine hundred pixels from
+/// the six-hundred-and-forty-pixel column the eye is actually in. This is the
+/// majority of the wall-clock time a person spends with a working Bot, and the
+/// interval in which they decide whether to press Stop — with the only
+/// evidence for that decision in the opposite corner from the control.
+///
+/// The model call does not stream and should not: `providers/http.rs` sends
+/// `"stream": false` deliberately, and `serve.rs` drops `AgentEvent::Thinking`,
+/// so there is genuinely nothing to show between the last tool result and the
+/// answer. What there is, is elapsed time — which is a measurement, and the
+/// reason this is a counter and not a spinner. A spinner asserts progress it
+/// has not measured, which is the mistake `abandonOpenStep` exists to avoid.
+///
+/// Ticks at 100ms so the number moves rather than jumping; DIRECTION allows
+/// motion that communicates a state transition, and a measured counter
+/// changing is the least decorative motion available.
+let waiting = null;
+let waitingTick = null;
+
+function openWaiting(what) {
+  closeWaiting();
+  const el = document.createElement("div");
+  el.className = "msg pending";
+  const started = performance.now();
+  const label = document.createElement("span");
+  label.textContent = what;
+  const dur = document.createElement("span");
+  dur.className = "step-dur";
+  // `#log` is `role="log"`, which is a live region. A number changing ten
+  // times a second inside one is not information, it is an interruption that
+  // does not stop.
+  dur.setAttribute("aria-hidden", "true");
+  el.append(label, dur);
+  log.appendChild(el);
+  waiting = el;
+  const tick = () => (dur.textContent = humanMs(performance.now() - started));
+  tick();
+  waitingTick = setInterval(tick, 100);
+  followLog();
+}
+
+function closeWaiting() {
+  clearInterval(waitingTick);
+  waitingTick = null;
+  if (waiting) waiting.remove();
+  waiting = null;
+}
+
 function abandonOpenStep() {
   if (!openStep) return;
   const mark = openStep.querySelector(".step-mark");
@@ -1690,6 +1752,9 @@ async function sendPrompt(text) {
   // as delivered before it is delivered is the kind of lie a transcript
   // exists to prevent.
   if (!joining) appendChunk({ kind: "user", text });
+  // Not when joining. A turn that is already running already has one of these,
+  // and reopening it would restart a counter that is measuring something real.
+  if (!joining) openWaiting("waiting for the model");
   try {
     // The reply is not in here: every word arrived as a `chunk` event while
     // the turn was running. What comes back is only how it ended.
@@ -1727,6 +1792,7 @@ async function sendPrompt(text) {
     // Whatever ended the turn, a step still open at this point is never going
     // to be completed by a result that is no longer coming.
     abandonOpenStep();
+    closeWaiting();
     busy = false;
     show(cancelBtn, false);
     refreshRoster();

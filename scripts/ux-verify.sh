@@ -11,8 +11,21 @@
 #   script plus `cargo test -p openbot-app --test page`, which drives that
 #   exact file in a real browser and is where the behaviour is actually pinned.
 #
-#   "bundle size" — the byte size of ui/*.{html,js,css} plus any vendored
-#   fonts. Baseline in .claude/ux-loop/.baseline-bytes, fail on >15% growth.
+#   "bundle size" — the *compressed* byte size of ui/*.{html,js,css} plus any
+#   vendored fonts. Baseline in .claude/ux-loop/.baseline-bytes, fail on >15%
+#   growth. The file is named for the unit on purpose: it is gitignored, so a
+#   machine that ran the old gate still has a `.baseline-bytes` holding a raw
+#   number. Read as a compressed one it would put the ceiling at three times
+#   the real size and pass everything forever — a gate that has silently
+#   stopped gating, which is worse than one that fails. A new name means that
+#   file is simply not this file, and the baseline is recorded on first run.
+#
+#   Measured gzipped rather than raw, for the reason in BASELINE.md:
+#   this repository requires comments explaining what broke and why, comments
+#   were 44% of the raw bundle, and a raw ceiling is therefore mostly a limit
+#   on how much of the reasoning survives. Gzip discounts prose by roughly ten
+#   to one and counts novel code close to full, which is the thing the ceiling
+#   was put there to watch.
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -100,29 +113,32 @@ else
 fi
 
 step "bundle size"
-bytes=$(cat crates/openbot-app/ui/index.html crates/openbot-app/ui/main.js crates/openbot-app/ui/styles.css 2>/dev/null | wc -c)
+# `-9` pinned, so the number does not move because a different gzip shipped a
+# different default. The fonts are counted as they are: WOFF2 is already
+# compressed and gzipping it again would measure the compressor, not the font.
+bytes=$(cat crates/openbot-app/ui/index.html crates/openbot-app/ui/main.js crates/openbot-app/ui/styles.css 2>/dev/null | gzip -9 | wc -c)
 fontbytes=0
 if [ -d crates/openbot-app/ui/fonts ]; then
   fontbytes=$(find crates/openbot-app/ui/fonts -type f -exec cat {} + 2>/dev/null | wc -c)
 fi
 total=$((bytes + fontbytes))
-if [ -f "$LOOP/.baseline-bytes" ]; then
-  base=$(cat "$LOOP/.baseline-bytes")
+if [ -f "$LOOP/.baseline-gzip-bytes" ]; then
+  base=$(cat "$LOOP/.baseline-gzip-bytes")
   limit=$((base * 115 / 100))
   if [ "$total" -gt "$limit" ]; then
-    note "FAIL bundle grew to $total bytes, over the 15% ceiling of $limit (baseline $base)"
+    note "FAIL bundle grew to $total compressed bytes, over the 15% ceiling of $limit (baseline $base)"
     fails=$((fails+1))
   else
-    note "ok bundle $total bytes (baseline $base, ceiling $limit)"
+    note "ok bundle $total compressed bytes (baseline $base, ceiling $limit)"
   fi
 else
-  echo "$total" > "$LOOP/.baseline-bytes"
+  echo "$total" > "$LOOP/.baseline-gzip-bytes"
   note "ok bundle $total bytes (baseline recorded)"
 fi
 
 step "summary"
 audit_json="$LOOP/audit.json"
-printf 'GATES total_failures=%s bundle_bytes=%s' "$fails" "$total"
+printf 'GATES total_failures=%s bundle_gzip_bytes=%s' "$fails" "$total"
 if [ -f "$audit_json" ]; then
   printf ' %s' "$(node -e "const a=require('./$audit_json');process.stdout.write('axe_serious='+(a.axe.serious||0)+' axe_critical='+(a.axe.critical||0)+' contrast_failures='+a.contrastFailures+' worst_contrast='+(a.worstContrast===null?'none':a.worstContrast))" 2>/dev/null || echo '')"
 fi

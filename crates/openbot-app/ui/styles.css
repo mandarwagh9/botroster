@@ -1014,6 +1014,19 @@ textarea {
   color: var(--muted);
 }
 
+/* The turn is running and nothing has come back yet. On the live hairline,
+   because teal already means "working" in this window and a state this common
+   must not introduce a fourth thing a colour can mean. */
+.msg.pending {
+  display: flex;
+  align-items: baseline;
+  margin: 8px 0;
+  padding: 2px 0 2px 16px;
+  border-left: 2px solid var(--live);
+  color: var(--faint);
+  font-size: var(--fs-13);
+}
+
 .msg.agent {
   margin: 8px 0;
 }

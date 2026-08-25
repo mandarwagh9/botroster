@@ -150,3 +150,47 @@ said it should happen once, deliberately, in its own commit.
 thing that happens when a phase is specified to add weight, and not a thing that happens because
 a phase overran. Phases 1 through 6 in `REDESIGN.md` are expected to fit under the new 15%;
 if one of them does not, that is a finding about the phase, not a reason to move the line again.
+
+## What the gate measures changed, 2026-08-25 — gzipped, not raw
+
+Phase 3's last item went through the ceiling by **610 bytes** (207,006 against 206,396). The
+previous entry says what should happen then: *"if one of them does not fit, that is a finding
+about the phase, not a reason to move the line again."* So the phase was measured rather than
+the line moved, and the measurement said the line was wrong.
+
+| | bytes | comments | share |
+|---|---|---|---|
+| `index.html` | 31,191 | 11,315 | 36% |
+| `main.js` | 125,153 | 65,202 | **52%** |
+| `styles.css` | 44,877 | 14,718 | 33% |
+| **total** | **207,006** | **91,235** | **44%** |
+
+`CONTRIBUTING.md` requires comments that say what broke and why; `CLAUDE.md` says the reason goes
+next to the thing. There is no build step, so those comments ship. A raw-byte ceiling on a file
+that ships its comments is therefore, in practice, **a limit on how much of the reasoning
+survives** — and the two rules were pulling against each other with only one of them measured.
+
+**The gate now measures the gzipped size of the three files.** Gzip is what a person actually
+waits for, it discounts repeated prose by roughly ten to one, and it counts novel code close to
+full — which is the growth the ceiling was put there to watch. One line of `ux-verify.sh`, no
+minifier, no parser. Vendored fonts are still counted raw: WOFF2 is already compressed, and
+gzipping it again would measure the compressor rather than the font.
+
+`179,475` raw becomes **`61,468` gzipped**, with a ceiling of `70,688`. The number is the last
+commit before the phase that hit the limit, deliberately: baselining at the current working tree
+would have granted this commit the exemption that started the conversation.
+
+**The baseline file is named for its unit.** `.baseline-bytes` is gitignored, so every machine
+that ran the old gate still has one holding a raw number. Read as a compressed one it puts the
+ceiling at three times the real size and passes everything, forever — a gate that has quietly
+stopped gating, which is worse than one that fails. The new gate reads `.baseline-gzip-bytes`,
+so the old file is simply not its file and the baseline is recorded on first run.
+
+**Decided by the operator, not by the loop.** A gate that the thing being gated may redefine is
+not a gate, and this is the one change in this file a loop must not make on its own. It was put
+as a question with the measurements above, and this was the answer.
+
+**What did not change.** Everything else. The number is a ceiling and not a target; 15% is still
+the allowance; re-cutting still happens only when a phase is specified to add weight. Phases 4
+through 6 are expected to fit under the new ceiling, and the raw number remains worth glancing at
+— it is just no longer the thing that fails a build.

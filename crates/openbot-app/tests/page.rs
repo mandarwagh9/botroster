@@ -5815,3 +5815,105 @@ async fn a_failed_groups_read_is_not_silent() {
         "a failing groups read took the Bots with it, which is the fault one level out"
     );
 }
+
+/// A running turn says so where the person is reading.
+///
+/// The whole design of this state was `setStatus("thinking…")`: one 12px word
+/// in the top-right corner, roughly 900px from the 640px column the eye is in.
+/// This is the majority of the wall-clock time a person spends with a working
+/// Bot, and the interval in which they decide whether to press Stop — with the
+/// only evidence for that decision in the opposite corner from the control.
+///
+/// The row carries elapsed time and not a spinner. The number is measured; a
+/// spinner asserts progress nobody measured, which is the mistake
+/// `abandonOpenStep` was written to avoid.
+#[tokio::test]
+async fn a_running_turn_says_so_where_the_person_is_reading() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    // A turn that does not answer, which is exactly the interval under test.
+    b.text_of(
+        "window.__replies.prompt = () => new Promise(() => {});
+         document.getElementById('input').value = 'do the thing';
+         document.getElementById('composer').requestSubmit(); 'ok'",
+    )
+    .await
+    .expect("a turn that hangs");
+
+    let said = wait_until(
+        &b,
+        "String(document.querySelectorAll('#log .msg.pending').length === 1)",
+        Duration::from_secs(5),
+    )
+    .await;
+    assert!(
+        said,
+        "the log said nothing at all between submitting and the first chunk"
+    );
+
+    // In the reading column, not in a corner. The row has to be inside the
+    // log's own box, which is the assertion that a status pill cannot pass.
+    let inside = b
+        .text_of(
+            "(() => { const l = document.getElementById('log').getBoundingClientRect();
+                      const r = document.querySelector('#log .msg.pending').getBoundingClientRect();
+                      return String(r.left >= l.left && r.right <= l.right + 1
+                                    && r.top >= l.top && r.bottom <= l.bottom + 1); })()",
+        )
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        inside, "true",
+        "the running state is not inside the log a person is reading"
+    );
+
+    // And it is measuring something, rather than animating.
+    let first = b
+        .text_of("document.querySelector('#log .msg.pending .step-dur').textContent")
+        .await
+        .unwrap_or_default();
+    assert!(!first.is_empty(), "the row carries no elapsed time");
+    let moved = wait_until(
+        &b,
+        &format!(
+            "String(document.querySelector('#log .msg.pending .step-dur').textContent !== {first:?})"
+        ),
+        Duration::from_secs(3),
+    )
+    .await;
+    assert!(
+        moved,
+        "the elapsed time never changed, so it is not elapsed time"
+    );
+
+    // A ticking number inside `role=\"log\"` would be announced ten times a
+    // second forever. It is for the eye, and says so.
+    let quiet = b
+        .text_of(
+            "document.querySelector('#log .msg.pending .step-dur').getAttribute('aria-hidden')",
+        )
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        quiet, "true",
+        "a counter ticking inside a live region will not stop talking"
+    );
+
+    // When the answer arrives the row is gone, replaced by what it was waiting
+    // for. A waiting line that outlives the wait is worse than none.
+    b.text_of(
+        r#"window.__fire('chunk', {session:"s1", kind:"agent", text:"here is the answer"}); 'ok'"#,
+    )
+    .await
+    .expect("the answer arrives");
+    settle().await;
+    let gone = b
+        .text_of("String(document.querySelectorAll('#log .msg.pending').length)")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        gone, "0",
+        "the window is still saying it is waiting for something that arrived"
+    );
+}
