@@ -339,3 +339,26 @@ outright.
 
 **Generalisable: branching on somebody else's error wording is a dependency nobody records. If the
 state is queryable, query it.**
+
+### A focus assertion that matched the whole document
+
+`the_roster_does_not_take_focus_off_the_row_you_were_on` first asserted
+`document.activeElement.textContent.includes("Bot 7")`. When focus is thrown to `<body>`,
+`activeElement.textContent` is **the text of the entire document** — so the assertion matched, the
+test passed, and it passed against the exact code it was written to condemn. Node identity
+(`activeElement === querySelectorAll(...)[7]`) is the assertion that discriminates.
+
+**Generalisable: an assertion about *which* element must compare elements. Any assertion about a
+focused element's text is really an assertion about the document, because `<body>` is the fallback
+and `<body>` contains everything.**
+
+### Half of a review finding did not reproduce
+
+F-DC9 said the roster redraw threw away both focus and scroll. Focus, yes, always. Scroll, no: the
+wipe and the rebuild are one synchronous block, no layout runs between them, and the offset is never
+clamped — 300px before, 300px after. Forcing a layout in between does zero it, which is presumably
+where the claim came from.
+
+**Generalisable: reproduce each half of a finding separately before fixing it. A compound claim can
+be half true, and the false half quietly becomes a test asserting something that never broke —
+which then passes against the unfixed code and certifies it.**
