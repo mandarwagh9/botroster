@@ -2619,8 +2619,8 @@ function setRail(open) {
 /// panel was something you closed. In a rail that is always here, closing is
 /// not a gesture any more, so the recovery is the one the rail already
 /// offers: the idle state, with the button that starts another. Moving a
-/// check into a container that never closes is exactly how a check quietly
-/// stops having a way to re-arm.
+/// check into a pane that never closes is exactly how a check quietly stops
+/// having a way to re-arm.
 let watchingComputer = null;
 
 function watchComputer() {
