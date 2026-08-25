@@ -3460,6 +3460,28 @@ async fn no_text_in_any_surface_falls_below_the_contrast_it_needs() {
 fn contrast_sweep() -> String {
     format!(
         r#"(() => {{
+        // Finish anything still animating before measuring anything.
+        //
+        // Half this stylesheet fades in with `animation: rise`, and text
+        // part-way through a fade is *transiently* below AA on purpose — every
+        // fade from nothing passes through it. Sampling mid-flight asserts that
+        // animations do not exist.
+        //
+        // It read as a colour bug for eleven commits: this sweep failed only on
+        // CI, on `+ New Bot` and `Send`, and reported a different ratio each
+        // run — 1.72 one day, 2.66 the next, with the tokens untouched between
+        // them. A varying number from unchanged colours is a clock, not a
+        // palette. A slower runner was simply still drawing.
+        //
+        // `finish()` throws on an infinite animation (the busy pulse, the
+        // spinner), and those are excluded rather than caught: they have no
+        // final frame to settle into, and both live on decoration rather than
+        // on text.
+        for (const a of document.getAnimations()) {{
+          try {{
+            if (a.effect && a.effect.getTiming().iterations !== Infinity) a.finish();
+          }} catch (e) {{ void e; }}
+        }}
         {CONTRAST_JS}
         const own = (el) => Array.from(el.childNodes).some(n => n.nodeType === 3 && n.textContent.trim());
         const bad = [];
@@ -6635,9 +6657,19 @@ async fn a_routine_can_be_made_from_the_window_without_typing_cron() {
         v["instructions"], "summarise overnight applications",
         "{args}"
     );
-    assert!(
-        v["timezone"].as_str().unwrap_or_default().contains('/'),
-        "the routine was scheduled in some other zone than the one the person is in, so          'every weekday at 07:30' fires in the middle of somebody's night: {args}"
+    // The machine's own zone, whatever it is. A `/` was the first version of
+    // this — "Asia/Kolkata", "Europe/London" — and CI runners are in UTC,
+    // which has no slash and is a perfectly correct answer for a machine in
+    // UTC. The claim is that the page does not hard-code a zone, so it is
+    // compared against what the browser itself reports.
+    let here = b
+        .text_of("Intl.DateTimeFormat().resolvedOptions().timeZone || ''")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        v["timezone"].as_str().unwrap_or_default(),
+        here,
+        "the routine was scheduled in some other zone than the one the person is in: {args}"
     );
 
     // The form empties, or the next routine is made by editing the last one.

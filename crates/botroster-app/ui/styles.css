@@ -1869,12 +1869,18 @@ textarea {
      the same as a layout that fits.
 
      So each row carries what belongs together: who and what it is called, then
-     when, then what it does and the button that makes it. */
+     when, then what it does.
+
+     The task field has the whole of its row. Sharing it with the button left
+     363px for a placeholder needing 388 on Linux, where the font is wider than
+     the one this was laid out against — and that placeholder is the
+     instruction, so the field gives way, not the sentence. The button takes
+     the cell the time field leaves empty. */
   grid-template-columns: auto 1fr auto;
   grid-template-areas:
     "bot  name name"
-    "when at   ."
-    "task task add";
+    "when at   add"
+    "task task task";
 }
 
 /* Grid items are `auto` sized by default, which lets a long placeholder push
