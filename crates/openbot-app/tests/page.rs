@@ -4518,15 +4518,20 @@ async fn pick_provider(b: &Browser, which: &str) {
 /// to know: the dialect, the base URL, and the key variable's conventional
 /// name. Getting any of them wrong fails in a way that reads like the product
 /// is broken, and the only way to get them right was to already know them.
+///
+/// The list used to hold four hosted providers, each of which required going
+/// away and opening an account before it did anything. A downloaded build now
+/// ships with a model, so what is left is the one arrangement the shipped one
+/// cannot offer — a model on this machine, where the work never leaves it.
 #[tokio::test]
 async fn picking_a_provider_fills_in_the_settings_nobody_should_have_to_look_up() {
     let Some((b, _p)) = page().await else { return };
-    pick_provider(&b, "anthropic").await;
+    pick_provider(&b, "ollama").await;
 
     for (id, want) in [
-        ("model-dialect", "anthropic"),
-        ("model-base", "https://api.anthropic.com"),
-        ("model-key-env", "ANTHROPIC_API_KEY"),
+        ("model-id", "qwen3:1.7b"),
+        ("model-dialect", "openai"),
+        ("model-base", "http://localhost:11434/v1"),
     ] {
         assert_eq!(
             b.text_of(&format!("document.getElementById({id:?}).value"))
@@ -4534,6 +4539,38 @@ async fn picking_a_provider_fills_in_the_settings_nobody_should_have_to_look_up(
                 .unwrap(),
             want,
             "the preset did not fill {id}"
+        );
+    }
+}
+
+/// Choosing the built-in model clears the fields, rather than leaving them.
+///
+/// The runtime falls back to the model the build ships with only when nothing
+/// is configured. So "built in" has to actually empty the boxes: a half-typed
+/// model id left behind would go on overriding the thing the person had just
+/// selected, and the window would say one model while the runtime used another.
+#[tokio::test]
+async fn choosing_the_built_in_model_clears_what_would_override_it() {
+    let Some((b, _p)) = page().await else { return };
+
+    // Somewhere else first, so there is something to clear.
+    pick_provider(&b, "ollama").await;
+    assert_ne!(
+        b.text_of("document.getElementById('model-id').value")
+            .await
+            .unwrap(),
+        "",
+        "nothing was filled in, so clearing it proves nothing"
+    );
+
+    pick_provider(&b, "").await;
+    for id in ["model-id", "model-dialect", "model-base", "model-key-env"] {
+        assert_eq!(
+            b.text_of(&format!("document.getElementById({id:?}).value"))
+                .await
+                .unwrap(),
+            "",
+            "{id} still holds a value that would override the built-in model"
         );
     }
 }

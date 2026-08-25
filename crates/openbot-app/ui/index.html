@@ -64,13 +64,16 @@
         <label for="model-preset">provider</label>
         <select id="model-preset" class="wide"
                 aria-label="fill the fields below for a known provider">
-          <option value="">custom — set the fields yourself</option>
-          <option value="ollama">Ollama — on this computer, free, no key</option>
-          <option value="xai">xAI — Grok</option>
-          <option value="anthropic">Anthropic — Claude</option>
-          <option value="openai">OpenAI — GPT</option>
+          <option value="">built in — nothing to set up</option>
+          <option value="ollama">Ollama — on this computer, private, no key</option>
+          <option value="custom">something else — set the fields yourself</option>
         </select>
 
+        <!-- Everything below is optional. A downloaded build already has a
+             model, so the fields start empty and stay empty for almost
+             everybody; they exist for the two cases the shipped one does not
+             serve: keeping the work on this machine, and pointing at an account
+             somebody already pays for. -->
         <label for="model-id">model</label>
         <input id="model-id" class="wide" spellcheck="false"
                placeholder="grok-4-5 — leave empty to keep what is configured" />

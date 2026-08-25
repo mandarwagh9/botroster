@@ -18,6 +18,36 @@ it visits, or a connected client do one of these is in scope:
 - read another session's tool calls, arguments or results
 - have `openbot-guest` reach `openbotd` (the isolation boundary)
 
+## The model key in an official build
+
+Installers published on the releases page carry an API key for the model they ship with, compiled
+in. **It is recoverable from any installer you download** — `grep -a` on the binary finds it, which
+was measured rather than assumed. Treat it as public.
+
+That is a deliberate trade and worth being exact about, because it is not the usual advice:
+
+- The key is **not** in this repository. It is injected at build time from a CI secret, so the source
+  stays publishable and rotating the key does not require rewriting history.
+- It buys a download that works with no account, no signup and nothing to paste. That was judged
+  worth more than the key staying secret, given the model it reaches is free of token charges.
+- It is **not** your key. It belongs to whoever cut the release, and it is rate-limited and rotated
+  by them. If a build stops working, that is what happened.
+- **A build from source has no key at all**, and nothing about this applies to it: `option_env!`
+  yields nothing and OPENBOT asks you to name a model, exactly as it did before.
+
+If you would rather not use a shared credential — and there are good reasons not to, including that
+the shipped provider retains prompts and completions — name your own model and OPENBOT will use it
+instead:
+
+```sh
+openbot config set --model qwen3:1.7b --dialect openai --base-url http://localhost:11434/v1 --api-key-env ''
+```
+
+Nothing leaves your machine on that arrangement.
+
+Please do not report the recoverable key as a vulnerability. It is documented here because it is
+intended, and the report we would want instead is a way for it to reach something it should not.
+
 ## What is out of scope, and said plainly
 
 The shipped guest is a process on your machine, not a VM or a container. `README.md` § *Honest

@@ -225,11 +225,29 @@ jobs:
       # The runtime goes into the bundle with the app. An installer shipping
       # only the client leaves whoever runs it with nothing to connect to,
       # which is what shipped before anybody tried installing it.
+      # The credential the shipped binary carries, injected here and nowhere
+      # else. It is deliberately not in the repository: this one is public and
+      # Apache-2.0, so a literal in the source would be readable by anybody
+      # browsing GitHub and would stay in the history after a rotation.
+      #
+      # This does not make the key secret in the released installer. Anyone who
+      # downloads one recovers it with `grep -a` — verified, not assumed. What it
+      # buys is that rotating it is a rebuild rather than a rewrite of history,
+      # and that the source stays publishable. Treat a build as the unit of
+      # rotation.
+      #
+      # A fork without the secret set builds a working OPENBOT with no shipped
+      # model, which is the correct outcome rather than a failure: `option_env!`
+      # yields `None` and the ordinary "configure a model" path applies.
       - name: stage the runtime as a sidecar
+        env:
+          OPENBOT_BUILTIN_KEY: ${{ secrets.OPENBOT_BUILTIN_KEY }}
         run: sh scripts/sidecar.sh
 
       - name: bundle
         working-directory: crates/openbot-app
+        env:
+          OPENBOT_BUILTIN_KEY: ${{ secrets.OPENBOT_BUILTIN_KEY }}
         run: cargo tauri build
 
       - uses: actions/upload-artifact@v4

@@ -353,6 +353,18 @@ fn resolve_key(home: &Path, key_env: &str) -> anyhow::Result<String> {
     if key_env.is_empty() {
         return Ok(String::new());
     }
+    // The built-in's credential is a compile-time constant, not a variable, and
+    // is answered here so it never has to be put into a process environment for
+    // the ordinary lookup to find it. Checked before `std::env::var` on purpose:
+    // the sentinel name cannot be a real variable, but answering it first makes
+    // that a property of this code rather than of what a shell happens to hold.
+    if key_env == BUILTIN_KEY_ENV {
+        return builtin_key().map(str::to_owned).ok_or_else(|| {
+            anyhow::anyhow!(
+                "this build has no built-in model key. A release build bakes one in; a build from source does not. Name a model yourself:  openbot config set --model <id> --api-key-env <VAR>"
+            )
+        });
+    }
     if let Ok(from_env) = std::env::var(key_env) {
         return Ok(from_env);
     }
@@ -389,6 +401,66 @@ pub fn key_available(home: &Path, key_env: &str) -> bool {
 ///
 /// `demo` short-circuits to a scripted stand-in so a deployment can be checked
 /// without a key. `fallback` is the canned reply that stand-in gives.
+/// The model this binary ships with, so a fresh download needs no setup.
+///
+/// A person who installs OPENBOT should be able to give it work immediately.
+/// Before this they met a refusal telling them to go and get an account
+/// somewhere; the model below is free of token charges and is already chosen,
+/// so there is nothing to pick, nothing to paste and no config file.
+///
+/// # The key is baked in at build time, not written here
+///
+/// `option_env!` reads `OPENBOT_BUILTIN_KEY` when this crate is compiled. The
+/// key therefore lives in the released binary and **not** in this repository,
+/// which is public and Apache-2.0 — a literal here would be readable by anyone
+/// browsing GitHub, and would be in the history for good even after it was
+/// rotated out.
+///
+/// That is a mitigation and not a solution, and the difference is worth being
+/// exact about: `strings` on any published installer still recovers it. The key
+/// is shared by every copy of a given build, works against OpenRouter's paid
+/// models as well as the free one, and belongs to whoever cut the release. Plan
+/// on rotating it, and treat a build as the unit of rotation.
+///
+/// A build with no key set falls through to the ordinary "configure a model"
+/// path, so a local `cargo build` behaves exactly as it did before.
+pub fn builtin() -> Option<ModelSettings> {
+    let key = option_env!("OPENBOT_BUILTIN_KEY")?;
+    if key.trim().is_empty() {
+        return None;
+    }
+    Some(ModelSettings {
+        id: Some(BUILTIN_MODEL.to_owned()),
+        dialect: "openai".to_owned(),
+        base_url: "https://openrouter.ai/api/v1".to_owned(),
+        // The name of the variable the run will read, not the value. `build`
+        // takes the value from `option_env!` directly, so the key never lands
+        // in `config.toml` or in a process environment somebody can dump.
+        api_key_env: BUILTIN_KEY_ENV.to_owned(),
+        max_tokens: default_max_tokens(),
+        token_budget: None,
+    })
+}
+
+/// What the built-in model is called on OpenRouter.
+pub const BUILTIN_MODEL: &str = "stealth/ox-alpha";
+
+/// A name that cannot collide with a real environment variable.
+///
+/// `resolve_key` looks a key up by variable name. The built-in has no variable —
+/// it has a compile-time constant — so it is given a sentinel name that
+/// `resolve_key` recognises and answers directly. Using something like
+/// `OPENROUTER_API_KEY` would mean an unrelated variable in someone's shell
+/// could silently replace the shipped credential.
+pub const BUILTIN_KEY_ENV: &str = "<built-in>";
+
+/// The compiled-in credential, if this build has one.
+pub fn builtin_key() -> Option<&'static str> {
+    option_env!("OPENBOT_BUILTIN_KEY")
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+}
+
 /// The model id `config.toml` names, if it names one.
 ///
 /// Read separately from [`build`] because "is anything configured" and "give me
@@ -408,6 +480,14 @@ pub fn build(
         return Ok(Arc::new(Scripted::builder().say(fallback).build()));
     }
     let s = overrides.apply(load(home)?.model);
+
+    // Nothing configured is no longer a refusal: the binary ships with a model.
+    // An explicit choice still wins — `--model`, or a `config.toml` — because
+    // somebody who named one meant it.
+    let s = match (&s.id, builtin()) {
+        (None, Some(shipped)) => overrides.apply(shipped),
+        _ => s,
+    };
 
     let id = s.id.ok_or_else(|| {
         anyhow::anyhow!(
@@ -948,6 +1028,109 @@ rules = [{ action = \"maybe\", tool = \"fs.write\" }]
         assert!(
             !shell.contains("Allow"),
             "an unconfigured home ran a shell command without asking: {shell}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod builtin_tests {
+    use super::*;
+
+    /// No credential is written down in this repository.
+    ///
+    /// The shipped key is injected at build time from a CI secret, and this is
+    /// what keeps it that way. A literal here would be readable by anyone
+    /// browsing a public Apache-2.0 repository, and — the part that is easy to
+    /// miss — would stay in the git history after it was rotated out, so the
+    /// rotation would not actually retire it.
+    ///
+    /// Scans the crate's own source rather than trusting the author of the next
+    /// change to remember.
+    #[test]
+    fn no_api_key_is_written_into_this_repository() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut offenders = Vec::new();
+        let mut stack = vec![src];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).expect("readable source dir") {
+                let path = entry.expect("dir entry").path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap_or_default();
+                for (n, line) in text.lines().enumerate() {
+                    // The shapes a real provider key takes, assembled from
+                    // fragments rather than written whole.
+                    //
+                    // This looks fussy and is not: the first version spelled
+                    // them out and this scan flagged its own pattern list,
+                    // which is the scanner working. A checker for a forbidden
+                    // string cannot contain that string, or it fails on itself
+                    // and the next person deletes the test rather than the key.
+                    let prefixes = [
+                        format!("sk-{}-v1-", "or"),
+                        format!("sk-{}-", "ant"),
+                        format!("{}-", "xai"),
+                    ];
+                    let looks_like_a_key = prefixes.iter().any(|p| line.contains(p.as_str()));
+                    // A doc comment naming the shape is not a key.
+                    let is_prose = line.trim_start().starts_with("//");
+                    if looks_like_a_key && !is_prose {
+                        offenders.push(format!("{}:{}", path.display(), n + 1));
+                    }
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "a credential appears to be written into the source. It must come from \
+             OPENBOT_BUILTIN_KEY at build time instead, or it ships in the repository and \
+             survives rotation in the history: {offenders:?}"
+        );
+    }
+
+    /// A build with no key shipped behaves exactly as it did before.
+    ///
+    /// A fork, or anyone's local `cargo build`, has no CI secret. That must be
+    /// an ordinary OPENBOT that asks you to name a model, not a broken one —
+    /// and it is what every test in this workspace runs against.
+    #[test]
+    fn a_build_without_a_shipped_key_offers_no_builtin() {
+        if builtin_key().is_some() {
+            // This build has one baked in, so the other assertion is the
+            // meaningful one. Said out loud rather than silently skipped.
+            eprintln!("this build carries a shipped key; nothing to check here");
+            return;
+        }
+        assert!(
+            builtin().is_none(),
+            "a build with no credential offered a built-in model anyway, which would fail at \
+             the first request with an authentication error instead of asking for a model"
+        );
+    }
+
+    /// The built-in points at the model it claims to.
+    ///
+    /// Cheap, and it is the one thing a typo would silently break: a wrong slug
+    /// fails at the provider with "model not found", far from here.
+    #[test]
+    fn the_builtin_names_the_model_and_endpoint_it_should() {
+        assert_eq!(BUILTIN_MODEL, "stealth/ox-alpha");
+        // The sentinel cannot collide with a real environment variable, which
+        // is what stops an unrelated variable in somebody's shell silently
+        // replacing the shipped credential.
+        assert!(
+            BUILTIN_KEY_ENV.contains('<') && BUILTIN_KEY_ENV.contains('>'),
+            "the built-in key name must be unusable as a real variable: {BUILTIN_KEY_ENV}"
+        );
+        assert!(
+            std::env::var(BUILTIN_KEY_ENV).is_err(),
+            "the sentinel is settable as a real variable, so a shell could override the \
+             shipped credential"
         );
     }
 }

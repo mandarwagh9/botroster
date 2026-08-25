@@ -1404,29 +1404,19 @@ $("connect-demo").addEventListener("click", () => connect(true));
 /// empty `api_key_env`, the way the runtime is told an endpoint wants no
 /// credential. See `build` in `crates/openbot-cli/src/config.rs`.
 const PRESETS = {
+  // Only the one that cannot be shipped. A downloaded build already carries a
+  // model, so a list of providers to pick between was a decision put in front
+  // of somebody who did not need to make one - and the two other entries here
+  // were an account you have to go and open before either is usable.
+  //
+  // Ollama stays because it is the one arrangement the shipped model cannot
+  // offer: the work never leaves this machine. `custom` is every other
+  // provider, entered by hand, which is what the fields were always for.
   ollama: {
     id: "qwen3:1.7b",
     dialect: "openai",
     baseUrl: "http://localhost:11434/v1",
     keyEnv: "",
-  },
-  xai: {
-    id: "grok-4-5",
-    dialect: "openai",
-    baseUrl: "https://api.x.ai/v1",
-    keyEnv: "XAI_API_KEY",
-  },
-  anthropic: {
-    id: "claude-sonnet-5",
-    dialect: "anthropic",
-    baseUrl: "https://api.anthropic.com",
-    keyEnv: "ANTHROPIC_API_KEY",
-  },
-  openai: {
-    id: "gpt-5",
-    dialect: "openai",
-    baseUrl: "https://api.openai.com/v1",
-    keyEnv: "OPENAI_API_KEY",
   },
 };
 
@@ -1462,7 +1452,22 @@ function setKeyless(on) {
 }
 
 $("model-preset").addEventListener("change", () => {
-  const preset = PRESETS[$("model-preset").value];
+  const choice = $("model-preset").value;
+
+  // Empty means the model the build ships with, and choosing it has to clear
+  // the fields: the runtime falls back to the built-in only when nothing is
+  // configured, so leaving a half-typed model id behind would silently keep
+  // overriding the thing the person just asked for.
+  if (choice === "") {
+    for (const id of ["model-id", "model-dialect", "model-base", "model-key-env"]) {
+      $(id).value = "";
+    }
+    setKeyless(false);
+    syncKeyEnvEcho();
+    return;
+  }
+
+  const preset = PRESETS[choice];
   // "custom" is not a provider with blank settings; it is the absence of a
   // choice. Clearing the fields on the way back to it would throw away what
   // somebody had just finished typing.

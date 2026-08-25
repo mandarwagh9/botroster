@@ -167,6 +167,23 @@ rules = [
 A rule that cannot be understood stops the hub rather than being skipped: a rule that is silently
 dropped is a security failure, not a warning.
 
+#### The model an installer ships with
+
+A build downloaded from the releases page has a model already: `stealth/ox-alpha` on OpenRouter,
+free of token charges, with the credential compiled in. There is nothing to choose, nothing to paste
+and no config file — `openbot run "..."` works on a machine that has never seen this before.
+
+That credential is **recoverable from the installer** and is shared by everyone on that build. It is
+documented in [SECURITY.md](SECURITY.md#the-model-key-in-an-official-build) rather than hidden, along
+with why the trade was made and what it does not protect. A build from source carries no key and
+behaves as it always did.
+
+Two reasons to use something else, and both are one command:
+
+- The shipped provider **retains prompts and completions**, because the model is operated
+  anonymously through OpenRouter.
+- A shared key is rate-limited across everybody using that build.
+
 #### A model on this computer
 
 If Ollama or LM Studio is already running here with a model downloaded, you do not have to configure
