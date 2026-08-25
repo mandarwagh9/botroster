@@ -158,7 +158,12 @@ the approval invariants still hold.
 *Gate:* B03 closed. The viewer's existing poll already tells the pane whether the computer is alive;
 no new transport.
 
-### Phase 3 — Liveness
+### Phase 3 — Liveness — **done, 2026-08-25**
+
+All five items landed. F-DC9's scroll half did not reproduce and is recorded as such in
+`renderRoster`; the ceiling in §3 was re-measured rather than re-cut, and now counts gzipped
+bytes — `BASELINE.md` carries the reasoning and the operator's decision.
+
 
 The department review's verdict was that the client was designed as a sequence of still frames. This
 phase is the fourth dimension.

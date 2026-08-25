@@ -387,3 +387,33 @@ only one with copy written for it, so it becomes the default answer to every kin
 **Generalisable: `pending` / `empty` / `failed` / `filled`, and `empty` may only be shown after an
 answer has arrived. If a surface can only say one of these, it is saying it about states it has not
 distinguished.**
+
+### The gate was measuring the practice the project requires
+
+Phase 3's last item went through the bundle ceiling by 610 bytes. The rule for that case was
+already written — *"a finding about the phase, not a reason to move the line"* — so the phase got
+measured, and the measurement indicted the line: **comments were 44% of the bundle and 52% of
+`main.js`**. `CONTRIBUTING.md` requires those comments, there is no build step, so they ship, and a
+raw-byte ceiling on a file that ships its comments is a limit on how much of the reasoning
+survives. Two project rules pulling against each other with only one of them enforced.
+
+Gzip resolves it without a minifier or a parser: prose discounts about ten to one, novel code
+counts close to full, and the number is what a person actually waits for.
+
+**Generalisable: when a limit blocks work the project separately requires, check what the limit is
+a proxy for before treating the work as the problem. And put the change to the operator — a gate
+the gated thing may redefine is not a gate.**
+
+### Changing a gate's unit can turn it vacuous instead of failing
+
+`.baseline-bytes` is **gitignored**. Switching the gate to compressed bytes while reading the same
+filename would have left every machine that ran the old gate comparing ~62,000 compressed bytes
+against a ceiling derived from ~180,000 raw ones — passing everything, forever, silently. Failing
+loudly would have been fine. Passing silently is the failure mode this repository names as worse
+than a failure.
+
+The fix is the filename: `.baseline-gzip-bytes`. The old file is then simply not this file.
+
+**Generalisable: when the unit of a stored number changes, change its name. A stale value in the
+old unit does not announce itself, and a gate that stops gating looks exactly like a gate that
+keeps passing.**
