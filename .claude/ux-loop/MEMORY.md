@@ -450,3 +450,30 @@ a measurement of the change.
 
 **Generalisable: when the ground moves under an experiment, the experiment has no result. Say so,
 rather than keeping whichever conclusion is convenient.**
+
+### The missing surface was not the missing thing
+
+`REDESIGN.md` §1.4 said OPENBOT's event model "already supports this shape … It has no surface", and
+planned a trigger menu naming Slack, Linear, Sentry. Checking the delivery path before building it:
+events arrive only through `openbot event post <source>` — *"point a webhook at this, or use it by
+hand"* — and `--source` is documented as **"anything you name"**. No listener, no endpoint, no
+integration behind any of those names.
+
+A menu reading "Slack message" over that would have created routines that never fire, and claimed
+integrations this product does not have. The reference has them; we have a generic bus and a command
+to poke it. Copying the menu would be copying the claim.
+
+**Generalisable: before building a surface for a capability, follow it end to end. "Tested crate, no
+UI" is a strong signal — it has been right twice this session — but the thing missing in front of a
+subsystem is not always the thing missing.**
+
+### The good version already existed, again
+
+Three times now the fix has been the same shape: a rule stated correctly in one place and applied
+nowhere else. `refreshMentionable`'s comment about independent lists while `refreshWiring` did the
+opposite; `record_run` versus a rehearsal that needed to leave the schedule alone; and `status`
+naming the hub URL while eight commands printed a bare winsock errno.
+
+**Generalisable: when a report says "one of ten gets this right", the fix is not to copy the good
+one nine times. It is to make the good one the only one — a helper the call sites cannot forget —
+and to sweep the test across all ten, because the defect's shape is "most callers do not use it".**

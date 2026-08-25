@@ -55,6 +55,23 @@ restated in OPENBOT's own language before it becomes work.
    supports this shape — `openbot-bots` has source matching, conditions and nested path lookups, all
    tested. It has no surface. A dropdown of real names is a different product from a JSON field.
 
+   **Withdrawn, 2026-08-25, after building the schedule half.** The missing piece is not the
+   surface. Events reach OPENBOT only through `openbot event post <source> --payload <json>` —
+   "point a webhook at this, or use it by hand" — and `--source` is documented as *"anything you
+   name"*. There is no listener, no endpoint, and no integration behind any of those names.
+
+   A menu reading "Slack message" over that mechanism claims an integration this product does not
+   have. It would create routines that never fire unless the person separately builds a
+   webhook-to-CLI bridge the product does not ship, and `CLAUDE.md` is explicit that documentation
+   and UI copy must not imply what the project does not do.
+
+   The reference has those integrations. We have a generic event bus and a command to poke it.
+   Copying the menu would be copying the claim.
+
+   What is honest here, in order of value: an endpoint that can actually receive a webhook (a
+   backend feature, and a security-sensitive one), and *then* a menu naming what it can receive.
+   The trigger picker is downstream of that, not a substitute for it.
+
 5. **Placeholders carry the instruction.** "Describe what your Bot does", "What this Bot is for".
    No help text, no tooltip, no info icon. The empty field teaches.
 
@@ -183,7 +200,10 @@ is scrolled up.
 
 - Bot settings in the rail with a back stack. Placeholders carry the instruction.
 - Routine editor in the rail: Active, Delete, **Test run** across the top.
-- Triggers as a named list, wired to the event model that already exists and has no surface.
+- ~~Triggers as a named list, wired to the event model that already exists and has no surface.~~
+  **Withdrawn** — see §1.4. The event model has no delivery path, so a named trigger list would
+  claim integrations that do not exist. The schedule half shipped instead: a routine can be created
+  from the window with a named cadence rather than a cron field.
 - Every toggle carries the sentence that says what it does.
 
 *Gate:* creating a routine and firing `Test run` records a run, driven through the shipped binary.
