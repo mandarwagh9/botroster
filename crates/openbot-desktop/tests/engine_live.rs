@@ -1111,3 +1111,102 @@ async fn a_key_that_could_never_be_sent_is_refused_when_it_is_stored() {
         "the refusal carried no explanation"
     );
 }
+
+/// The pid of the `openbot acp` this test process spawned.
+///
+/// The SDK owns the child — `AcpAgent` spawns it inside `connect_to` and hands
+/// back no handle — so the only way to end it the way a crash would is to ask
+/// the operating system which of our children it is. Killing by name would
+/// reach the developer's own running OPENBOT, which is not an acceptable thing
+/// for a test suite to do to the machine it runs on.
+///
+/// Returns `None` rather than panicking so the caller can say what it was
+/// looking for. It never skips: a suite that cannot find the child has lost
+/// the thing this test exists to kill.
+fn spawned_agent_pid() -> Option<u32> {
+    let me = std::process::id();
+    #[cfg(windows)]
+    let out = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            &format!(
+                "Get-CimInstance Win32_Process -Filter 'ParentProcessId={me}' | \
+                 Where-Object {{ $_.CommandLine -like '* acp*' }} | \
+                 Select-Object -First 1 -ExpandProperty ProcessId"
+            ),
+        ])
+        .output()
+        .ok()?;
+    #[cfg(not(windows))]
+    let out = std::process::Command::new("pgrep")
+        .args(["-P", &me.to_string(), "-f", " acp"])
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|line| line.trim().parse().ok())
+}
+
+/// A dead agent stops reporting itself alive.
+///
+/// The window polls this to decide whether "connected" is still true. Without
+/// it an `Engine` whose agent has been killed is indistinguishable from a
+/// working one: the struct is intact, the channel still accepts sends, and the
+/// status pill goes on claiming a connection over a process that is gone,
+/// while every prompt fails with a protocol error nobody can act on.
+///
+/// The kill is real rather than a drop. A dropped `Engine` closes its command
+/// channel and ends the driver task, which is a different path entirely — and
+/// it is the path that would pass even if `alive` were wired to nothing but
+/// the task handle. What is asserted here is the crash.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_that_was_killed_stops_reporting_itself_alive() {
+    let up = Up::start().expect("openbot up");
+    let agent_home = tempfile::tempdir().expect("a home for the agent's bots");
+
+    let engine = Engine::connect(Config {
+        openbot: common::up::openbot(),
+        home: agent_home.path().to_path_buf(),
+        hub: up.hub.clone(),
+        demo: true,
+        demo_tools: false,
+        demo_secret: false,
+        bot: None,
+        api_key: None,
+    })
+    .await
+    .expect("the engine could not connect");
+
+    assert!(
+        engine.alive(),
+        "it should be up before anything kills it, or the assertion below proves nothing"
+    );
+
+    let pid = spawned_agent_pid()
+        .expect("could not find the `openbot acp` this test spawned, so there is nothing to kill");
+    #[cfg(windows)]
+    let killed = std::process::Command::new("taskkill")
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    #[cfg(not(windows))]
+    let killed = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status();
+    assert!(killed.is_ok(), "could not end the agent to test the check");
+
+    // EOF has to travel up the pipe and through the SDK's close callback.
+    // Polling rather than one sleep: a fixed wait either flakes or is slow,
+    // and this is the same shape `a_viewer_that_was_killed…` uses.
+    let noticed = (0..60).any(|_| {
+        std::thread::sleep(Duration::from_millis(100));
+        !engine.alive()
+    });
+    assert!(
+        noticed,
+        "the agent was killed six seconds ago and the engine still says it is alive; the window \
+         would still be showing `connected`"
+    );
+}

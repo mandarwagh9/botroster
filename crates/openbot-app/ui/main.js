@@ -1417,6 +1417,11 @@ async function enterWorkspace() {
   // at all, on the one screen every new install starts on.
   closeConversation();
   setStatus("connected", "connected");
+  // A reconnect arrives here, so whatever the last runtime's death left on
+  // screen is cleared by the thing that makes it untrue again.
+  show($("runtime-gone"), false);
+  sendBtn.disabled = false;
+  watchRuntime();
   await refreshRoster();
   // What `@` and `/` can offer. Not awaited into the roster's path: a slow
   // `skill ls` should not hold up the sidebar, and an empty menu for the first
@@ -1424,7 +1429,69 @@ async function enterWorkspace() {
   refreshMentionable();
 }
 
+/// How often the window checks that the runtime is still there.
+///
+/// The same three seconds the computer panel polls at, and for the same
+/// reason: fast enough that nobody writes a paragraph into a dead window,
+/// slow enough to be free.
+const RUNTIME_POLL_MS = 3000;
+
+/// While the workspace is up, notice if the runtime stops.
+///
+/// `openbot acp` is a child process, and this window keeps its whole side of
+/// the connection whether or not anything is still on the other end of it. A
+/// dead runtime is indistinguishable from a working one from in here: the pill
+/// says connected, the composer takes a message, and the failure arrives only
+/// after somebody has written it. Polling is the only option — a process that
+/// died does not send anything to say so.
+///
+/// Started on entering the workspace and cleared on the way out, which is what
+/// keeps it honest: `runtime_alive` answers false both for "the engine died"
+/// and for "there is no engine", so a poll still ticking after a deliberate
+/// disconnect would report a person's own click back to them as a crash.
+let watchingRuntime = null;
+
+function watchRuntime() {
+  stopWatchingRuntime();
+  watchingRuntime = setInterval(async () => {
+    let alive;
+    try {
+      alive = await invoke("runtime_alive");
+    } catch {
+      // The call did not get through. That is this window's own IPC and says
+      // nothing about the runtime; telling somebody their session died over a
+      // dropped message is worse than waiting three seconds for the next tick.
+      // A returned `false` is different — the backend looked and answered.
+      return;
+    }
+    if (alive) return;
+    stopWatchingRuntime();
+    runtimeStopped();
+  }, RUNTIME_POLL_MS);
+}
+
+function stopWatchingRuntime() {
+  clearInterval(watchingRuntime);
+  watchingRuntime = null;
+}
+
+/// Say the runtime is gone, and stop offering what cannot work.
+///
+/// The composer keeps its text and its focus. Only Send goes dead: whatever
+/// somebody was part-way through writing survives the reconnect, which it
+/// would not if the box itself were disabled. An action that is certain to
+/// fail is not offered; the words a person already typed are not taken away.
+function runtimeStopped() {
+  setStatus("the runtime stopped", "error");
+  sendBtn.disabled = true;
+  show($("runtime-gone"), true);
+}
+
 async function disconnect() {
+  // Before the call, not after. The next tick would otherwise land on a
+  // window that has just had its engine taken away on purpose and put a
+  // crash banner on screen for it.
+  stopWatchingRuntime();
   try {
     await invoke("disconnect");
   } catch (err) {
@@ -1485,6 +1552,12 @@ async function sendPrompt(text) {
 
 $("no-computer-dismiss").addEventListener("click", () => show($("no-computer"), false));
 $("problem-dismiss").addEventListener("click", () => show($("problem"), false));
+// The one action that resolves it. `disconnect` is the path back to the
+// connect panel, and the panel is where reconnecting happens; calling it
+// rather than duplicating what it does keeps one definition of leaving a
+// workspace, including the parts that are easy to forget (the computer, the
+// approvals still parked, the conversation).
+$("runtime-reconnect").addEventListener("click", disconnect);
 
 listen("chunk", (event) => {
   if (event.payload.session === session) appendChunk(event.payload);

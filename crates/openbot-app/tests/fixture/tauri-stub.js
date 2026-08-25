@@ -1,5 +1,10 @@
 window.__calls = [];
-window.__replies = { connected: false, roster: [], secret_list: [], policy_list: [],
+// `runtime_alive` defaults to true because a stub with no runtime at all is
+// not the state any of these tests are about, and the page reads a falsy
+// answer as "the runtime died" — without this every test that stays open past
+// one poll would end up asserting against a crash banner it never asked for.
+window.__replies = { connected: false, runtime_alive: true,
+                     roster: [], secret_list: [], policy_list: [],
                      connectors: [], routines: [], groups: [], group_log: [], search: [],
                      skills: { skills: [], problems: [] } };
 window.__listeners = {};

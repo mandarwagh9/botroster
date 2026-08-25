@@ -1172,6 +1172,13 @@ fn the_shell_says_whether_it_is_connected() {
 
     let before = shell.call("connected", json!({})).expect("connected");
     assert_eq!(before, json!(false), "a fresh shell holds no engine");
+    assert_eq!(
+        shell
+            .call("runtime_alive", json!({}))
+            .expect("runtime_alive"),
+        json!(false),
+        "nothing is running, so nothing is alive"
+    );
 
     let args = json!({
         "openbot": common::up::openbot().to_str().unwrap(),
@@ -1182,6 +1189,22 @@ fn the_shell_says_whether_it_is_connected() {
     assert_eq!(
         shell.call("connected", json!({})).expect("connected"),
         json!(true)
+    );
+
+    // The window polls this every three seconds to decide whether "connected"
+    // is still true, and swallows a throw as an IPC hiccup — so a command that
+    // was never registered would look exactly like a runtime that never dies.
+    // This is the assertion that the handler exists and answers.
+    //
+    // It pins the wiring and not the process check, the same way
+    // `computer_alive` is pinned here: what the check is made of is proved in
+    // `openbot-desktop`'s `engine_live.rs`, by killing the agent.
+    assert_eq!(
+        shell
+            .call("runtime_alive", json!({}))
+            .expect("runtime_alive"),
+        json!(true),
+        "a running agent reported itself as gone, so the window would say the runtime stopped"
     );
 
     let twice = shell.call("connect", args);
@@ -1195,6 +1218,13 @@ fn the_shell_says_whether_it_is_connected() {
         shell.call("connected", json!({})).expect("connected"),
         json!(false),
         "disconnect must leave the shell able to say so"
+    );
+    assert_eq!(
+        shell
+            .call("runtime_alive", json!({}))
+            .expect("runtime_alive"),
+        json!(false),
+        "the engine is gone and this still says it is alive"
     );
 
     // The window can connect again afterwards, which is the whole point of a

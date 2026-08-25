@@ -237,6 +237,21 @@
         <button id="no-computer-dismiss" class="link">Dismiss</button>
       </div>
 
+      <!-- The runtime this window drives is gone: `openbot acp` exited, was
+           killed or crashed. A banner and not only the status pill, because it
+           is the reason every next thing a person tries would fail, and
+           because the one action that resolves it belongs beside the sentence
+           that says why it is needed. `alert` and not `status`: nothing here
+           works until this is dealt with. -->
+      <div id="runtime-gone" class="no-computer hidden" role="alert">
+        <div>
+          <strong>The runtime stopped.</strong> <code>openbot acp</code> is no
+          longer running, so nothing can be sent. The conversation is on disk;
+          reconnecting picks it up where it stopped.
+        </div>
+        <button id="runtime-reconnect" class="link">Reconnect</button>
+      </div>
+
       <!-- Anything that failed, said once and properly. The status pill used to
            carry `String(err)` in nine places, which put a whole sentence in the
            chrome with no way to read the rest of it and no way to copy it. The

@@ -7,6 +7,8 @@
 //! against the shipped binary exactly as the adapter's own tests do.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
@@ -435,6 +437,8 @@ pub struct Engine {
     updates: tokio::sync::mpsc::UnboundedReceiver<(SessionId, SessionUpdate)>,
     permissions: tokio::sync::mpsc::UnboundedReceiver<PendingPermission>,
     task: tokio::task::JoinHandle<Result<(), agent_client_protocol::Error>>,
+    /// Cleared when the agent's stdout reaches EOF. See [`Engine::alive`].
+    open: Arc<AtomicBool>,
 }
 
 /// One command to the agent-driver task, answered over a oneshot.
@@ -532,9 +536,30 @@ impl Engine {
         let (permissions, permission_rx) = tokio::sync::mpsc::unbounded_channel();
         let (handshake, handshake_rx) = tokio::sync::oneshot::channel();
 
+        // Whether the agent is still on the other end of the pipe.
+        //
+        // Nothing else in this file can answer that. The driver task below is
+        // not the signal: `connect_with` documents that a clean incoming EOF
+        // "does not cancel unrelated work in `main_fn`", and this `main_fn`
+        // sits on `command_rx.recv()` for the life of the `Engine` — so
+        // `task.is_finished()` stays false over a corpse, forever. Asking the
+        // task would have produced a check that always says yes.
+        let open = Arc::new(AtomicBool::new(true));
+        let closing = Arc::clone(&open);
+
         let task = tokio::spawn(async move {
             agent_client_protocol::Client
                 .builder()
+                // The agent's stdout reached EOF: it exited, crashed or was
+                // killed. `Ok(())` rather than an error, deliberately —
+                // returning an error here tears the connection down and
+                // cancels `connect_with`, which would race every in-flight
+                // turn's own report of what happened. The flag is enough: it
+                // is what `alive` reads, and the shell polls that.
+                .on_close(async move |_cx| {
+                    closing.store(false, Ordering::Relaxed);
+                    Ok(())
+                })
                 // Everything the agent says during a turn, forwarded out of
                 // the SDK's event loop. The shell's job is showing this
                 // stream, so it must never be stuck behind a request.
@@ -716,6 +741,7 @@ impl Engine {
                 updates: update_rx,
                 permissions: permission_rx,
                 task,
+                open,
             }),
             Ok(Err(_)) => {
                 // The sender was dropped, so the task has already ended — and
@@ -764,6 +790,37 @@ impl Engine {
                 ))
             }
         }
+    }
+
+    /// Is `openbot acp` still on the other end?
+    ///
+    /// An `Engine` whose agent has died looks exactly like a working one from
+    /// the outside: the struct is still here, the command channel still
+    /// accepts sends, and the window goes on saying "connected" over a process
+    /// that is gone. Every prompt after that fails, and nothing on screen says
+    /// why. This is the check that lets it say why.
+    ///
+    /// Two signals, and both are read because the SDK documents two different
+    /// endings:
+    ///
+    /// - `open` is cleared by the `on_close` callback on clean incoming EOF.
+    /// - the driver task finishes, which the SDK says a *clean* EOF does not
+    ///   cause — but a transport error does, and a child that dies of a signal
+    ///   or a nonzero exit ends the transport that way.
+    ///
+    /// Measured, because the documentation reads as though only the first
+    /// would fire and that is not what happens: killing the child trips both,
+    /// every time, and each was checked alone against
+    /// `an_agent_that_was_killed_stops_reporting_itself_alive`. The redundancy
+    /// is kept for the ending that test cannot stage — an agent that exits
+    /// zero, which is the case the SDK's own caveat is about, and which would
+    /// otherwise leave this saying yes forever.
+    ///
+    /// Cheap enough to poll: an atomic load and a flag on a `JoinHandle`.
+    /// Nothing is sent to the agent, so a dying agent is not asked to answer.
+    #[must_use]
+    pub fn alive(&self) -> bool {
+        self.open.load(Ordering::Relaxed) && !self.task.is_finished()
     }
 
     /// A handle for sending commands without holding whatever lock this

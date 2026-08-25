@@ -5246,3 +5246,173 @@ async fn the_waiting_count_clears_when_the_queue_does() {
         "the count still claims something is waiting after the queue emptied"
     );
 }
+
+/// A runtime that has died stops reading as connected.
+///
+/// `openbot acp` is a child process, and this window keeps its whole side of
+/// the connection whether or not anything is still on the other end. Before
+/// this, a dead one was indistinguishable from a working one: the pill said
+/// connected for as long as the window stayed open, the composer took a
+/// message, and the only sign was a protocol error after somebody had written
+/// a paragraph and pressed Send.
+///
+/// The poll is left to fire on its own clock rather than called directly. What
+/// is in doubt is not whether the function works — it is whether anything ever
+/// calls it, which is exactly what a direct call would paper over.
+#[tokio::test]
+async fn a_dead_runtime_stops_reading_as_connected() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    let before = b
+        .text_of("document.getElementById('status').textContent")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        before, "connected",
+        "the window did not start out connected, so nothing below is about a death"
+    );
+
+    b.text_of("window.__replies.runtime_alive = false; 'ok'")
+        .await
+        .expect("the runtime dies");
+
+    // Generous against the three-second poll: this asserts the behaviour, not
+    // the clock, and a loaded runner must not fail it for being slow.
+    let noticed = wait_until(
+        &b,
+        "String(!document.getElementById('runtime-gone').classList.contains('hidden'))",
+        Duration::from_secs(15),
+    )
+    .await;
+    assert!(
+        noticed,
+        "the runtime has been gone for fifteen seconds and the window has not said so"
+    );
+
+    let pill = b
+        .text_of("document.getElementById('status').textContent")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        pill, "the runtime stopped",
+        "the banner appeared but the pill still claims a connection, which is the lie this fixes"
+    );
+
+    let send = b
+        .text_of("String(document.getElementById('send').disabled)")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        send, "true",
+        "Send is still live over a runtime that is gone, so pressing it fails after the writing"
+    );
+
+    // And the half that keeps the fix from being its own bug: the words
+    // somebody was part-way through must survive, which is why the box is not
+    // disabled with the button.
+    let typing = b
+        .text_of(
+            "(() => { const i = document.getElementById('input');
+                      i.value = 'half a paragraph';
+                      return String(!i.disabled && i.value === 'half a paragraph'); })()",
+        )
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        typing, "true",
+        "the composer was disabled along with Send, which throws away what was being written"
+    );
+
+    // And the recovery, because a window that says what went wrong and cannot
+    // come back from it has only moved the dead end. Reconnect is the banner's
+    // one action; it leads to the connect panel, and connecting again must
+    // undo every part of this state rather than the visible part of it.
+    b.text_of(
+        "window.__replies.runtime_alive = true;
+         document.getElementById('runtime-reconnect').click(); 'ok'",
+    )
+    .await
+    .expect("reconnect");
+    let back = wait_until(
+        &b,
+        "String(!document.getElementById('connect').classList.contains('hidden'))",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(
+        back,
+        "Reconnect did not lead anywhere a person can reconnect from"
+    );
+
+    b.text_of("document.getElementById('connect-btn').click(); 'ok'")
+        .await
+        .expect("connect again");
+    let recovered = wait_until(
+        &b,
+        "String(!document.getElementById('send').disabled
+                 && document.getElementById('runtime-gone').classList.contains('hidden'))",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(
+        recovered,
+        "the window reconnected still showing the last runtime's death, with Send dead; one crash          would mute it for the rest of the session"
+    );
+}
+
+/// Disconnecting is not reported back to you as a crash.
+///
+/// The backend cannot tell "the runtime died" from "there is no runtime": both
+/// answer `runtime_alive` false, which is the right answer to the question
+/// asked and the wrong thing to put on screen after somebody clicks
+/// Disconnect. The poll is cleared before the call that empties the engine, and
+/// this is the test that keeps those two statements in that order.
+///
+/// It is the more valuable of the pair. The death path announces itself; this
+/// one would have shipped as a crash banner nobody could explain, on the most
+/// ordinary action in the window.
+#[tokio::test]
+async fn disconnecting_is_not_reported_as_a_crash() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    // A slow `disconnect`, deliberately, because the bug lives entirely inside
+    // the time that call takes. An instant one closes the window the poll
+    // would have ticked in, and the test passes with the two statements in
+    // either order — which is to say it tests nothing. Four seconds is longer
+    // than the three-second poll, so an interval cleared after the call rather
+    // than before it has fired at least once by the time this returns.
+    //
+    // Not a contrivance: `disconnect` drops the viewer and the computer this
+    // window started, and waits on the children it is killing.
+    b.text_of(
+        "window.__replies.runtime_alive = false;
+         window.__replies.disconnect = () => new Promise((r) => setTimeout(r, 4000));
+         document.getElementById('disconnect').click(); 'ok'",
+    )
+    .await
+    .expect("disconnect");
+
+    // The assertion is that nothing happens, and there is no condition to poll
+    // for; a fixed wait is the only shape that has.
+    tokio::time::sleep(Duration::from_millis(4500)).await;
+
+    let banner = b
+        .text_of("String(document.getElementById('runtime-gone').classList.contains('hidden'))")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        banner, "true",
+        "clicking Disconnect put a crash banner on screen, blaming the runtime for the click"
+    );
+
+    let pill = b
+        .text_of("document.getElementById('status').textContent")
+        .await
+        .unwrap_or_default();
+    assert_ne!(
+        pill, "the runtime stopped",
+        "the pill reports a deliberate disconnect as a runtime that died"
+    );
+}

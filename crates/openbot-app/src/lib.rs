@@ -621,6 +621,29 @@ async fn connected(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(state.engine.lock().await.is_some())
 }
 
+/// Is the runtime this window is driving still alive?
+///
+/// `connected` answers whether an engine was ever established; this answers
+/// whether the process behind it is still there. They come apart the moment
+/// `openbot acp` dies: the engine struct outlives its child, so the window
+/// goes on saying "connected" over a corpse and every message a person sends
+/// after that fails with a protocol error that explains nothing.
+///
+/// Shaped exactly like [`computer_alive`], including that a window with no
+/// engine at all answers `false`. Both are "there is nothing on the other end
+/// of this", and the page only polls while it is in the workspace — it clears
+/// the poll before it disconnects, so a person's own click is never read back
+/// to them as a crash.
+#[tauri::command]
+async fn runtime_alive(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(state
+        .engine
+        .lock()
+        .await
+        .as_ref()
+        .is_some_and(Engine::alive))
+}
+
 /// Every Bot, for the sidebar.
 ///
 /// `hidden` is the docs' "Show hidden chats". It travels to the binary rather
@@ -1734,6 +1757,7 @@ pub fn shell<R: Runtime>(builder: tauri::Builder<R>, mode: Mode) -> tauri::Build
             connect,
             disconnect,
             connected,
+            runtime_alive,
             roster,
             open_bot,
             open_computer,
