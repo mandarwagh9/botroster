@@ -1454,6 +1454,7 @@ async fn run() -> anyhow::Result<()> {
                                         ..
                                     }
                             ),
+                            manual: false,
                         },
                         Err(e) => openbot_bots::Run {
                             at: chrono::Utc::now(),
@@ -1465,6 +1466,7 @@ async fn run() -> anyhow::Result<()> {
                             // A hub that was restarting is not a reason to
                             // skip the day. Anything unrecognised stays false.
                             retryable: openbot_agent::is_transient(e),
+                            manual: false,
                         },
                     };
                     render::outln!("  {} {}", if run.ok { "ok" } else { "failed" }, run.summary);
@@ -1808,6 +1810,7 @@ async fn run() -> anyhow::Result<()> {
                                             ..
                                         }
                                 ),
+                                manual: false,
                             },
                             Err(e) => openbot_bots::Run {
                                 at: now,
@@ -1819,6 +1822,7 @@ async fn run() -> anyhow::Result<()> {
                                 // As on the event path: an outage is retried,
                                 // a refusal is not.
                                 retryable: openbot_agent::is_transient(e),
+                                manual: false,
                             },
                         };
                         render::outln!(

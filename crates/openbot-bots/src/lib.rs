@@ -2487,6 +2487,17 @@ pub struct Run {
     /// happen.
     #[serde(default)]
     pub retryable: bool,
+    /// Somebody ran this on purpose, rather than the schedule firing it.
+    ///
+    /// A rehearsal and a real firing leave the same trace otherwise, and the
+    /// history is the only place anyone can check whether a routine has
+    /// actually been running: three green rows that were all somebody pressing
+    /// a button say the opposite of what they appear to say.
+    ///
+    /// `serde(default)` because every run recorded before this field existed
+    /// was a scheduled one, which is exactly what `false` means.
+    #[serde(default)]
+    pub manual: bool,
 }
 
 /// Recurring work owned by one Bot.
@@ -2929,11 +2940,42 @@ impl BotStore {
             r.retry_after = None;
         }
         r.runs.push(run);
+        self.trim_runs(r);
+        self.save_routine(r)
+    }
+
+    /// Record a run somebody asked for, without touching the schedule.
+    ///
+    /// This is the whole difference between a rehearsal and a firing, and it
+    /// is not cosmetic. [`Routine::is_due`] is computed from `last_run` —
+    /// deliberately, so a scheduler that was asleep still notices it missed a
+    /// firing — so recording a test run the ordinary way would set `last_run`
+    /// to now and the next real firing would be computed from the rehearsal.
+    /// Pressing "test run" at 08:55 would silently cancel the 09:00 run, and
+    /// the routine would look like it had run, because in a sense it had.
+    ///
+    /// `retry_after` is left alone for the same reason. A rehearsal that hits
+    /// a held computer must not push out a real firing that was already owed,
+    /// and must not clear a backoff that a string of real failures earned.
+    ///
+    /// The history is still written, because the point of a rehearsal is
+    /// seeing what it did, and it is marked [`Run::manual`] so the record does
+    /// not read as evidence the schedule is working.
+    pub fn record_manual_run(&self, r: &mut Routine, run: Run) -> Result<()> {
+        r.runs.push(Run {
+            manual: true,
+            ..run
+        });
+        self.trim_runs(r);
+        self.save_routine(r)
+    }
+
+    /// Keep the history bounded, oldest first out.
+    fn trim_runs(&self, r: &mut Routine) {
         if r.runs.len() > MAX_RUNS_KEPT {
             let drop = r.runs.len() - MAX_RUNS_KEPT;
             r.runs.drain(..drop);
         }
-        self.save_routine(r)
     }
 }
 
@@ -2952,7 +2994,125 @@ mod routine_tests {
             tokens_in: 0,
             tokens_out: 0,
             retryable: true,
+            manual: false,
         }
+    }
+
+    /// A rehearsal must not cancel the firing it was rehearsing.
+    ///
+    /// `is_due` is computed from `last_run`, deliberately, so a scheduler that
+    /// was asleep still notices it missed a firing. Recording a test run the
+    /// ordinary way therefore sets `last_run` to now and the next real firing
+    /// is computed from the rehearsal: pressing "test run" at 08:55 silently
+    /// cancels the 09:00 run, and the routine looks like it ran, because in a
+    /// sense it did.
+    ///
+    /// This is the assertion that keeps the two recorders apart, and it is why
+    /// there are two.
+    #[test]
+    fn a_test_run_does_not_cancel_the_next_real_one() {
+        let (_d, s, bot) = store();
+        let mut r = s
+            .create_routine(&bot, "nightly", "digest", "0 9 * * *", "UTC")
+            .unwrap();
+
+        // Half a minute past nine, with this morning's firing owed and not yet
+        // served. Not five past: a routine that has never run is due only
+        // within a minute of its firing time, which `is_due` documents and the
+        // first draft of this test did not read.
+        let nine_oh_five: DateTime<Utc> = "2026-08-25T09:00:30Z".parse().unwrap();
+        assert!(
+            r.is_due(nine_oh_five).unwrap(),
+            "the routine was not owed a run, so nothing below could cancel one"
+        );
+
+        s.record_manual_run(
+            &mut r,
+            Run {
+                at: nine_oh_five,
+                ok: true,
+                summary: "rehearsed".into(),
+                steps: 1,
+                tokens_in: 1,
+                tokens_out: 1,
+                retryable: false,
+                manual: false,
+            },
+        )
+        .unwrap();
+
+        assert!(
+            r.is_due(nine_oh_five).unwrap(),
+            "a rehearsal marked the routine as having run; the nine o'clock firing will never              happen and the history will say it did"
+        );
+        assert_eq!(
+            r.last_run, None,
+            "the rehearsal moved the schedule, which is the one thing it must not touch"
+        );
+
+        // And the ordinary recorder still does what it is for, or this test is
+        // asserting that nothing works.
+        s.record_run(
+            &mut r,
+            Run {
+                at: nine_oh_five,
+                ok: true,
+                summary: "fired".into(),
+                steps: 1,
+                tokens_in: 1,
+                tokens_out: 1,
+                retryable: false,
+                manual: false,
+            },
+        )
+        .unwrap();
+        assert!(
+            !r.is_due(nine_oh_five).unwrap(),
+            "a real firing did not settle the schedule either, so nothing here works"
+        );
+    }
+
+    /// A rehearsal is recorded, and says it was one.
+    ///
+    /// The point of a test run is seeing what it did, so it goes in the
+    /// history. But three green rows that were all somebody pressing a button
+    /// say the opposite of what they appear to say, and the history is the
+    /// only place anyone can check whether a routine is actually running.
+    #[test]
+    fn a_test_run_is_kept_and_says_it_was_a_test() {
+        let (_d, s, bot) = store();
+        let mut r = s
+            .create_routine(&bot, "nightly", "digest", "0 9 * * *", "UTC")
+            .unwrap();
+        let at = Utc::now();
+        let run = |summary: &str| Run {
+            at,
+            ok: true,
+            summary: summary.into(),
+            steps: 1,
+            tokens_in: 1,
+            tokens_out: 1,
+            retryable: false,
+            manual: false,
+        };
+
+        s.record_manual_run(&mut r, run("rehearsed")).unwrap();
+        s.record_run(&mut r, run("fired")).unwrap();
+
+        let marks: Vec<bool> = r.runs.iter().map(|p| p.manual).collect();
+        assert_eq!(
+            marks,
+            vec![true, false],
+            "the history cannot tell a rehearsal from a firing"
+        );
+
+        // Round-trips, or the mark is only true until the next launch.
+        let back = s.get_routine(&bot, &r.id).unwrap();
+        assert_eq!(
+            back.runs.iter().map(|p| p.manual).collect::<Vec<_>>(),
+            vec![true, false],
+            "the mark did not survive being written to disk and read back"
+        );
     }
 
     #[test]
@@ -3013,6 +3173,7 @@ mod routine_tests {
                 tokens_in: 1,
                 tokens_out: 1,
                 retryable: false,
+                manual: false,
             },
         )
         .unwrap();
@@ -3110,6 +3271,7 @@ mod routine_tests {
                 tokens_in: 0,
                 tokens_out: 0,
                 retryable: false,
+                manual: false,
             },
         )
         .unwrap();
@@ -3150,6 +3312,7 @@ mod routine_tests {
                     tokens_in: 0,
                     tokens_out: 0,
                     retryable: false,
+                    manual: false,
                 },
             )
             .unwrap();
@@ -3288,6 +3451,7 @@ mod routine_tests {
                 tokens_in: 0,
                 tokens_out: 0,
                 retryable: true,
+                manual: false,
             },
         )
         .unwrap();
@@ -3311,6 +3475,7 @@ mod routine_tests {
                 tokens_in: 0,
                 tokens_out: 0,
                 retryable: false,
+                manual: false,
             },
         )
         .unwrap();
@@ -3334,6 +3499,7 @@ mod routine_tests {
                 tokens_in: 0,
                 tokens_out: 0,
                 retryable: true,
+                manual: false,
             },
         )
         .unwrap();
@@ -3364,6 +3530,7 @@ mod routine_tests {
                 tokens_in: 0,
                 tokens_out: 0,
                 retryable: false,
+                manual: false,
             },
         )
         .unwrap();
