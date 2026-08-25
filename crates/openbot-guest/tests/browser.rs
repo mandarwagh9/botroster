@@ -142,7 +142,9 @@ static LAUNCHES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(3);
 
 /// A launched browser, holding its place in the concurrency cap until dropped.
 struct Session {
-    _dir: tempfile::TempDir,
+    /// Kept only so the path outlives the browser using it. It is not a
+    /// `TempDir` any more, and does not delete itself — see `fresh_profile`.
+    _dir: std::path::PathBuf,
     _permit: tokio::sync::SemaphorePermit<'static>,
     browser: Arc<Browser>,
 }
@@ -155,6 +157,48 @@ impl std::ops::Deref for Session {
 }
 
 /// Launch a browser, or explain why the test is being skipped.
+/// A directory for one test's Chromium profile, under `target/`, not in TEMP.
+///
+/// The same fault, and the same fix, as `openbot-app/tests/page.rs` — kept in
+/// both because two integration-test binaries in two crates cannot share a
+/// helper without a support crate, and the reasoning is worth more beside the
+/// code than in one of the two places.
+///
+/// `tempfile::tempdir()` deletes itself on drop, and on Windows that delete is
+/// best-effort: it fails silently while any process still holds a file open.
+/// [`Browser`]'s `kill_on_drop` ends Chrome's root process and returns — its
+/// own source says "Chrome's other processes take a moment" — and those
+/// processes are still holding the profile when the directory is asked to
+/// remove itself. So every launch here leaked one.
+///
+/// It is not a slow leak. The sibling suite leaked twenty thousand directories
+/// and filled a 952GB disk, and a full disk fails tests in ways that read
+/// exactly like flaky ones.
+///
+/// The fix is to stop racing: profiles go under `target/`, and the whole
+/// directory is removed once at the start of a run, when the processes that
+/// held the last run's profiles are certainly gone.
+fn fresh_profile() -> std::path::PathBuf {
+    static ROOT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+    let root = ROOT.get_or_init(|| {
+        let root = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("browser-profiles");
+        // Last run's, not this one's. Best-effort on purpose: a directory a
+        // dead process somehow still holds is a reason to leave it, never a
+        // reason to fail a run that has not started.
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("somewhere to put test profiles");
+        root
+    });
+    let dir = root.join(format!(
+        "p{}",
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).expect("a profile");
+    dir
+}
+
 async fn browser() -> Option<Session> {
     // A skip that reads as a pass is the worst outcome: on a bare CI runner
     // the whole suite would go green having exercised nothing, including
@@ -170,8 +214,8 @@ async fn browser() -> Option<Session> {
         return None;
     }
     let permit = LAUNCHES.acquire().await.expect("semaphore is never closed");
-    let dir = tempfile::tempdir().unwrap();
-    match Browser::launch(&dir.path().join("profile")).await {
+    let dir = fresh_profile();
+    match Browser::launch(&dir).await {
         Ok(b) => Some(Session {
             _dir: dir,
             _permit: permit,
@@ -327,8 +371,7 @@ async fn cookies_survive_a_browser_restart_in_the_same_profile() {
     }
     // This is the property "sign in once" rests on: the profile is durable, so
     // a rebuilt guest keeps its sessions.
-    let dir = tempfile::tempdir().unwrap();
-    let profile = dir.path().join("profile");
+    let profile = fresh_profile();
     let url = serve().await;
 
     let first = match Browser::launch(&profile).await {
@@ -577,8 +620,7 @@ async fn dropping_a_browser_reaps_its_process() {
         eprintln!("SKIP: no Chromium-family browser installed");
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let profile = dir.path().join("profile");
+    let profile = fresh_profile();
 
     // Launch and drop without calling shutdown: a panic, a dropped guest, a
     // cancelled task. Tokio does not reap a child on drop unless told to;
@@ -623,8 +665,7 @@ async fn a_browser_that_outlived_its_guest_is_adopted_with_its_page_intact() {
         return;
     }
     let _permit = LAUNCHES.acquire().await.expect("semaphore is never closed");
-    let dir = tempfile::tempdir().unwrap();
-    let profile = dir.path().join("profile");
+    let profile = fresh_profile();
     let url = serve().await;
 
     let first = Browser::launch(&profile).await.expect("first launch");
@@ -708,8 +749,7 @@ async fn a_browser_that_dies_mid_session_is_replaced_rather_than_kept() {
         return;
     }
     let _permit = LAUNCHES.acquire().await.expect("semaphore is never closed");
-    let dir = tempfile::tempdir().unwrap();
-    let profile = dir.path().join("profile");
+    let profile = fresh_profile();
     let url = serve().await;
 
     let first = Browser::launch(&profile).await.expect("launch");
