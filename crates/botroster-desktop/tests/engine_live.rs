@@ -1192,22 +1192,34 @@ async fn an_agent_that_was_killed_stops_reporting_itself_alive() {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status();
+    // The whole process group on unix, not just the leader.
+    //
+    // The SDK spawns the agent with `process_group(0)`, making it the leader of
+    // its own group precisely so its own teardown can reach a whole tree —
+    // "agents are commonly distributed behind wrapper launchers (`npx …`);
+    // killing only the immediate child orphans the real agent". Killing one pid
+    // reproduces the orphaning rather than the crash, and this test then waited
+    // six seconds for an EOF that something still holding the pipe was never
+    // going to send. `kill -- -PID` addresses the group.
     #[cfg(not(windows))]
     let killed = std::process::Command::new("kill")
-        .args(["-9", &pid.to_string()])
+        .args(["-9", &format!("-{pid}")])
         .status();
     assert!(killed.is_ok(), "could not end the agent to test the check");
 
     // EOF has to travel up the pipe and through the SDK's close callback.
     // Polling rather than one sleep: a fixed wait either flakes or is slow,
     // and this is the same shape `a_viewer_that_was_killed…` uses.
-    let noticed = (0..60).any(|_| {
+    // Twenty seconds, not six. A loaded CI runner is slower than the machine
+    // this was written on at every step of that path, and the cost of the
+    // longer budget is nothing when the check passes in milliseconds.
+    let noticed = (0..200).any(|_| {
         std::thread::sleep(Duration::from_millis(100));
         !engine.alive()
     });
     assert!(
         noticed,
-        "the agent was killed six seconds ago and the engine still says it is alive; the window \
+        "the agent was killed twenty seconds ago and the engine still says it is alive; the window \
          would still be showing `connected`"
     );
 }
