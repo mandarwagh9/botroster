@@ -292,8 +292,21 @@ jobs:
           OPENBOT_BUILTIN_KEY: ${{ secrets.OPENBOT_BUILTIN_KEY }}
         run: |
           set -eu
-          staged=$(find crates/openbot-app/binaries -type f | head -1)
-          test -n "$staged" || { echo "no sidecar was staged"; exit 1; }
+          # This runner's own binary, by name, not "whichever file is first".
+          #
+          # `crates/openbot-app/binaries/` is not empty at checkout: the Windows
+          # sidecar is committed, so on Linux and macOS there are two files here
+          # after staging and `find | head -1` returns an arbitrary one. It
+          # returned the committed Windows binary - built on a laptop long
+          # before this key existed - and reported a correct build as broken.
+          # Windows passed only because `sidecar.sh` overwrites that same file
+          # there.
+          triple=$(rustc -vV | sed -n 's/^host: //p')
+          ext=""
+          case "$triple" in *windows*) ext=".exe" ;; esac
+          staged="crates/openbot-app/binaries/openbot-$triple$ext"
+          test -f "$staged" || { echo "no sidecar was staged at $staged"; exit 1; }
+          echo "checking $staged"
           if grep -qa -- "$OPENBOT_BUILTIN_KEY" "$staged"; then
             echo "the shipped runtime carries the credential"
           else
