@@ -378,3 +378,59 @@ fn the_default_home_is_absolute() {
         "a relative home moves with the shell: {home}"
     );
 }
+
+/// The workspace version and the bundle version are the same number.
+///
+/// `Cargo.toml` carries a note that these drifted once — the library crates
+/// said `0.0.1` while the desktop client and the installer said `0.1.0`, "so a
+/// release would have carried two answers to 'which version is this'". The note
+/// records the fix and nothing enforced it, which leaves the drift free to
+/// happen again the next time somebody bumps one file.
+///
+/// A release is exactly when it bites, and exactly when it is most expensive:
+/// the installers are named from `tauri.conf.json`, the binaries report
+/// `CARGO_PKG_VERSION` over the wire in `hello`, and a tag names a third thing.
+/// Somebody debugging a version mismatch would be reading all three.
+#[test]
+fn the_bundle_and_the_crates_agree_about_the_version() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("crates/<name> has two ancestors");
+
+    let workspace = std::fs::read_to_string(root.join("Cargo.toml")).expect("workspace Cargo.toml");
+    let cargo_version = workspace
+        .lines()
+        .find_map(|l| l.strip_prefix("version = "))
+        .map(|v| v.trim().trim_matches('"').to_owned())
+        .expect("workspace.package.version is set");
+
+    let conf = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json"),
+    )
+    .expect("tauri.conf.json");
+    let bundle_version: String = serde_json::from_str::<serde_json::Value>(&conf)
+        .expect("tauri.conf.json parses")["version"]
+        .as_str()
+        .expect("tauri.conf.json has a version")
+        .to_owned();
+
+    assert_eq!(
+        cargo_version, bundle_version,
+        "Cargo.toml says {cargo_version} and tauri.conf.json says {bundle_version}. The installer \
+         is named from the second and every binary reports the first over the wire, so a release \
+         built like this ships two answers to one question."
+    );
+
+    // Anti-vacuity: reading either file wrongly would produce two empty strings
+    // that compare equal, and this test would pass forever on a repo with no
+    // versions at all.
+    assert!(
+        cargo_version.split('.').count() == 3
+            && cargo_version
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit()),
+        "did not actually read a version out of Cargo.toml, got {cargo_version:?}"
+    );
+}

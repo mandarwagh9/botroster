@@ -16,7 +16,7 @@ members = [
 # One version for every crate, inherited below. They drifted: the library
 # crates said 0.0.1 while the desktop client and the bundle said 0.1.0, so a
 # release would have carried two answers to "which version is this".
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/mandarwagh9/openbot"
