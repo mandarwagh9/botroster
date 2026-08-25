@@ -5022,3 +5022,123 @@ async fn the_log_does_not_yank_you_back_down_while_you_are_reading() {
          different bug"
     );
 }
+
+/// A step's raw record can be opened, read, and selected.
+///
+/// It used to live only on the element's `title`. A tooltip cannot be selected,
+/// cannot be copied, and disappears the moment the pointer moves - which makes
+/// it the wrong home for the one piece of text somebody debugging a run
+/// actually needs. The row now opens.
+///
+/// The head is a real `<button>` with `aria-expanded` rather than a div with a
+/// click handler, so the row is reachable by keyboard and says what it does.
+#[tokio::test]
+async fn a_step_opens_to_show_the_record_behind_it() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    b.text_of(
+        r#"window.__fire('chunk', {session:"s1", kind:"tool", text:"fs.read {\"path\":\"notes.md\"}", args:{path:"notes.md"}}); 'ok'"#,
+    )
+    .await
+    .expect("a call");
+    b.text_of(
+        r#"window.__fire('chunk', {session:"s1", kind:"result", text:"✓ {\"contents\":\"the-actual-bytes\"}"}); 'ok'"#,
+    )
+    .await
+    .expect("its result");
+
+    // Closed to begin with: the record is context, not the conversation.
+    let before = b
+        .text_of("String(document.querySelectorAll('#log .step-raw').length)")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        before, "0",
+        "the record was open before anybody asked for it"
+    );
+    let collapsed = b
+        .text_of("document.querySelector('#log .step-head').getAttribute('aria-expanded')")
+        .await
+        .unwrap_or_default();
+    assert_eq!(collapsed, "false", "a closed row must say it is closed");
+
+    b.click(".step-head").await.expect("open the row");
+
+    let raw = b
+        .text_of("document.querySelector('#log .step-raw').textContent")
+        .await
+        .expect("the record is on screen");
+    assert!(
+        raw.contains("notes.md") && raw.contains("the-actual-bytes"),
+        "the record must carry both the call and its result, got {raw:?}"
+    );
+    let expanded = b
+        .text_of("document.querySelector('#log .step-head').getAttribute('aria-expanded')")
+        .await
+        .unwrap_or_default();
+    assert_eq!(expanded, "true", "an open row must say it is open");
+
+    // Selectable, which is the entire point of moving it off `title`.
+    let selectable = b
+        .text_of("getComputedStyle(document.querySelector('#log .step-raw')).userSelect")
+        .await
+        .unwrap_or_default();
+    assert_ne!(
+        selectable, "none",
+        "the record cannot be selected, so it cannot be pasted into an issue"
+    );
+
+    // And it closes again, or it is a disclosure that only discloses.
+    b.click(".step-head").await.expect("close the row");
+    let after = b
+        .text_of("String(document.querySelectorAll('#log .step-raw').length)")
+        .await
+        .unwrap_or_default();
+    assert_eq!(after, "0", "the row would not close again");
+}
+
+/// The row is reachable without a mouse.
+///
+/// A disclosure that only opens on click is a disclosure half the people using
+/// this cannot open at all. Asserted separately from the behaviour above
+/// because "it works with a pointer" and "it exists in the tab order" fail
+/// independently, and the second is the one that silently regresses.
+#[tokio::test]
+async fn a_step_row_can_be_opened_from_the_keyboard() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+    b.text_of(
+        r#"window.__fire('chunk', {session:"s1", kind:"tool", text:"fs.list {}", args:{path:"."}}); 'ok'"#,
+    )
+    .await
+    .expect("a call");
+
+    let tag = b
+        .text_of("document.querySelector('#log .step-head').tagName")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        tag, "BUTTON",
+        "the row is not a button, so it is not in the tab order and Enter does nothing"
+    );
+
+    b.text_of("document.querySelector('#log .step-head').focus(); 'ok'")
+        .await
+        .expect("focus it");
+    let focused = b
+        .text_of("document.activeElement.className")
+        .await
+        .unwrap_or_default();
+    assert!(
+        focused.contains("step-head"),
+        "the row would not take focus, got {focused:?}"
+    );
+
+    b.key("Enter").await.expect("press it");
+    let open = b
+        .text_of("String(document.querySelectorAll('#log .step-raw').length)")
+        .await
+        .unwrap_or_default();
+    assert_eq!(open, "1", "Enter on a focused row did not open its record");
+}

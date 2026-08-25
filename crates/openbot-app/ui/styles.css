@@ -1025,33 +1025,71 @@ textarea {
   font-style: italic;
 }
 
-/* A tool step is one row: a mark that carries its state, a verb phrase, and
-   the detail that arrives with the result. The raw record is on the row's
-   title. Quiet by design: activity is context for the conversation, not the
-   conversation. */
+/* A tool step is one row: a mark that carries its state, a verb phrase, the
+   detail that arrives with the result, and how long it took. Quiet by design:
+   activity is context for the conversation, not the conversation.
+
+   The row opens. The raw call and its result used to live only on the element's
+   `title`, which is a tooltip: it cannot be selected, cannot be copied, and
+   vanishes the moment the pointer moves. That is the wrong home for the one
+   piece of text somebody debugging actually needs, so the record now expands
+   underneath the row and can be selected like any other text. */
 .msg.tool {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   align-self: flex-start;
   margin: 4px 0 4px calc(50% - 320px);
   max-width: min(640px, 100%);
+  animation: rise var(--t) var(--ease) both;
+}
+
+.step-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
   min-height: 28px;
   padding: 4px 10px 4px 8px;
-  border-radius: var(--r-chip);
+  border-radius: var(--r-1);
   background: transparent;
   border: 1px solid transparent;
   font-family: var(--sans);
   font-size: var(--fs-13);
   color: var(--faint);
+  text-align: left;
   white-space: nowrap;
   overflow: hidden;
-  animation: rise var(--t) var(--ease) both;
+  cursor: pointer;
   transition: background-color var(--t) var(--ease);
 }
 
-.msg.tool:hover {
+.step-head:hover {
   background: var(--panel);
+}
+
+/* The focus ring is the row, not the text inside it: the whole row is the
+   control, and a ring around a verb would say otherwise. */
+.step-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* The raw record. Mono because it is a record and not prose, and selectable
+   because being able to paste it into an issue is the entire point. */
+.step-raw {
+  margin: 2px 0 2px 8px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--line);
+  background: var(--panel);
+  border-radius: var(--r-1);
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  line-height: 1.55;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
 }
 
 .step-mark {

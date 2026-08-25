@@ -368,7 +368,15 @@ function appendChunk(chunk) {
     const args = chunk.args ?? (sp > 0 ? jsonTail(chunk.text, sp) : null);
     el.dataset.tool = name;
     el.dataset.args = args ? JSON.stringify(args) : "";
-    el.appendChild(stepMark("running"));
+    // A real button, not a div with a click handler. The row is a control that
+    // opens a record, so it has to be reachable by keyboard and has to say what
+    // it does to a screen reader; `aria-expanded` is the whole of that contract
+    // and costs one attribute.
+    const head = document.createElement("button");
+    head.type = "button";
+    head.className = "step-head";
+    head.setAttribute("aria-expanded", "false");
+    head.appendChild(stepMark("running"));
     const text = document.createElement("span");
     text.className = "step-text";
     const summary = STEP_SUMMARY[name];
@@ -391,14 +399,19 @@ function appendChunk(chunk) {
       text.appendChild(v);
       if (sp > 0) text.appendChild(document.createTextNode(" " + chunk.text.slice(sp + 1)));
     }
-    el.appendChild(text);
+    head.appendChild(text);
     const state = document.createElement("span");
     state.className = "step-state";
-    el.appendChild(state);
+    head.appendChild(state);
     const dur = document.createElement("span");
     dur.className = "step-dur";
-    el.appendChild(dur);
+    head.appendChild(dur);
+    el.appendChild(head);
+    // Kept as the raw record rather than only as a tooltip. `title` stays so a
+    // hover still previews it; the copyable copy is the one that matters.
+    el.dataset.raw = chunk.text;
     el.title = chunk.text;
+    head.addEventListener("click", () => toggleStepRaw(el));
     // Stamped here because nothing upstream carries it. The runtime measures a
     // tool call's real duration and puts it on `ToolCallFinished`, but the
     // window drives the CLI over ACP, and ACP's tool-call update has no field
@@ -435,6 +448,27 @@ function appendChunk(chunk) {
 function followLog() {
   const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
   if (nearBottom) log.scrollTop = log.scrollHeight;
+}
+
+/// Open or close a step's raw record.
+///
+/// The record is the exact text the shell sent: the call with its arguments,
+/// and the result underneath. Nothing is summarised here on purpose - the row
+/// above already carries the readable version, and this is the copy somebody
+/// pastes into an issue when the readable version is not enough.
+function toggleStepRaw(step) {
+  const head = step.querySelector(".step-head");
+  const open = step.querySelector(".step-raw");
+  if (open) {
+    open.remove();
+    if (head) head.setAttribute("aria-expanded", "false");
+    return;
+  }
+  const pre = document.createElement("pre");
+  pre.className = "step-raw";
+  pre.textContent = step.dataset.raw || "";
+  step.appendChild(pre);
+  if (head) head.setAttribute("aria-expanded", "true");
 }
 
 /// The tick or cross at the head of a step row.
@@ -526,6 +560,11 @@ function completeStep(step, chunk) {
     step.querySelector(".step-text").appendChild(d);
   }
   step.title = `${step.title}\n${chunk.text}`;
+  step.dataset.raw = `${step.dataset.raw || ""}\n${chunk.text}`;
+  // Already open means it is being read right now, so the result belongs in it
+  // immediately rather than waiting for the next open.
+  const shownRaw = step.querySelector(".step-raw");
+  if (shownRaw) shownRaw.textContent = step.dataset.raw;
   // Said to a screen reader: the outcome, with the record behind it.
   const sr = document.createElement("span");
   sr.className = "sr-only";
