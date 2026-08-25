@@ -2090,7 +2090,9 @@ async fn run() -> anyhow::Result<()> {
         }
 
         Command::Servers => {
-            let (hub, _p) = HubClient::connect(&cli.hub).await?;
+            let (hub, _p) = HubClient::connect(&cli.hub)
+                .await
+                .map_err(|e| up::unreachable(&cli.hub, &e))?;
             let servers = hub.list_servers().await?;
             if servers.is_empty() {
                 println!("no tool servers are registered with {}", cli.hub);
@@ -2159,7 +2161,9 @@ async fn run() -> anyhow::Result<()> {
         }
 
         Command::Attach { file, json } => {
-            let (hub, _p) = HubClient::connect(&cli.hub).await?;
+            let (hub, _p) = HubClient::connect(&cli.hub)
+                .await
+                .map_err(|e| up::unreachable(&cli.hub, &e))?;
             hub.open_session().await?;
             // Ask the guest that is actually serving, rather than working the
             // path out from the store. See `openbot_proto::META_WORKSPACE`.
@@ -2203,7 +2207,9 @@ async fn run() -> anyhow::Result<()> {
         }
 
         Command::Tools => {
-            let (hub, _p) = HubClient::connect(&cli.hub).await?;
+            let (hub, _p) = HubClient::connect(&cli.hub)
+                .await
+                .map_err(|e| up::unreachable(&cli.hub, &e))?;
             hub.open_session().await?;
             let tools = hub.bind_server(&cli.server).await?;
             for t in tools {
@@ -2221,7 +2227,9 @@ async fn run() -> anyhow::Result<()> {
                 anyhow::anyhow!("arguments must be one JSON object: {e}\n  openbot call fs.read '{{\"path\":\"notes.md\"}}'")
             })?;
 
-            let (hub, _p) = HubClient::connect_with(&cli.hub, approve::handler(approve)).await?;
+            let (hub, _p) = HubClient::connect_with(&cli.hub, approve::handler(approve))
+                .await
+                .map_err(|e| up::unreachable(&cli.hub, &e))?;
             hub.open_session().await?;
             if !no_server {
                 // A guest may not be running, and hub-served tools do not need
@@ -2710,7 +2718,7 @@ async fn run() -> anyhow::Result<()> {
             .await?;
             let (hub, progress) = HubClient::connect_with(&hub_url, approve::handler(approve))
                 .await
-                .map_err(|e| anyhow::anyhow!("could not reach the hub at {hub_url}: {e}"))?;
+                .map_err(|e| up::unreachable(&hub_url, &e))?;
             hub.open_session_as(acting_as.as_deref()).await?;
             let tools = hub.bind_server(&cli.server).await.map_err(|e| {
                 anyhow::anyhow!(
@@ -3252,7 +3260,9 @@ pub(crate) async fn run_task(t: Task<'_>) -> anyhow::Result<openbot_agent::Agent
     // approver reads stdin, and under ACP stdin carries the protocol. An
     // `openbot acp` that fell back to the TTY approver would consume the
     // client's own messages while prompting a human who is not there.
-    let (hub, progress) = HubClient::connect_with(hub_url, approver).await?;
+    let (hub, progress) = HubClient::connect_with(hub_url, approver)
+        .await
+        .map_err(|e| up::unreachable(hub_url, &e))?;
     hub.open_session_as(Some(bot.id.as_str())).await?;
     let tools = hub.bind_server(server).await?;
 

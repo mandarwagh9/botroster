@@ -394,6 +394,33 @@ fn snapshot_on_a_timer(
 /// The caller must hold the returned [`Running`] until the work is done and
 /// then stop it: process exit runs no destructors, so the browser teardown has
 /// to be explicit.
+/// Say what could not be reached, and the one command that fixes it.
+///
+/// Every hub-dependent command used to fail with the bare transport error, and
+/// on Windows that is `connect: IO error: No connection could be made because
+/// the target machine actively refused it. (os error 10061)` — a line naming
+/// neither the hub, nor its address, nor anything to do about it. Eight
+/// commands printed exactly that and nothing else, byte-identical, and the
+/// same string reached editors through the ACP bridge as `-32603 Internal
+/// error`.
+///
+/// The crate already knew better in two places: `status` names the URL and
+/// renders the failure as a row, and `watch` maps its *second* failure to
+/// "is openbot-guest running?" twenty lines below a first failure it does not
+/// map at all. One rule, written twice, applied nowhere else.
+///
+/// The underlying error is kept rather than replaced. A hub that is running
+/// and refusing — a wrong address, a rejected upgrade — is a different problem
+/// from one that is not there, and a remedy that assumed the common case would
+/// send somebody to start a second hub beside the one already failing. So the
+/// remedy is offered conditionally, in words that stay true either way.
+pub fn unreachable(hub_url: &str, e: &impl std::fmt::Display) -> anyhow::Error {
+    anyhow::anyhow!(
+        "could not reach the computer at {hub_url}\n  {e}\n  \
+         if nothing is running there, `openbot up` starts one"
+    )
+}
+
 pub async fn hub_or_start(
     hub_url: &str,
     paths: Paths,
@@ -589,7 +616,9 @@ impl Running {
 
 /// Poll until the guest has registered, or give up with a real explanation.
 async fn wait_until_ready(hub_url: &str, server_id: &str) -> anyhow::Result<()> {
-    let (hub, _p) = openbot_agent::HubClient::connect(hub_url).await?;
+    let (hub, _p) = openbot_agent::HubClient::connect(hub_url)
+        .await
+        .map_err(|e| unreachable(hub_url, &e))?;
     for _ in 0..200 {
         if let Ok(list) = hub.list_servers().await {
             if list.iter().any(|s| s.server_id.as_str() == server_id) {

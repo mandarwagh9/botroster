@@ -80,6 +80,22 @@ fn run(home: &Path, args: &[&str]) -> Output {
     out
 }
 
+/// The same isolation as `run`, for the commands that take no `--home`.
+///
+/// `tools`, `servers`, `call` and `attach` speak to a hub and never touch a
+/// home directory, so passing one is a usage error rather than a no-op — which
+/// is how the first version of the hub-message sweep below came to be
+/// asserting on clap's help text instead of on the failure it was written for.
+fn run_bare(args: &[&str]) -> Output {
+    std::process::Command::new(OPENBOT)
+        .args(args)
+        .env("NO_COLOR", "1")
+        .env("OPENBOT_HUB_URL", nowhere_hub())
+        .env_remove("OPENBOT_HOME")
+        .output()
+        .unwrap_or_else(|e| panic!("could not run {OPENBOT}: {e}"))
+}
+
 fn ok(home: &Path, args: &[&str]) -> String {
     let out = run(home, args);
     assert!(
@@ -1709,5 +1725,80 @@ fn a_paused_routine_can_still_be_rehearsed() {
     assert!(
         list.contains("paused"),
         "the rehearsal armed the routine; pressing a test button must not schedule anything:\n{list}"
+    );
+}
+
+/// Every command that needs a hub says which hub, and what to do about it.
+///
+/// They used to print the bare transport error and nothing else — on Windows
+/// `connect: IO error: No connection could be made because the target machine
+/// actively refused it. (os error 10061)`, byte-identical across eight
+/// commands, naming neither the hub nor its address nor any next step. The
+/// same string reached editors through the ACP bridge as `-32603 Internal
+/// error`.
+///
+/// Swept across the commands rather than asserted on one, because that is the
+/// shape of the defect: the crate already got this right in `status` and in
+/// `watch`'s *second* failure, and the fix that matters is the one that leaves
+/// no command behind. A new hub-dependent command added without the wrapper
+/// fails here.
+#[test]
+fn every_command_that_needs_a_hub_says_which_hub_and_what_to_do() {
+    // None of these take a `--home`: they speak to a hub and never touch a
+    // home directory. See `run_bare`.
+    let commands: &[&[&str]] = &[
+        &["tools"],
+        &["servers"],
+        &["call", "fs.read", "{\"path\":\"a\"}"],
+        &["attach", "openbot-workspace"],
+    ];
+
+    let mut bad = Vec::new();
+    for args in commands {
+        let out = run_bare(args);
+        let said = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        // It has to name the address, or "could not reach the computer" is a
+        // sentence about nothing a person can check.
+        let names_it = said.contains("127.0.0.1") || said.contains("could not reach the computer");
+        let offers = said.contains("openbot up");
+        if !names_it || !offers {
+            bad.push(format!(
+                "{}: {}",
+                args.join(" "),
+                said.trim().replace('\n', " / ")
+            ));
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "a command failed without naming the hub or a way to fix it:\n{}",
+        bad.join("\n")
+    );
+}
+
+/// And it keeps the transport's own account of what went wrong.
+///
+/// A hub that is running and refusing — a wrong address, a rejected upgrade —
+/// is a different problem from one that is not there. Replacing the underlying
+/// error with a remedy for the common case would send somebody to start a
+/// second hub beside the one already failing, so the remedy is offered
+/// conditionally and the original is kept.
+#[test]
+fn an_unreachable_hub_still_reports_what_actually_failed() {
+    let out = run_bare(&["tools"]);
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(
+        said.contains("refused") || said.contains("os error") || said.contains("connect"),
+        "the transport's account of the failure was thrown away, so a hub that is up and \
+         refusing is indistinguishable from one that is not running:\n{said}"
+    );
+    assert!(
+        said.contains("if nothing is running there"),
+        "the remedy is stated unconditionally, which is wrong whenever something *is* running \
+         there:\n{said}"
     );
 }

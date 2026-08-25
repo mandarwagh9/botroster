@@ -159,7 +159,8 @@ impl Watch {
                 driving: Arc::clone(&driving),
             }),
         )
-        .await?;
+        .await
+        .map_err(|e| crate::up::unreachable(hub_url, &e))?;
         hub.open_session().await?;
         // A viewer with no computer bound has nothing to show. Reported here
         // rather than as an empty screen the person has to interpret.

@@ -135,7 +135,7 @@ tests pass with it enabled. The vocabulary that justified it is corrected across
 Five steps and two terminals, and nothing warns you until `up` has already taken the first. `run`'s
 one remedy names two binaries the documented install does not put on your PATH.
 
-### T3-2 — eight commands fail with a bare winsock errno. `open`
+### T3-2 — eight commands fail with a bare winsock errno. `done`
 `P0` · reach: all users · `reports/cli-devex.md` F-CD4
 
 `os error 10061` names neither the hub nor a remedy. One command of ten gets this right, so the
