@@ -301,3 +301,41 @@ would hide real failures — so it must key on that condition only.
 **Generalisable: when you add load to a suite that is already flaking, say so in the same breath
 as the feature.** A flake that arrives with a change looks like the change caused it, and the next
 person will go looking in the wrong place.
+
+### The obvious liveness check was the one that could never fail
+
+`Engine` holds a `JoinHandle`, so `!task.is_finished()` reads as the answer to "is the agent still
+there". The SDK's own documentation says otherwise: a clean incoming EOF "does not cancel unrelated
+work in `main_fn`", and that `main_fn` waits on a command channel for the life of the `Engine`. The
+check would have been **true over a corpse, forever**, and the test written against it would have
+passed while asserting nothing.
+
+Then the measurement disagreed with the documentation in the other direction. Killing the child
+trips *both* signals every time, five runs — because a child that dies of a signal ends the
+transport with an *error*, not a clean EOF, and that does end the task. Both are kept, and the
+comment says which ending each covers and which one no test here can stage.
+
+**Generalisable: a liveness check has two failure modes and only one of them is visible. It can say
+dead when alive, which you find immediately, and alive when dead, which you never find — because
+that is also what a working system looks like. Mutate it: implement the naive version and run the
+test. If the naive version passes too, the test is not testing the check.**
+
+### A negative test needs the window the bug lives in
+
+`disconnecting_is_not_reported_as_a_crash` passed with the two statements in **either order**,
+because the stub answered `disconnect` instantly and the poll never got a tick in between. The bug
+lives entirely inside the time that call takes, so the test now stages a four-second `disconnect` —
+which is not a contrivance: that call drops the viewer and waits on the children it kills.
+
+**Generalisable: when the fix is an ordering, the test has to hold the window open. A race you
+cannot lose is a race you are not testing.**
+
+### Ask the system, do not read its error text
+
+A turn that failed over a dead runtime arrived as the literal string `openbot acp is gone`. Matching
+on it would have worked, and would have broken silently at the next rewording — in the direction of
+showing the worse message. One extra IPC call on an already-failed path answers the question
+outright.
+
+**Generalisable: branching on somebody else's error wording is a dependency nobody records. If the
+state is queryable, query it.**
