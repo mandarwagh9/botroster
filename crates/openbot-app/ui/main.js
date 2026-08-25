@@ -2590,6 +2590,38 @@ function showComputer(running) {
   show(computerFrame, running);
   show($("computer-live"), running);
   show($("computer-idle"), !running);
+  show($("rail-expand"), running);
+  // A lightbox over a computer that has just been stopped is a full-screen
+  // view of nothing at all.
+  if (!running) setExpanded(false);
+}
+
+/// Expand the computer over this window, or put it back.
+///
+/// A lightbox, never a second window: OPENBOT is one application, and a
+/// browser window that has escaped its app is a thing a person then has to
+/// manage — find, raise, close — on top of the work they opened it for.
+///
+/// The rail does not move anywhere in the tree to do this. Reparenting an
+/// iframe is a fresh navigation, so lifting it into an overlay element would
+/// restart the viewer and drop whatever the Bot was in the middle of. It is
+/// two CSS rules for that reason and no other.
+///
+/// The app behind is dimmed, so it is also made unreachable. A dimmed panel
+/// that still takes Tab is worse than one that does not dim: it looks
+/// unavailable and answers anyway. An approval outranks all of this without
+/// any code here — `applyModality` inerts every child of `#app` except the
+/// dialog, and the rail is inside one of them.
+function setExpanded(on) {
+  if (on) setRail(true);
+  rail.classList.toggle("expanded", on);
+  const btn = $("rail-expand");
+  btn.textContent = on ? "Shrink" : "Expand";
+  btn.setAttribute("aria-expanded", String(on));
+  for (const pane of workspace.children) {
+    pane.toggleAttribute("inert", on && pane !== rail);
+  }
+  if (!btn.classList.contains("hidden")) btn.focus();
 }
 
 /// Collapse or expand the rail. Layout only.
@@ -2602,6 +2634,10 @@ function showComputer(running) {
 /// navigation, so a rail that came and went would restart the viewer every
 /// time it was collapsed.
 function setRail(open) {
+  // Collapsing an expanded rail: shrink first, or the overlay stays fixed over
+  // a window whose rail is notionally 40px wide, with nothing on screen that
+  // would put it back.
+  if (!open) setExpanded(false);
   rail.classList.toggle("collapsed", !open);
   const btn = $("rail-toggle");
   btn.setAttribute("aria-expanded", String(open));
@@ -2664,6 +2700,9 @@ $("computer-start").addEventListener("click", startComputer);
 $("close-computer").addEventListener("click", closeComputer);
 $("rail-toggle").addEventListener("click", () =>
   setRail(rail.classList.contains("collapsed")),
+);
+$("rail-expand").addEventListener("click", () =>
+  setExpanded(!rail.classList.contains("expanded")),
 );
 
 // ------------------------------------------------------------- palette
@@ -3077,6 +3116,10 @@ document.addEventListener("keydown", (e) => {
     if (!editDialog.classList.contains("hidden")) return show(editDialog, false);
     if (!secretsDialog.classList.contains("hidden")) return show(secretsDialog, false);
     if (!rulesDialog.classList.contains("hidden")) return show(rulesDialog, false);
+    // Last, because everything above is drawn over the workspace and the
+    // workspace is inert while any of them is open: Escape has to close what
+    // is actually on top first.
+    if (rail.classList.contains("expanded")) return setExpanded(false);
   }
 });
 

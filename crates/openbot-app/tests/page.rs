@@ -6189,3 +6189,193 @@ async fn a_step_replayed_from_history_does_not_claim_to_have_taken_no_time() {
         "the replayed step did not render, so the empty duration proves nothing: {said:?}"
     );
 }
+
+/// Sets up a running computer in the rail and returns once it is on screen.
+async fn computer_running(b: &Browser) {
+    b.text_of(concat!(
+        "window.__replies.open_computer = 'http://127.0.0.1:7777/?k=x';",
+        "window.__replies.computer_alive = true;",
+        "document.getElementById('computer-start').click(); 'ok'"
+    ))
+    .await
+    .expect("start a computer");
+    let live = wait_until(
+        b,
+        "String(!document.getElementById('computer-frame').classList.contains('hidden'))",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(live, "the computer never came up");
+}
+
+/// Expanding the computer keeps it in this window, and keeps it running.
+///
+/// A second window is a thing a person then has to manage — find, raise,
+/// close — on top of the work they opened it for. OPENBOT is one application.
+///
+/// The load-bearing half is the second assertion. The obvious way to build a
+/// lightbox is to lift the content into an overlay element, and reparenting an
+/// iframe is a fresh navigation: it would restart the viewer and drop whatever
+/// the Bot was in the middle of, every time somebody wanted a closer look.
+#[tokio::test]
+async fn expanding_the_computer_stays_in_this_window_and_does_not_restart_it() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+    computer_running(&b).await;
+
+    b.text_of(concat!(
+        "window.__opened = 0;",
+        "window.open = () => { window.__opened += 1; return null; };",
+        "window.__frameWas = document.getElementById('computer-frame');",
+        "document.getElementById('rail-expand').click(); 'ok'"
+    ))
+    .await
+    .expect("expand");
+    settle().await;
+
+    let covers = b
+        .text_of(
+            "(() => { const r = document.getElementById('rail').getBoundingClientRect();
+                      return String(r.width > innerWidth * 0.7 && r.height > innerHeight * 0.7); })()",
+        )
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        covers, "true",
+        "expanding did not expand: the rail is still a column, not a view of the computer"
+    );
+
+    // The same node, still pointed at the same viewer. Not a new iframe, and
+    // not the same iframe re-navigated.
+    let kept = b
+        .text_of(
+            "(() => { const f = document.getElementById('computer-frame');
+                      return String(f === window.__frameWas
+                                    && (f.getAttribute('src') || '').includes('7777')); })()",
+        )
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        kept, "true",
+        "the frame was replaced or re-navigated by expanding, so the viewer restarted"
+    );
+
+    let spawned = b
+        .text_of("String(window.__opened)")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        spawned, "0",
+        "expanding opened a second window; this is one application"
+    );
+
+    let restarted = b
+        .text_of("String(window.__sent('open_computer').length)")
+        .await
+        .unwrap_or_default();
+    assert_eq!(restarted, "1", "expanding started a second viewer");
+
+    // The app behind is dimmed, so it is also unreachable. A dimmed panel that
+    // still answers Tab looks unavailable and is not.
+    let sealed = b
+        .text_of(
+            "(() => { const w = document.getElementById('workspace');
+                      return String([...w.children].every(
+                        (p) => p.id === 'rail' ? !p.hasAttribute('inert')
+                                              : p.hasAttribute('inert'))); })()",
+        )
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        sealed, "true",
+        "the dimmed app is still reachable behind the overlay, or the rail itself went inert"
+    );
+}
+
+/// Escape shrinks the expanded computer, and gives the app back.
+///
+/// The overlay covers the window, so the way out has to be the one every other
+/// overlay in this window uses. It is checked last in that chain because
+/// everything above it is drawn over the workspace and inerts it — Escape has
+/// to close what is actually on top first.
+#[tokio::test]
+async fn escape_shrinks_the_expanded_computer_and_gives_the_app_back() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+    computer_running(&b).await;
+
+    b.text_of("document.getElementById('rail-expand').click(); 'ok'")
+        .await
+        .expect("expand");
+    settle().await;
+    let up = b
+        .text_of("String(document.getElementById('rail').classList.contains('expanded'))")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        up, "true",
+        "nothing was expanded, so escaping it proves nothing"
+    );
+
+    b.text_of(
+        "document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); 'ok'",
+    )
+    .await
+    .expect("escape");
+    settle().await;
+
+    let down = b
+        .text_of(
+            "(() => { const r = document.getElementById('rail');
+                      const w = document.getElementById('workspace');
+                      return String(!r.classList.contains('expanded')
+                                    && [...w.children].every((p) => !p.hasAttribute('inert'))); })()",
+        )
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        down, "true",
+        "Escape left the overlay up, or left the app behind it inert and unusable"
+    );
+
+    // And the computer survived being looked at closely.
+    let alive = b
+        .text_of("String(!document.getElementById('computer-frame').classList.contains('hidden'))")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        alive, "true",
+        "shrinking the overlay took the computer with it"
+    );
+}
+
+/// Stopping the computer takes the overlay down with it.
+///
+/// A lightbox over a computer that has just been stopped is a full-screen view
+/// of nothing, with the app behind it inert and no obvious way back.
+#[tokio::test]
+async fn stopping_the_computer_takes_the_expanded_view_down_with_it() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+    computer_running(&b).await;
+
+    b.text_of(concat!(
+        "document.getElementById('rail-expand').click();",
+        "document.getElementById('close-computer').click(); 'ok'"
+    ))
+    .await
+    .expect("expand, then stop");
+
+    let recovered = wait_until(
+        &b,
+        "String(!document.getElementById('rail').classList.contains('expanded')
+                && [...document.getElementById('workspace').children]
+                     .every((p) => !p.hasAttribute('inert')))",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(
+        recovered,
+        "the computer was stopped and the window is left showing a full-screen view of nothing"
+    );
+}

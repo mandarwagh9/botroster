@@ -1481,6 +1481,30 @@ textarea {
   overflow: hidden;
 }
 
+/* Expanded: a lightbox over this window, not a second window.
+
+   `position: fixed` rather than moving the rail anywhere in the tree. An
+   iframe that is unmounted and remounted is a fresh navigation, so reparenting
+   it into an overlay would restart the viewer — the same reason collapsing
+   narrows a column instead of removing the rail. The whole of expanding is two
+   rules, for exactly that reason. */
+.rail.expanded {
+  position: fixed;
+  inset: 32px;
+  z-index: 40;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow);
+}
+
+.workspace:has(#rail.expanded)::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: color-mix(in srgb, #000 52%, transparent);
+}
+
 .rail-head {
   display: flex;
   align-items: center;

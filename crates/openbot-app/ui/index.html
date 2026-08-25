@@ -345,6 +345,11 @@
     <aside id="rail" class="rail" aria-label="Agent Computer">
       <header class="rail-head">
         <h3>Agent Computer</h3>
+        <!-- Expanding is a lightbox over this same window, never a second
+             one. Hidden until there is a computer to expand: a full-screen
+             view of an offer to start something is not a view of anything. -->
+        <button id="rail-expand" class="link hidden" aria-expanded="false"
+                aria-controls="computer-panel">Expand</button>
         <button id="rail-toggle" class="link" aria-expanded="true"
                 aria-controls="computer-panel">Collapse</button>
       </header>
