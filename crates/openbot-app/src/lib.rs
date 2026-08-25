@@ -1004,6 +1004,28 @@ async fn routine_pause(
         .map_err(|e| e.to_string())
 }
 
+/// Run one routine now, without moving its schedule.
+///
+/// The window's `Test run`. See `settings::test_run` for why a rehearsal
+/// started this way cannot ask this window to approve anything: the hub asks
+/// whichever harness owns the session, and that is the `openbot` process doing
+/// the run, not this one. Anything needing approval is refused and says so,
+/// which is the honest behaviour — the alternative would be a button here that
+/// silently approves every call a routine makes.
+#[tauri::command]
+async fn routine_run(
+    state: State<'_, AppState>,
+    bot: String,
+    routine: String,
+) -> Result<settings::TestRun, String> {
+    let Some(here) = state.where_.lock().await.clone() else {
+        return Err("not connected".into());
+    };
+    settings::test_run(&here.openbot, &here.home, &here.hub, &bot, &routine)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// The saved procedures the composer's `/` offers.
 ///
 /// Both halves travel: what loaded, and what did not. A skill that fails to
@@ -1779,6 +1801,7 @@ pub fn shell<R: Runtime>(builder: tauri::Builder<R>, mode: Mode) -> tauri::Build
             bot_delete,
             bot_hide,
             routine_pause,
+            routine_run,
             groups,
             group_log,
             open_group,

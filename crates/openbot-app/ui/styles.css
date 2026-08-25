@@ -1569,6 +1569,13 @@ textarea {
   margin: 0;
 }
 
+/* Two controls on one settings row. `dd` is the value column of a definition
+   list, so they sit at its end rather than needing a layout of their own. */
+.row-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
 .rail-foot {
   padding: 10px 12px;
   border-top: 1px solid var(--line-soft);

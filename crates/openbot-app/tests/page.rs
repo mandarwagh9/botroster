@@ -1877,19 +1877,26 @@ async fn a_routine_can_be_paused_and_resumed_from_the_window() {
     .expect("open settings");
     settle().await;
 
-    let labels = b
-        .text_of("[...document.querySelectorAll('#routines-list button')].map(e=>e.textContent).join('|')")
-        .await
-        .unwrap();
+    // Each row's arming control, found by what it does rather than by
+    // position. It used to be the only button on a row, so index 0 was the
+    // same thing as "the pause control"; `Test run` sits beside it now, and a
+    // positional assertion would have gone on passing while pressing the wrong
+    // button.
+    const ARMING: &str = "[...document.querySelectorAll('#routines-list .row-actions')]         .map(a => [...a.querySelectorAll('button')]         .find(b => b.textContent === 'Pause' || b.textContent === 'Resume')?.textContent)";
+
+    let labels = b.text_of(&format!("{ARMING}.join('|')")).await.unwrap();
     assert_eq!(
         labels, "Pause|Resume",
         "the control must name the act it performs, per row"
     );
 
     // The running one pauses.
-    b.text_of("document.querySelectorAll('#routines-list button')[0].click(); 'ok'")
-        .await
-        .expect("pause");
+    b.text_of(
+        "[...document.querySelectorAll('#routines-list .row-actions')][0]
+           .querySelector('button:nth-child(2)').click(); 'ok'",
+    )
+    .await
+    .expect("pause");
     settle().await;
     let sent = b
         .text_of("JSON.stringify(window.__sent('routine_pause').map(c => c.args))")
@@ -1906,9 +1913,12 @@ async fn a_routine_can_be_paused_and_resumed_from_the_window() {
     );
 
     // The paused one resumes: the same control, the other direction.
-    b.text_of("document.querySelectorAll('#routines-list button')[1].click(); 'ok'")
-        .await
-        .expect("resume");
+    b.text_of(
+        "[...document.querySelectorAll('#routines-list .row-actions')][1]
+           .querySelector('button:nth-child(2)').click(); 'ok'",
+    )
+    .await
+    .expect("resume");
     settle().await;
     let sent = b
         .text_of("JSON.stringify(window.__sent('routine_pause').map(c => c.args))")
@@ -6419,4 +6429,183 @@ async fn stopping_the_computer_takes_the_expanded_view_down_with_it() {
         recovered,
         "the computer was stopped and the window is left showing a full-screen view of nothing"
     );
+}
+
+/// Opens Settings with one routine listed, and waits for it.
+async fn one_routine(b: &Browser) {
+    b.text_of(concat!(
+        "window.__replies.routines = [",
+        "  { bot: 'talent-scout', bot_name: 'Talent Scout', id: 'nightly',",
+        "    enabled: true, trigger: 'every day at 09:00', next: null }];",
+        "document.getElementById('rules-btn').click(); 'ok'"
+    ))
+    .await
+    .expect("open settings");
+    let listed = wait_until(
+        b,
+        "String(document.querySelectorAll('#routines-list dt').length === 1)",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(listed, "the routine never appeared in Settings");
+}
+
+/// A routine can be rehearsed from the window, and the window says the
+/// schedule did not move.
+///
+/// The parity report ranked "routine test run" a top-five gap. The runtime can
+/// now do it without swallowing a scheduled firing; this is the control.
+///
+/// The sentence about the schedule is asserted, not the button. That promise is
+/// the entire reason a rehearsal is a separate thing from a run, and leaving a
+/// person to infer it from nothing having visibly changed is leaving them to
+/// guess at the one fact that decides whether they dare press it.
+#[tokio::test]
+async fn a_routine_can_be_rehearsed_from_the_window() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+    one_routine(&b).await;
+
+    b.text_of(concat!(
+        "window.__replies.routine_run = { ok: true, summary: 'Routine ran.',",
+        "  steps: 2, next: '2026-08-26T09:00:00+00:00', paused: false };",
+        "[...document.querySelectorAll('#routines-list button')]",
+        "  .find((x) => x.textContent === 'Test run').click(); 'ok'"
+    ))
+    .await
+    .expect("press Test run");
+
+    let said = wait_until(
+        &b,
+        "String(document.getElementById('rule-error').textContent.includes('schedule is unchanged'))",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(
+        said,
+        "the window did not say the schedule was unchanged, which is the promise a rehearsal makes"
+    );
+
+    let text = b
+        .text_of("document.getElementById('rule-error').textContent")
+        .await
+        .unwrap_or_default();
+    assert!(
+        text.contains("Routine ran."),
+        "the window did not say what the rehearsal did: {text:?}"
+    );
+
+    // It asked for the routine that was pressed, not for whatever was first.
+    let sent = b
+        .text_of("JSON.stringify(window.__sent('routine_run').map((c) => c.args))")
+        .await
+        .unwrap_or_default();
+    assert!(
+        sent.contains("talent-scout") && sent.contains("nightly"),
+        "the wrong routine was rehearsed: {sent}"
+    );
+}
+
+/// A rehearsal that fails says so, and still says the schedule is unchanged.
+///
+/// The failure a person will actually meet: the hub asks whichever harness
+/// owns a session to approve a call, and a rehearsal is a separate `openbot`
+/// process owning its own — so it cannot ask this window, and anything needing
+/// approval is refused. That is deliberate. A button here that answered on a
+/// person's behalf would be the exact thing the approval gate exists to stop.
+///
+/// What matters is that the window reports it as a refusal rather than as
+/// success, and still tells the truth about the schedule — a failed rehearsal
+/// moves it no more than a successful one.
+#[tokio::test]
+async fn a_rehearsal_that_was_refused_says_so_and_not_that_it_worked() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+    one_routine(&b).await;
+
+    b.text_of(concat!(
+        "window.__replies.routine_run = { ok: false,",
+        "  summary: 'denied by the approver: fs.write', steps: 1,",
+        "  next: '2026-08-26T09:00:00+00:00', paused: false };",
+        "[...document.querySelectorAll('#routines-list button')]",
+        "  .find((x) => x.textContent === 'Test run').click(); 'ok'"
+    ))
+    .await
+    .expect("press Test run");
+
+    let said = wait_until(
+        &b,
+        "String(document.getElementById('rule-error').textContent.includes('failed'))",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(said, "a refused rehearsal was not reported as a failure");
+
+    let text = b
+        .text_of("document.getElementById('rule-error').textContent")
+        .await
+        .unwrap_or_default();
+    assert!(
+        text.contains("denied by the approver"),
+        "the window did not say why it was refused, which is the only actionable part: {text:?}"
+    );
+    assert!(
+        text.contains("schedule is unchanged"),
+        "a failed rehearsal stopped saying the thing that is still true of it: {text:?}"
+    );
+}
+
+/// The button says it is working, and comes back.
+///
+/// A rehearsal is a real run against a real computer, so it takes as long as
+/// the routine takes. A control that goes quiet for a minute reads as one that
+/// did not register the click, and the second click starts a second run.
+#[tokio::test]
+async fn the_test_run_button_says_it_is_running_and_refuses_a_second_press() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+    one_routine(&b).await;
+
+    b.text_of(concat!(
+        "window.__replies.routine_run = () => new Promise((r) =>",
+        "  setTimeout(() => r({ ok: true, summary: 'done', steps: 1,",
+        "                       next: null, paused: false }), 2500));",
+        "[...document.querySelectorAll('#routines-list button')]",
+        "  .find((x) => x.textContent === 'Test run').click(); 'ok'"
+    ))
+    .await
+    .expect("press Test run");
+
+    let busy = wait_until(
+        &b,
+        "(() => { const t = [...document.querySelectorAll('#routines-list button')]
+                    .find((x) => x.textContent === 'Running…');
+                  return String(!!t && t.disabled); })()",
+        Duration::from_secs(5),
+    )
+    .await;
+    assert!(
+        busy,
+        "the button went quiet during a run that takes as long as the routine does"
+    );
+
+    let back = wait_until(
+        &b,
+        "String(!![...document.querySelectorAll('#routines-list button')]
+                 .find((x) => x.textContent === 'Test run' && !x.disabled))",
+        Duration::from_secs(15),
+    )
+    .await;
+    assert!(
+        back,
+        "the button never came back, so the routine can be tested once"
+    );
+
+    // One run, not two: the second press during the first must not have
+    // started another.
+    let runs = b
+        .text_of("String(window.__sent('routine_run').length)")
+        .await
+        .unwrap_or_default();
+    assert_eq!(runs, "1", "more than one rehearsal was started");
 }

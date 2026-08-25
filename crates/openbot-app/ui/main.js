@@ -2353,6 +2353,49 @@ async function refreshRules() {
   });
 }
 
+/// Rehearse a routine, and say what happened where it was asked for.
+///
+/// A real run against the real computer, which is the point: a rehearsal that
+/// simulated the work would answer a different question from the one somebody
+/// pressing this is asking. It takes as long as the routine takes, so the
+/// button says so rather than going quiet.
+///
+/// **The schedule does not move.** That is the promise `routine run` makes and
+/// the reason it exists, so it is repeated here where somebody can read it,
+/// rather than left to be inferred from nothing having visibly changed.
+///
+/// Anything the routine does that needs approval is refused, and the result
+/// says so. The hub asks whichever harness owns a session, and a rehearsal is
+/// a separate `openbot` process owning its own — so it cannot ask this window,
+/// and this window must not answer on a person's behalf.
+async function testRoutine(r, btn) {
+  const was = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Running…";
+  const say = (text, bad) => {
+    ruleError.textContent = text;
+    ruleError.classList.toggle("hint", !bad);
+  };
+  say(`running ${r.bot_name || r.bot} / ${r.id}…`, false);
+  try {
+    const out = await invoke("routine_run", { bot: r.bot, routine: r.id });
+    const when = out.next ? `; next ${out.next.replace("T", " ").slice(0, 16)}` : "";
+    say(
+      out.ok
+        ? `test run finished: ${out.summary} — the schedule is unchanged${when}`
+        : `test run failed: ${out.summary} — the schedule is unchanged${when}`,
+      !out.ok,
+    );
+  } catch (err) {
+    say(`could not test that routine — ${err}`, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = was;
+    // The history gained a row, and a paused routine is still paused.
+    refreshWiring();
+  }
+}
+
 /// The two lists in Settings that are read from the runtime, each on its own.
 ///
 /// Independently, and that is the whole change. These two awaits used to sit
@@ -2426,6 +2469,24 @@ async function refreshWiring() {
           // the history, so it needs no confirmation: the same button undoes it,
           // which is exactly what deleting a Bot cannot offer.
           (r) => {
+            const controls = document.createElement("span");
+            controls.className = "row-actions";
+
+            // Rehearsal first, because it is what somebody does *before*
+            // deciding whether to arm a routine, and because it is the only
+            // control here that answers "does this actually work".
+            const test = document.createElement("button");
+            test.className = "forget";
+            test.textContent = "Test run";
+            test.addEventListener("click", () => testRoutine(r, test));
+            controls.appendChild(test);
+
+            // The docs' "pausable". A routine is the run nobody is watching, so
+            // this is the control that matters when one starts failing every
+            // night or costing more than it is worth. Pausing keeps the
+            // definition and the history, so it needs no confirmation: the same
+            // button undoes it, which is exactly what deleting a Bot cannot
+            // offer.
             const btn = document.createElement("button");
             btn.className = "forget" + (r.enabled ? "" : " primary");
             btn.textContent = r.enabled ? "Pause" : "Resume";
@@ -2439,7 +2500,8 @@ async function refreshWiring() {
               );
               refreshWiring();
             });
-            return btn;
+            controls.appendChild(btn);
+            return controls;
           },
         ),
     }),

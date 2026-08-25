@@ -97,6 +97,95 @@ pub async fn set_paused(
     Ok(())
 }
 
+/// What a rehearsal did, as the window has to show it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestRun {
+    pub ok: bool,
+    pub summary: String,
+    #[serde(default)]
+    pub steps: u32,
+    /// When it will next fire on its own — unchanged by the rehearsal, which
+    /// is the promise being made and therefore worth showing.
+    #[serde(default)]
+    pub next: Option<String>,
+    #[serde(default)]
+    pub paused: bool,
+}
+
+/// Run one routine now, without moving its schedule.
+///
+/// The window's `Test run`. Reads `--json` rather than the prose, so the
+/// wording a person sees can change without breaking the client.
+///
+/// **Approvals cannot reach the window on this path, and that is not an
+/// oversight to route around.** The hub asks *"the harness that owns a
+/// session"* to approve a call, and this is a separate `openbot` process
+/// owning its own session — so it is the one asked. `--approve ask` becomes
+/// `deny` with no terminal attached, which means a rehearsal of a routine that
+/// writes anything is refused and says so. That is the honest behaviour: the
+/// alternative is `--approve auto`, which would have a button in this window
+/// silently approve every call a routine makes, and the gate exists precisely
+/// to stop that.
+///
+/// The durable fix is for the window to run the rehearsal through its own
+/// engine, where it owns the session and approvals appear inline exactly as
+/// they do for a typed message. That is a larger change than a button.
+///
+/// # Errors
+/// If the binary cannot be run, fails, or answers something other than the
+/// one JSON object it promises.
+pub async fn test_run(
+    openbot: &Path,
+    home: &Path,
+    hub: &str,
+    bot: &str,
+    routine: &str,
+) -> anyhow::Result<TestRun> {
+    let mut cmd = tokio::process::Command::new(openbot);
+    cmd.arg("routine")
+        .arg("run")
+        .arg(bot)
+        .arg(routine)
+        .arg("--json")
+        .arg("--home")
+        .arg(home)
+        .env("NO_COLOR", "1")
+        .env_remove("OPENBOT_HOME")
+        // The hub this window is already connected to, so the rehearsal runs
+        // on the computer the Bots use rather than starting a second stack
+        // beside it.
+        .env("OPENBOT_HUB_URL", hub);
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = cmd
+        .output()
+        .await
+        .map_err(|e| anyhow::anyhow!("could not run {}: {e}", openbot.display()))?;
+    if !out.status.success() {
+        return Err(anyhow::anyhow!(
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+                .trim()
+                .trim_start_matches("Error:")
+                .trim()
+        ));
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    // The last JSON object on stdout. `hub_or_start` can print before it, and
+    // taking the first line that parses would read a progress note as a
+    // result.
+    let line = text
+        .lines()
+        .rev()
+        .find(|l| l.trim_start().starts_with('{'))
+        .ok_or_else(|| anyhow::anyhow!("the runtime did not report what the test run did"))?;
+    serde_json::from_str(line)
+        .map_err(|e| anyhow::anyhow!("could not read what the test run did: {e}"))
+}
+
 /// Every connected app.
 ///
 /// # Errors
