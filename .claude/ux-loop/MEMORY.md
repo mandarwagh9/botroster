@@ -417,3 +417,36 @@ The fix is the filename: `.baseline-gzip-bytes`. The old file is then simply not
 **Generalisable: when the unit of a stored number changes, change its name. A stale value in the
 old unit does not announce itself, and a gate that stops gating looks exactly like a gate that
 keeps passing.**
+
+### A full disk presents itself as a flaky page suite, for the second time
+
+The suite failed 88 of 94, three runs running. I had just made the loopback server a shared
+singleton to relieve what I had diagnosed as descriptor pressure, so I read the failures as my
+change and began reverting — and the revert failed with **out of diskspace**, which is when the real
+cause appeared: `tempfile::tempdir()` deletes on drop, that delete is best-effort on Windows, and
+`Browser`'s `kill_on_drop` ends Chrome's *root* process while its renderers keep the profile open.
+Every page test leaked a profile. **Twenty thousand directories, a 952GB disk at zero bytes.**
+
+`MEMORY.md` already recorded a full disk masquerading as `FAIL page suite` once. Two occurrences is
+not a coincidence — the diagnosis now lives in a doc comment beside the code that caused it, not
+only here.
+
+**Generalisable: when a suite fails en masse right after a change, check the machine before
+believing the change. Disk, descriptors, held binaries — an environment failure is indistinguishable
+from a regression in the test output, and it is the reading that costs a good change.**
+
+The corollary bit twice in one hour: `git checkout` truncated `page.rs` to **zero bytes** when it
+ran out of space mid-write. Committed work came back; uncommitted work would not have.
+
+**Generalisable: on a machine that may be near full, commit before reverting. A failed write is not
+a no-op.**
+
+### The measurement that measured the wrong thing
+
+The shared-server change was never evaluated — its three "failing" runs were the disk. It is not in
+the tree, and not because it was judged bad. Shipping it on that evidence, or discarding it as bad
+on that evidence, would both have been the same error: treating a measurement of the environment as
+a measurement of the change.
+
+**Generalisable: when the ground moves under an experiment, the experiment has no result. Say so,
+rather than keeping whichever conclusion is convenient.**
