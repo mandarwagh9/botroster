@@ -1145,6 +1145,22 @@ textarea {
   color: var(--faint);
 }
 
+/* How long the step took, held at the right edge of the row.
+ *
+ * A column, not another middle-dot clause: durations are the one value on this
+ * row a person scans down rather than reads across, and a ragged one cannot be
+ * scanned. Tabular figures so 8ms and 88ms occupy the same width and the column
+ * does not shimmer as a run proceeds. Mono, because it is a measurement. */
+.step-dur {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .step-detail::before {
   content: "·";
   margin-right: 6px;

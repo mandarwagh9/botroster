@@ -4903,3 +4903,122 @@ async fn turning_bypass_off_is_remembered_as_well() {
         "switching it off must be what is remembered"
     );
 }
+
+/// A finished step says how long it took.
+///
+/// The first thing anyone watching a Bot work wants to know, and the window had
+/// no answer anywhere. A slow step and a stuck one looked identical, which is
+/// the worst possible ambiguity on the one surface where a person is deciding
+/// whether to intervene.
+///
+/// The runtime does measure this and puts it on `ToolCallFinished`; the window
+/// drives the CLI over ACP, whose tool-call update carries no such field, so
+/// the number dies at that boundary. What is asserted here is the window's own
+/// observation, which on a local transport differs by well under a millisecond.
+#[tokio::test]
+async fn a_finished_step_says_how_long_it_took() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    b.text_of(
+        r#"window.__fire('chunk', {session:"s1", kind:"tool", text:"fs.read {}", args:{path:"notes.md"}}); 'ok'"#,
+    )
+    .await
+    .expect("the call opens a step");
+
+    // A gap the assertion can see. Without it a sub-millisecond step would
+    // round to "0ms" and pass while proving nothing about the measurement.
+    tokio::time::sleep(Duration::from_millis(120)).await;
+
+    b.text_of(
+        r#"window.__fire('chunk', {session:"s1", kind:"result", text:"✓ {\"contents\":\"hi\"}"}); 'ok'"#,
+    )
+    .await
+    .expect("the result completes it");
+
+    let shown = b
+        .text_of("document.querySelector('.msg.tool .step-dur').textContent")
+        .await
+        .expect("the step carries a duration");
+    assert!(
+        shown.ends_with("ms") || shown.ends_with('s'),
+        "a duration has to read as a duration, got {shown:?}"
+    );
+    let ms: f64 = shown
+        .trim_end_matches("ms")
+        .parse()
+        .unwrap_or_else(|_| panic!("expected milliseconds for a step this short, got {shown:?}"));
+    assert!(
+        (100.0..2000.0).contains(&ms),
+        "the window measured {ms}ms for a step it held open for ~120ms, so it is not timing the \
+         step at all"
+    );
+}
+
+/// The log follows new lines only when the reader is already at the bottom.
+///
+/// It used to jump to the bottom on every arriving line, which is exactly wrong
+/// while a Bot is working: the moment somebody scrolls up to read what a step
+/// did, the next step yanks them back down. The log became unreadable precisely
+/// when it had something worth reading.
+#[tokio::test]
+async fn the_log_does_not_yank_you_back_down_while_you_are_reading() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    // Enough to overflow, so there is somewhere to scroll away to.
+    for i in 0..40 {
+        b.text_of(&format!(
+            r#"window.__fire('chunk', {{session:"s1", kind:"agent", text:"line {i}"}}); 'ok'"#
+        ))
+        .await
+        .expect("fill the log");
+    }
+    let overflows = b
+        .text_of("String(document.getElementById('log').scrollHeight > document.getElementById('log').clientHeight + 100)")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        overflows, "true",
+        "the log does not overflow, so scrolling away from the bottom proves nothing"
+    );
+
+    // Deliberately away from the bottom, the way a person reading back is.
+    b.text_of("document.getElementById('log').scrollTop = 0; 'ok'")
+        .await
+        .expect("scroll up");
+    b.text_of(r#"window.__fire('chunk', {session:"s1", kind:"agent", text:"new line"}); 'ok'"#)
+        .await
+        .expect("a line arrives");
+
+    let top = b
+        .text_of("String(Math.round(document.getElementById('log').scrollTop))")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        top, "0",
+        "a new line dragged the reader back to the bottom; they were at the top reading"
+    );
+
+    // And the anti-vacuity half: a reader who IS at the bottom must still be
+    // carried along, or this "fix" is just a broken log.
+    b.text_of("document.getElementById('log').scrollTop = document.getElementById('log').scrollHeight; 'ok'")
+        .await
+        .expect("back to the bottom");
+    let before = b
+        .text_of("String(Math.round(document.getElementById('log').scrollTop))")
+        .await
+        .unwrap_or_default();
+    b.text_of(r#"window.__fire('chunk', {session:"s1", kind:"agent", text:"another line"}); 'ok'"#)
+        .await
+        .expect("another line arrives");
+    let after = b
+        .text_of("String(Math.round(document.getElementById('log').scrollTop))")
+        .await
+        .unwrap_or_default();
+    assert_ne!(
+        before, after,
+        "a reader already at the bottom stopped being followed, which is not a fix, it is a \
+         different bug"
+    );
+}

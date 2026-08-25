@@ -335,7 +335,7 @@ function appendChunk(chunk) {
   if (chunk.kind === "result" && openStep) {
     completeStep(openStep, chunk);
     openStep = null;
-    log.scrollTop = log.scrollHeight;
+    followLog();
     return;
   }
   // Progress belongs to the open step and is shown as its state, not as rows.
@@ -395,7 +395,21 @@ function appendChunk(chunk) {
     const state = document.createElement("span");
     state.className = "step-state";
     el.appendChild(state);
+    const dur = document.createElement("span");
+    dur.className = "step-dur";
+    el.appendChild(dur);
     el.title = chunk.text;
+    // Stamped here because nothing upstream carries it. The runtime measures a
+    // tool call's real duration and puts it on `ToolCallFinished`, but the
+    // window drives the CLI over ACP, and ACP's tool-call update has no field
+    // for it - so the number dies at that boundary rather than in this file.
+    //
+    // What is recorded instead is what the window observed: the wall time
+    // between the call appearing and its result arriving. On a local transport
+    // those differ by well under a millisecond, and this is the honest thing to
+    // measure from here. If the duration ever needs to be the runtime's own,
+    // that is a protocol extension, not a change to this line.
+    el.dataset.startedAt = String(performance.now());
     openStep = el;
   } else {
     const body = document.createElement("span");
@@ -404,7 +418,23 @@ function appendChunk(chunk) {
     if (chunk.kind === "result") el.title = chunk.text;
   }
   log.appendChild(el);
-  log.scrollTop = log.scrollHeight;
+  followLog();
+}
+
+/// Follow the log only when the reader is already at the bottom.
+///
+/// It used to jump to the bottom on every arriving line, which is exactly wrong
+/// while a Bot is working: the moment somebody scrolls up to read what a step
+/// did, the next step yanks them back down. The result is that the log is
+/// unreadable precisely when there is something worth reading in it.
+///
+/// The threshold is generous. Landing within a couple of lines of the bottom
+/// counts as being at the bottom, because a person who has not deliberately
+/// scrolled away expects to keep following, and sub-pixel scroll positions
+/// should not decide it.
+function followLog() {
+  const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+  if (nearBottom) log.scrollTop = log.scrollHeight;
 }
 
 /// The tick or cross at the head of a step row.
@@ -448,10 +478,30 @@ function abandonOpenStep() {
   openStep = null;
 }
 
+/// A duration a person reads at a glance, not a number they parse.
+///
+/// Sub-second work is the common case and `0.004s` tells nobody anything, so
+/// milliseconds stay milliseconds until a second is genuinely the better unit.
+/// Above a minute the seconds stop mattering and the shape of the wait is what
+/// is being read.
+function humanMs(ms) {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60000);
+  return `${m}m ${Math.round((ms - m * 60000) / 1000)}s`;
+}
+
 function completeStep(step, chunk) {
   const ok = chunk.text.startsWith("✓");
   const mark = step.querySelector(".step-mark");
   if (mark) mark.dataset.state = ok ? "ok" : "failed";
+  // How long it took. Every other column on this row says what happened; none
+  // said how long it took, which is the first thing anyone watching a Bot work
+  // wants to know and the reason a slow step was indistinguishable from a stuck
+  // one.
+  const started = Number(step.dataset.startedAt);
+  const dur = step.querySelector(".step-dur");
+  if (dur && Number.isFinite(started)) dur.textContent = humanMs(performance.now() - started);
   step.classList.toggle("failed", !ok);
   const st = step.querySelector(".step-state");
   if (st) st.textContent = "";
@@ -957,7 +1007,7 @@ function noteAutoApproval(ask, grant) {
   how.textContent = grant.name;
   el.appendChild(how);
   log.appendChild(el);
-  log.scrollTop = log.scrollHeight;
+  followLog();
 }
 
 function enqueueAsk(ask) {
