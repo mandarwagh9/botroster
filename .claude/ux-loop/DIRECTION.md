@@ -100,9 +100,21 @@ Status *text* uses the pair above.
 ## DERIVED — remaining text tiers
 
 ```
-  --faint    light-dark(#6C7887, #6E7C8C)   timestamps, durations, row metadata
+  --faint    light-dark(#5F6B7C, #8794A4)   timestamps, durations, row metadata
   --ghost    light-dark(#98A3B1, #5A6675)   placeholders and disabled text ONLY
 ```
+
+**REVISED 2026-08-25, implementing this file.** `--faint` was `light-dark(#6C7887, #6E7C8C)`
+and cleared AA on nothing. Measured against the three surfaces it actually lands on, the dark
+value gave 4.43 / 4.06 / 3.75 and the light value 4.37 / 4.11 / 3.85 — so a token this
+document declares must clear AA did not, on either theme, on any surface. The paragraph below
+exempts `--ghost` and nothing else, which makes the old value an internal contradiction rather
+than a judgement call.
+
+The new pair is derived from the requirement instead of chosen by eye: each clears 4.5 against
+the *worst* surface it can sit on (`--raise`, the lightest dark step and the darkest light
+step), giving 5.18 and 4.64 there and more elsewhere. Same cool-grey family, so the intent —
+metadata recedes — survives; it now recedes without becoming unreadable.
 
 `--ghost` does not clear AA and must never carry a label or a value somebody reads. This is
 inherited verbatim from the shipped system, and the contrast gate exempts `::placeholder`

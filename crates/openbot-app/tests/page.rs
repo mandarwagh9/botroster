@@ -3165,21 +3165,34 @@ async fn every_coat_a_bot_can_wear_is_legible() {
         "expected 8 coats × 2 themes = 16 measurements, got {}: {out}",
         rows.len()
     );
-    // Both themes really rendered: a page that ignored `color-scheme` would
-    // measure the same sixteen numbers twice and prove one theme.
-    let dark_bg = rows[0]
-        .split("\"bg\":\"")
-        .nth(1)
-        .and_then(|t| t.split('"').next())
-        .unwrap_or("");
-    let light_bg = rows[8]
-        .split("\"bg\":\"")
-        .nth(1)
-        .and_then(|t| t.split('"').next())
-        .unwrap_or("");
-    assert_ne!(
-        dark_bg, light_bg,
-        "coat 0 painted the same in both themes, so the theme switch did nothing: {out}"
+    // The coats are eight *distinguishable* identities, and that is the property
+    // worth pinning. This used to assert that coat 0 painted differently in dark
+    // than in light, on the reasoning that a page ignoring `color-scheme` would
+    // measure the same numbers twice. That reasoning was sound against the old
+    // token layer, where every coat was a `light-dark()` pair.
+    //
+    // DIRECTION.md deliberately removed the second set: the coats now sit
+    // between 35 and 55 lightness precisely so one value reads on both themes.
+    // Identical-across-themes is the design, so the old assertion would now fail
+    // on correct output. What still has to hold - and what a broken sweep would
+    // break - is that the eight differ from *each other*.
+    let bg_of = |row: &str| {
+        row.split("\"bg\":\"")
+            .nth(1)
+            .and_then(|t| t.split('"').next())
+            .unwrap_or("")
+            .to_owned()
+    };
+    let dark: std::collections::BTreeSet<String> = rows[..8].iter().map(|r| bg_of(r)).collect();
+    assert_eq!(
+        dark.len(),
+        8,
+        "two Bots wear the same coat, so the roster cannot tell them apart: {out}"
+    );
+    // And the sweep measured real paint rather than an empty string eight times.
+    assert!(
+        dark.iter().all(|b| b.matches(',').count() == 2),
+        "the coat sweep did not read colours: {out}"
     );
     let failing: Vec<&str> = rows
         .iter()

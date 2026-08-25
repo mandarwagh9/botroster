@@ -29,51 +29,100 @@
 :root {
   color-scheme: light dark;
 
-  /* surfaces */
-  --bg: light-dark(#ffffff, #101014);
-  --panel: light-dark(#f7f7f8, #16161a);
-  --raise: light-dark(#efeff1, #1e1e23);
-  --line: light-dark(#e2e2e6, #2a2a31);
-  --line-soft: light-dark(#ededf0, #1c1c21);
-  --sidebar: light-dark(#f7f7f8, #0c0c0f);
+  /* ── DIRECTION.md is the authority for everything in this block. ──────────
+   *
+   * The names below are DIRECTION's. The shipped stylesheet grew its own
+   * vocabulary (--bg, --ink, --raise) before that document existed, so each of
+   * those is aliased onto the pinned token rather than renamed across two and a
+   * half thousand lines in one commit. The alias is not permanent: a rule gets
+   * the DIRECTION name when a later phase touches it, and this block shrinks.
+   * Renaming everything at once would have made a diff nobody could review and
+   * a bisect nobody could use.
+   */
 
-  /* text tiers, measured on --raise: dark 14.8 / 9.9 / 5.1, light 16.0 / 9.4 / 4.7 */
-  --ink: light-dark(#141417, #f2f2f2);
-  --muted: light-dark(#3d3d44, #c8c8cc);
-  --faint: light-dark(#6a6a72, #8e8e95);
-  /* ghost is for placeholders and disabled text only; it does not clear AA
-     and must never carry a label or a value somebody reads. */
-  --ghost: light-dark(#9a9aa3, #5e5e66);
+  /* Pinned. Not to be changed without editing DIRECTION.md in the same commit. */
+  --base: light-dark(#fbfcfd, #0e1116);
+  --raised: light-dark(#f2f5f8, #161b22);
+  --line: light-dark(#dfe5ec, #232b36);
+  --text: light-dark(#10151b, #d6dee8);
+  --muted: light-dark(#55616f, #8593a3);
 
-  /* the one accent; a fill, never a text colour */
-  --accent: light-dark(#6f45e0, #7c4ff0);
-  --accent-ink: #ffffff;
-  --accent-wash: light-dark(rgba(111, 69, 224, 0.1), rgba(124, 79, 240, 0.16));
+  /* Status. Three hues, and every one of them means exactly one thing.
+     Amber appears only where a person is blocking progress: if amber is on
+     screen and nothing needs you, that is a bug, not a decoration. */
+  --waiting: light-dark(#8a5100, #f2a649);
+  --live: light-dark(#0e6e66, #4fd1c5);
+  --refused: light-dark(#b23a22, #e5674e);
 
-  /* semantic inks on a 12% wash; each clears 5.5 on every surface, both themes */
-  --danger: light-dark(#9e2128, #f67a7e);
-  --danger-line: light-dark(rgba(158, 33, 40, 0.45), rgba(246, 122, 126, 0.45));
-  --danger-wash: light-dark(rgba(158, 33, 40, 0.12), rgba(246, 122, 126, 0.12));
-  --ok: light-dark(#1a5f35, #7adc95);
-  --ok-wash: light-dark(rgba(26, 95, 53, 0.12), rgba(122, 220, 149, 0.12));
-  --warn: light-dark(#7f3a14, #f6b463);
-  --warn-wash: light-dark(rgba(127, 58, 20, 0.12), rgba(246, 180, 99, 0.12));
+  /* Status *fills* keep the bright dark-mode hue in both themes. A fill is not
+     read as text, and the amber dot has to stay recognisably amber on white. */
+  --waiting-fill: #f2a649;
+  --live-fill: #4fd1c5;
+  --refused-fill: #e5674e;
 
-  --scrim: light-dark(rgba(20, 20, 23, 0.4), rgba(0, 0, 0, 0.6));
-  --shadow: light-dark(0 20px 50px rgba(20, 20, 23, 0.14), 0 24px 60px rgba(0, 0, 0, 0.5));
-  --shadow-soft: light-dark(0 8px 30px rgba(20, 20, 23, 0.08), 0 12px 40px rgba(0, 0, 0, 0.35));
+  /* DERIVED — the accent is neutral, and this is the load-bearing decision.
+     Colour in this app means status. It never means emphasis. Every hue is
+     already spoken for, so a fourth one for "this is the primary button" would
+     put a colour on screen carrying no state. The accent is therefore the
+     highest-contrast neutral: a fill, never a text colour. */
+  --accent: light-dark(#10151b, #e8eef5);
+  --accent-ink: light-dark(#fbfcfd, #0e1116);
+  --accent-wash: light-dark(rgba(16, 21, 27, 0.08), rgba(232, 238, 245, 0.1));
 
-  /* shape */
-  --r-pill: 999px;
-  --r-card: 16px;
-  --r-row: 12px;
-  --r-field: 10px;
-  --r-chip: 8px;
-  --radius: var(--r-card);
+  /* DERIVED — remaining text tiers. --ghost does not clear AA and carries
+     placeholders and disabled text only; the contrast gate exempts exactly
+     those two cases. A gate failure pointing at --ghost anywhere else is fixed
+     by not using --ghost there, never by lightening the token. */
+  --faint: light-dark(#5f6b7c, #8794a4);
+  --ghost: light-dark(#98a3b1, #5a6675);
+
+  /* DERIVED — surface steps between the two pinned ones. The shipped layout
+     needs four surfaces and DIRECTION pins two, so these interpolate: each is
+     one perceptual step, same hue, no chroma introduced. */
+  --raise: light-dark(#e9eef3, #1c222b);
+  --sidebar: light-dark(#f2f5f8, #0b0e12);
+  --line-soft: light-dark(#e9eef0, #1a2028);
+
+  /* Aliases onto the pinned names. See the note at the top of this block. */
+  --bg: var(--base);
+  --panel: var(--raised);
+  --ink: var(--text);
+
+  /* The three status hues under the names the shipped rules already use. */
+  --danger: var(--refused);
+  --danger-line: light-dark(rgba(178, 58, 34, 0.45), rgba(229, 103, 78, 0.45));
+  --danger-wash: light-dark(rgba(178, 58, 34, 0.12), rgba(229, 103, 78, 0.12));
+  --ok: var(--live);
+  --ok-wash: light-dark(rgba(14, 110, 102, 0.12), rgba(79, 209, 197, 0.12));
+  --warn: var(--waiting);
+  --warn-wash: light-dark(rgba(138, 81, 0, 0.12), rgba(242, 166, 73, 0.12));
+
+  /* DERIVED — depth. No glassmorphism and no blur: depth is one hairline and
+     one shadow, because a console that fakes glass stops reading as an
+     instrument. */
+  --scrim: light-dark(rgba(16, 21, 27, 0.32), rgba(0, 0, 0, 0.6));
+  --shadow: light-dark(0 12px 32px rgba(16, 21, 27, 0.12), 0 16px 40px rgba(0, 0, 0, 0.55));
+  --shadow-soft: light-dark(0 6px 18px rgba(16, 21, 27, 0.08), 0 8px 24px rgba(0, 0, 0, 0.4));
+
+  /* DERIVED — shape. Rounded-everything is banned. A console reads as
+     instrumentation, so the scale is tight and there are no pills. --r-pill
+     keeps its name only because six rules still say it; it is 3px now, which
+     is the point. */
+  --r-0: 0;
+  --r-1: 3px;
+  --r-2: 6px;
+  --r-3: 10px;
+  --r-pill: var(--r-1);
+  --r-chip: var(--r-1);
+  --r-field: var(--r-1);
+  --r-row: var(--r-2);
+  --r-card: var(--r-3);
+  --radius: var(--r-3);
 
   /* type */
-  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: "Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "Commit Mono", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --micro: "Martian Mono", "Geist Sans", ui-sans-serif, system-ui, sans-serif;
   --fs-11: 11px;
   --fs-12: 12px;
   --fs-13: 13px;
@@ -86,25 +135,26 @@
   --t: 160ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
 
-  /* Eight coats. Two values per coat: the light value is tinted toward ink
-     until it clears 4.5 on the light raised surface. The initial on a coat is
-     --coat-ink, themed the opposite way to --ink. All sixteen pairs clear 4.5. */
-  --coat-0: light-dark(#744ed0, #946cf6);
-  --coat-1: light-dark(#326f64, #54b9a6);
-  --coat-2: light-dark(#c7363b, #ec5358);
-  --coat-3: light-dark(#a64f20, #ed712e);
-  /* Was #f19d38, an amber. Two things wrong with it. Amber is the one warm
-     colour this product reserves for "a person is blocking progress", so a Bot
-     idly wearing it put the waiting-on-you signal on screen when nothing was
-     waiting. And it sat beside --coat-3 at roughly the same hue, so the two
-     Bots wearing them were the same orange in the roster — which defeats the
-     only per-Bot identity the sidebar has. Olive is unoccupied: no other coat
-     is near it, and it is nobody's status colour. */
-  --coat-4: light-dark(#5c6b34, #a8bd66);
-  --coat-5: light-dark(#bc387a, #eb4699);
-  --coat-6: light-dark(#377749, #5bc67a);
-  --coat-7: light-dark(#3068c5, #3c82f6);
-  --coat-ink: light-dark(#ffffff, #101014);
+  /* DERIVED — the eight Bot coats. A coat is identity, not status, so it is
+     low-chroma and must never compete with amber, teal or vermilion. All eight
+     sit between 35 and 55 lightness, which is why one value serves both themes
+     where the old coats needed a pair, and none is within 20 degrees of hue of
+     a status colour.
+
+     A coat appears in exactly three places: the Bot's mark, its open roster
+     row, and a hairline on its turns. It is never a page or panel fill and
+     never a text colour. */
+  --coat-0: #6e8fa8;
+  --coat-1: #7c8b6b;
+  --coat-2: #9a7f8e;
+  --coat-3: #55897f;
+  --coat-4: #a08668;
+  --coat-5: #7a82a6;
+  --coat-6: #8e7a6e;
+  --coat-7: #6f947c;
+  /* Dark, not white. The coats are light enough that near-black on them clears
+     AA on all eight; near-white does not, on any of them. */
+  --coat-ink: #10151b;
 }
 
 * {

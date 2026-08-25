@@ -129,3 +129,24 @@ baselines and disagree about whether the same change passes.
 Tracking the file instead would fix both — re-cuts would show up in a diff, and every clone
 would measure against the same number. That changes the harness contract, so it is left as a
 recommendation rather than done here.
+
+
+---
+
+## Baseline re-cut, 2026-08-25 — implementing DIRECTION.md
+
+`154,229` became `179,475`. The ceiling was 15% over the old number and this work went through
+it, which is what the ceiling is for: it caught the growth and made it a decision instead of a
+drift.
+
+**Why it was allowed to grow.** The old baseline was measured against a token layer DIRECTION.md
+had already replaced on paper and never in the file. Implementing it is not the loop bloating the
+client with new features; it is the client finally carrying the system it was specified to have.
+The growth is one `:root` block: pinned tokens, the derived surface steps, the status fills, the
+radius scale and the coats, each with the reason next to it. `REDESIGN.md` §3 planned this and
+said it should happen once, deliberately, in its own commit.
+
+**What did not change.** The rule that the number is a ceiling, not a target. Re-cutting is a
+thing that happens when a phase is specified to add weight, and not a thing that happens because
+a phase overran. Phases 1 through 6 in `REDESIGN.md` are expected to fit under the new 15%;
+if one of them does not, that is a finding about the phase, not a reason to move the line again.
