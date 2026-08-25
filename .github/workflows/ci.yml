@@ -241,7 +241,12 @@ jobs:
       # yields `None` and the ordinary "configure a model" path applies.
       - name: stage the runtime as a sidecar
         env:
-          BOTROSTER_BUILTIN_KEY: ${{ secrets.BOTROSTER_BUILTIN_KEY }}
+          # Either name. The product was renamed after this secret was set, and
+          # a repository secret cannot be renamed in place — only deleted and
+          # recreated, which needs the value, which nobody can read back. Taking
+          # both means the rename does not quietly take the shipped model down
+          # with it, and the day the new name is set it wins.
+          BOTROSTER_BUILTIN_KEY: ${{ secrets.BOTROSTER_BUILTIN_KEY || secrets.OPENBOT_BUILTIN_KEY }}
         run: sh scripts/sidecar.sh
 
       # The failure this exists to prevent is silent. A secret that is unset,
@@ -257,7 +262,7 @@ jobs:
       - name: the shipped credential is present
         shell: bash
         env:
-          BOTROSTER_BUILTIN_KEY: ${{ secrets.BOTROSTER_BUILTIN_KEY }}
+          BOTROSTER_BUILTIN_KEY: ${{ secrets.BOTROSTER_BUILTIN_KEY || secrets.OPENBOT_BUILTIN_KEY }}
         run: |
           set -eu
           if [ -z "${BOTROSTER_BUILTIN_KEY:-}" ]; then
@@ -276,7 +281,7 @@ jobs:
       - name: bundle
         working-directory: crates/botroster-app
         env:
-          BOTROSTER_BUILTIN_KEY: ${{ secrets.BOTROSTER_BUILTIN_KEY }}
+          BOTROSTER_BUILTIN_KEY: ${{ secrets.BOTROSTER_BUILTIN_KEY || secrets.OPENBOT_BUILTIN_KEY }}
         run: cargo tauri build
 
       # And it actually reached the binary. The step above proves the secret
@@ -289,7 +294,7 @@ jobs:
       - name: the credential reached the shipped runtime
         shell: bash
         env:
-          BOTROSTER_BUILTIN_KEY: ${{ secrets.BOTROSTER_BUILTIN_KEY }}
+          BOTROSTER_BUILTIN_KEY: ${{ secrets.BOTROSTER_BUILTIN_KEY || secrets.OPENBOT_BUILTIN_KEY }}
         run: |
           set -eu
           # This runner's own binary, by name, not "whichever file is first".
