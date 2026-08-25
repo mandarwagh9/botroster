@@ -1550,6 +1550,14 @@ fn a_routine_can_be_rehearsed_without_swallowing_a_firing_it_was_owed() {
         said.contains("the schedule is unchanged"),
         "the rehearsal did not say the thing a person needs to know before pressing it:\n{said}"
     );
+    // It actually ran. Without this the test passes over a rehearsal that
+    // never reached a hub: every assertion above holds just as well for a run
+    // that failed to connect, which is how this test passed before
+    // `routine run` learned to start a stack of its own.
+    assert!(
+        said.contains("  ok "),
+        "the rehearsal did not succeed, so nothing here is about a run that happened:\n{said}"
+    );
 
     // The claim, checked against the scheduler rather than against its own
     // sentence. A command that says the schedule is unchanged and moves it is
@@ -1575,6 +1583,74 @@ fn a_routine_can_be_rehearsed_without_swallowing_a_firing_it_was_owed() {
     assert!(
         shown.contains("(test run)"),
         "the history shows the rehearsal as an ordinary firing, which is the evidence          somebody would use to conclude the schedule is working:\n{shown}"
+    );
+}
+
+/// `--json` says the same thing in a form a client can act on.
+///
+/// The window's `Test run` needs to know whether it worked and what it said.
+/// Parsing the prose would tie it to wording written for a person to read, and
+/// that wording is going to change — this commit already changed it once.
+///
+/// `next` is in the object for the same reason the prose says "the schedule is
+/// unchanged": it is the promise a rehearsal makes, and a client that shows a
+/// person the outcome should be able to show them that too.
+#[test]
+fn a_rehearsal_can_report_itself_as_json() {
+    let d = home();
+    let h = d.path();
+    ok(h, &["bot", "new", "Account Health"]);
+    ok(
+        h,
+        &[
+            "routine",
+            "new",
+            "Account Health",
+            "Morning watch list",
+            "--cron",
+            "* * * * *",
+            "--instructions",
+            "Rank the portfolio by churn risk.",
+        ],
+    );
+
+    let out = ok(
+        h,
+        &[
+            "routine",
+            "run",
+            "Account Health",
+            "morning-watch-list",
+            "--demo",
+            "--approve",
+            "auto",
+            "--json",
+        ],
+    );
+    let line = out
+        .lines()
+        .find(|l| l.trim_start().starts_with('{'))
+        .unwrap_or_else(|| panic!("no JSON object in the output:\n{out}"));
+    let v: serde_json::Value =
+        serde_json::from_str(line).unwrap_or_else(|e| panic!("not JSON: {e}\n{line}"));
+
+    assert_eq!(v["bot"], "account-health", "{line}");
+    assert_eq!(v["routine"], "morning-watch-list", "{line}");
+    assert_eq!(v["ok"], true, "the scripted demo did not succeed: {line}");
+    assert_eq!(v["paused"], false, "{line}");
+    assert!(
+        v["next"].is_string(),
+        "a client cannot tell a person the schedule is unchanged without being told what it          is: {line}"
+    );
+    assert!(
+        !v["summary"].as_str().unwrap_or_default().is_empty(),
+        "nothing to show a person: {line}"
+    );
+
+    // And the prose is gone, or a client parsing this gets both.
+    assert!(
+        !out.contains("the schedule is unchanged"),
+        "--json printed the prose as well:\n{out}"
     );
 }
 
@@ -1622,6 +1698,10 @@ fn a_paused_routine_can_still_be_rehearsed() {
         said.contains("paused"),
         "it ran a paused routine without saying so, which is the one thing a person would want \
          to be told here:\n{said}"
+    );
+    assert!(
+        said.contains("  ok "),
+        "the rehearsal did not succeed, so this proves nothing about paused routines:\n{said}"
     );
 
     // Still paused afterwards. Rehearsing is not arming.

@@ -851,6 +851,13 @@ enum RoutineCmd {
         /// Use the scripted demo instead of a model.
         #[arg(long)]
         demo: bool,
+        /// Emit the outcome as one JSON object instead of prose.
+        ///
+        /// For the window's `Test run`, which needs to know whether it worked
+        /// and what it said. Parsing the prose would tie a client to wording
+        /// written for a person to read.
+        #[arg(long)]
+        json: bool,
     },
     /// Run everything that is due, once, and record the outcome.
     ///
@@ -1732,11 +1739,36 @@ async fn run() -> anyhow::Result<()> {
                     id,
                     approve,
                     demo,
+                    json,
                 } => {
                     let b = bots.resolve(&bot)?;
                     let mut r = bots.get_routine(&b.id, &id)?;
-                    render::outln!("running {}/{} now", b.id, r.id);
-                    if !r.enabled {
+                    // A computer, whether or not the person started one — the
+                    // same courtesy `openbot run` does, and for the same
+                    // reason: pressing a button that needs a stack should not
+                    // require having read about stacks. `tick` deliberately
+                    // does not, because cron is pointed at a machine that
+                    // already has one.
+                    let (hub_url, own_stack) = up::hub_or_start(
+                        &hub_url,
+                        up::Paths {
+                            home: home.clone(),
+                            workspace: None,
+                        },
+                        &server,
+                        // The progress line goes to stderr, but a client
+                        // reading JSON did not ask for a narrative.
+                        if json {
+                            render::Style::plain()
+                        } else {
+                            render::Style::detect()
+                        },
+                    )
+                    .await?;
+                    if !json {
+                        render::outln!("running {}/{} now", b.id, r.id);
+                    }
+                    if !r.enabled && !json {
                         // Said, not refused. A routine you are still getting
                         // right is one you have not armed yet, and rehearsing
                         // it is most of what this command is for.
@@ -1796,21 +1828,50 @@ async fn run() -> anyhow::Result<()> {
                             manual: true,
                         },
                     };
-                    render::outln!("  {} {}", if run.ok { "ok" } else { "failed" }, run.summary);
+                    if !json {
+                        render::outln!(
+                            "  {} {}",
+                            if run.ok { "ok" } else { "failed" },
+                            run.summary
+                        );
+                    }
+                    let ok = run.ok;
+                    let summary = run.summary.clone();
+                    let steps = run.steps;
                     // The recorder that leaves the schedule alone. Using the
                     // ordinary one here would set `last_run`, and the firing
                     // this was rehearsing would silently never happen.
                     bots.record_manual_run(&mut r, run)?;
-                    match r.next_after(now)? {
-                        Some(t) => println!(
-                            "
-  the schedule is unchanged; next {}",
-                            t.to_rfc3339()
-                        ),
-                        None => println!(
-                            "
-  the schedule is unchanged"
-                        ),
+                    let next = r.next_after(now)?.map(|t| t.to_rfc3339());
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "bot": b.id.as_str(),
+                                "routine": r.id,
+                                "ok": ok,
+                                "summary": summary,
+                                "steps": steps,
+                                // Named for what a client has to be able to
+                                // say rather than for what happened inside:
+                                // the whole promise of a rehearsal is that
+                                // this is the same time it was before.
+                                "next": next,
+                                "paused": !r.enabled,
+                            })
+                        );
+                    } else {
+                        match next {
+                            Some(t) => println!("\n  the schedule is unchanged; next {t}"),
+                            None => println!("\n  the schedule is unchanged"),
+                        }
+                    }
+                    // Before returning, because `kill_on_drop` reaps the child
+                    // but the browser teardown has to be explicit. Nothing to
+                    // do when the person started their own hub — it is not
+                    // ours to stop.
+                    if let Some(stack) = &own_stack {
+                        stack.stop().await;
                     }
                 }
                 RoutineCmd::Tick {
