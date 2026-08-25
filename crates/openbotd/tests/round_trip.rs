@@ -121,6 +121,7 @@ async fn boot() -> anyhow::Result<(String, tempfile::TempDir, Arc<Hub>)> {
         hub_url: url.clone(),
         server_id: "openbot-workspace".into(),
         description: "test guest".into(),
+        token: None,
     };
     tokio::spawn(async move {
         let _ = openbot_guest::run(cfg, ws).await;

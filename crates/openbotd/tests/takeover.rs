@@ -152,6 +152,7 @@ async fn boot(policy: Policy) -> anyhow::Result<(String, tempfile::TempDir)> {
         hub_url: url.clone(),
         server_id: "openbot-workspace".into(),
         description: "test guest".into(),
+        token: None,
     };
     tokio::spawn(async move {
         let _ = openbot_guest::run(cfg, ctx).await;
@@ -492,6 +493,7 @@ async fn a_hook_refuses_a_call_and_the_tool_never_runs() -> anyhow::Result<()> {
                 hub_url: url.clone(),
                 server_id: "openbot-workspace".into(),
                 description: "hook test guest".into(),
+                token: None,
             },
             ctx,
         )

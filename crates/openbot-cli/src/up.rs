@@ -296,6 +296,7 @@ fn routines_on_a_timer(
     home: std::path::PathBuf,
     hub_url: String,
     every: std::time::Duration,
+    token: String,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(every);
@@ -307,6 +308,10 @@ fn routines_on_a_timer(
             tick.tick().await;
             let mut cmd = tokio::process::Command::new(&exe);
             cmd.args(tick_args(&home, &hub_url));
+            // Told, not left to find it. This child would otherwise look in
+            // the default home, which is the right place only when `--home`
+            // did not name another one.
+            cmd.env(openbot_proto::HUB_TOKEN_ENV, &token);
             cmd.kill_on_drop(true);
             match cmd.output().await {
                 Ok(out) if out.status.success() => {
@@ -473,6 +478,19 @@ impl Up {
             crate::config::policy(&self.paths.home)?,
         )
         .await?;
+        // A secret for this home, written before anything can connect.
+        //
+        // Generated fresh on every start rather than kept: a token that
+        // outlives the hub that issued it is a credential lying on disk for
+        // whatever reads it next, and there is nothing to gain — every client
+        // reads the file, so rotating it costs them nothing.
+        //
+        // Written before `serve` is spawned, so there is no window in which
+        // the listener is up and the file a client would read is stale.
+        // See `Hello::token` for what this defends and what it does not.
+        let token = uuid::Uuid::new_v4().to_string();
+        openbot_proto::write_hub_token(&self.paths.home, &token)?;
+
         let (listener, addr) = Server::bind(&self.bind).await?;
         let server = Arc::new(Server::new(Arc::clone(&booted.hub)));
         tokio::spawn(Arc::clone(&server).serve(listener));
@@ -508,6 +526,7 @@ impl Up {
                 self.paths.home.clone(),
                 hub_url.clone(),
                 every,
+                token.clone(),
             )),
             (Some(_), Err(e)) => {
                 // Worth a warning rather than a failed boot: everything else
@@ -534,6 +553,11 @@ impl Up {
             hub_url: hub_url.clone(),
             server_id: self.server_id.clone(),
             description: "openbot workspace (local mode)".into(),
+            // Handed over rather than looked up. This guest runs in *this*
+            // process, against whatever home `--home` named, and the lookup
+            // inside `Hello` would read the default home — which is the right
+            // answer only when they happen to be the same.
+            token: Some(token.clone()),
         };
         tokio::spawn(async move {
             if let Err(e) = openbot_guest::run_supervised(cfg, ctx).await {

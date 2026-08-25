@@ -48,6 +48,7 @@ async fn rig_with(policy: Policy, approver: Arc<dyn ApprovalHandler>) -> anyhow:
         hub_url: url.clone(),
         server_id: "openbot-workspace".into(),
         description: "test guest".into(),
+        token: None,
     };
     tokio::spawn(async move {
         let _ = openbot_guest::run(cfg, ws).await;

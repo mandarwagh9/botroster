@@ -98,6 +98,7 @@ async fn rig_timeout(
         hub_url: url.clone(),
         server_id: "openbot-workspace".into(),
         description: "test guest".into(),
+        token: None,
     };
     tokio::spawn(async move {
         let _ = openbot_guest::run(cfg, ws).await;
@@ -407,6 +408,7 @@ async fn with_no_approver_attached_everything_gated_is_denied() -> anyhow::Resul
                 hub_url: url.clone(),
                 server_id: "openbot-workspace".into(),
                 description: "t".into(),
+                token: None,
             },
             ws,
         )

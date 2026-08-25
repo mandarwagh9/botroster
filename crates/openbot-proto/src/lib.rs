@@ -97,6 +97,35 @@ pub struct Hello {
     /// Opaque metadata, echoed in `ServerInfo.metadata`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Value>,
+    /// The hub's per-home token, read from `OPENBOT_HUB_TOKEN` or from
+    /// `<home>/hub.token`.
+    ///
+    /// # What this defends, and what it does not
+    ///
+    /// The hub used to hand every connection `dev_principal()`. Approvals are
+    /// authorised on socket identity, so a connection that opens its own
+    /// session is the owner of it — and is therefore the one the hub asks for
+    /// permission. Anything that could open a socket could approve its own
+    /// `shell.exec`.
+    ///
+    /// A shared secret raises that bar from *anything that can open a socket*
+    /// to *anything that can read this user's files*. That stops a remote
+    /// caller, another user on the machine, and any program that is not
+    /// looking for the file.
+    ///
+    /// **It is not isolation from a program running as this user.** Such a
+    /// program can read `<home>/hub.token` exactly as the desktop client does.
+    /// The backlog entry that asked for this called it "what defends against a
+    /// local process", and that is true only for a local process belonging to
+    /// somebody else. Nothing here changes what a process running as you can
+    /// reach; `CLAUDE.md` is explicit that this repository does not claim
+    /// isolation it does not have.
+    ///
+    /// `Option` because a hub that has not been given a token accepts a
+    /// connection without one, which is what every client did before this
+    /// field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
 }
 
 impl Hello {
@@ -107,6 +136,7 @@ impl Hello {
             server_id: None,
             description: None,
             metadata: None,
+            token: hub_token(),
         }
     }
 
@@ -117,7 +147,18 @@ impl Hello {
             server_id: Some(server_id.into()),
             description: None,
             metadata: None,
+            token: hub_token(),
         }
+    }
+
+    /// Present a token explicitly, for a caller that found one somewhere other
+    /// than the environment.
+    #[must_use]
+    pub fn with_token(mut self, token: Option<String>) -> Self {
+        if token.is_some() {
+            self.token = token;
+        }
+        self
     }
 
     pub fn with_description(mut self, d: impl Into<String>) -> Self {
@@ -788,6 +829,70 @@ mod tests {
         assert_eq!(e.code, WORKSPACE_UNAVAILABLE_CODE);
         assert_eq!(e.data.unwrap()["reason"], "idle_timeout");
     }
+}
+
+/// The environment variable a hub's children are told its token through.
+///
+/// `up` sets it on the guest it spawns, so a guest — which knows a URL and has
+/// never known a home — needs no new argument and no new dependency. See
+/// [`Hello::token`] for what the token defends.
+pub const HUB_TOKEN_ENV: &str = "OPENBOT_HUB_TOKEN";
+
+/// The token file's name inside a home.
+pub const HUB_TOKEN_FILE: &str = "hub.token";
+
+/// The token to present, from the environment or from the default home.
+///
+/// The environment first, because that is how a hub tells the children it
+/// spawned. The file second, because a person in a second terminal has neither
+/// the variable nor any reason to know about it — they have a home, and the
+/// hub they are talking to wrote its token there.
+///
+/// `$OPENBOT_HOME` is consulted before the default, because that is the
+/// variable the whole command line already means by "which home". Reading the
+/// default home while the person's commands all address another one would look
+/// exactly like a hub refusing a correct token.
+#[must_use]
+pub fn hub_token() -> Option<String> {
+    if let Some(v) = std::env::var_os(HUB_TOKEN_ENV) {
+        let v = v.to_string_lossy().trim().to_owned();
+        if !v.is_empty() {
+            return Some(v);
+        }
+    }
+    let home = std::env::var_os("OPENBOT_HOME")
+        .filter(|v| !v.is_empty())
+        .map_or_else(default_home, std::path::PathBuf::from);
+    hub_token_in(&home)
+}
+
+/// The token written in a particular home, if there is one.
+#[must_use]
+pub fn hub_token_in(home: &std::path::Path) -> Option<String> {
+    let raw = std::fs::read_to_string(home.join(HUB_TOKEN_FILE)).ok()?;
+    let token = raw.trim().to_owned();
+    (!token.is_empty()).then_some(token)
+}
+
+/// Write a hub's token into its home, readable only by this user.
+///
+/// `0600` on unix. Windows has no chmod and its default ACL on a file under
+/// the user profile already excludes other users; this does not pretend
+/// otherwise, and the token is not what keeps a program running *as* this user
+/// out — nothing here does.
+///
+/// # Errors
+/// If the home cannot be created or the file cannot be written.
+pub fn write_hub_token(home: &std::path::Path, token: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(home)?;
+    let path = home.join(HUB_TOKEN_FILE);
+    std::fs::write(&path, token)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
 }
 
 /// Where a person's Bots, secrets and connectors live by default.

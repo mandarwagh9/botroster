@@ -85,6 +85,7 @@ fn guest(
         hub_url: url.to_owned(),
         server_id: "refused-test".into(),
         description: "a guest the hub will turn away".into(),
+        token: None,
     };
     (cfg, ctx)
 }

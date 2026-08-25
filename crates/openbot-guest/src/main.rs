@@ -172,6 +172,10 @@ async fn main() -> anyhow::Result<()> {
         hub_url: args.hub_url.clone(),
         server_id: args.server_id.clone(),
         description: "openbot guest workspace".into(),
+        // A guest started on its own — the split-deployment case — is told the
+        // hub's token the same way it is told the hub's address: through the
+        // environment. `None` here falls back to that inside `Hello`.
+        token: None,
     };
 
     // `run` only returns when the hub connection ends, so a stop signal must

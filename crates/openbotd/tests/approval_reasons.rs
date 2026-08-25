@@ -61,6 +61,7 @@ async fn denial_message(answer: Answer) -> anyhow::Result<String> {
         hub_url: url.clone(),
         server_id: "openbot-workspace".into(),
         description: "approval-reasons guest".into(),
+        token: None,
     };
     tokio::spawn(async move {
         let _ = openbot_guest::run(cfg, ws).await;

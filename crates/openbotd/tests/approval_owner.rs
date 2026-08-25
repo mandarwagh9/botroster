@@ -104,6 +104,7 @@ async fn an_approval_cannot_be_answered_by_a_bystander() -> anyhow::Result<()> {
         hub_url: url.clone(),
         server_id: "openbot-workspace".into(),
         description: "bystander test guest".into(),
+        token: None,
     };
     tokio::spawn(async move {
         let _ = openbot_guest::run(cfg, ws).await;
@@ -522,6 +523,7 @@ async fn an_approval_is_never_shown_to_a_bystander() -> anyhow::Result<()> {
         hub_url: url.clone(),
         server_id: "openbot-workspace".into(),
         description: "bystander visibility test guest".into(),
+        token: None,
     };
     tokio::spawn(async move {
         let _ = openbot_guest::run(cfg, ws).await;

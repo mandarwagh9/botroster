@@ -134,6 +134,7 @@ async fn boot() -> anyhow::Result<(String, tempfile::TempDir, Arc<Mutex<Vec<Stri
         hub_url: ws.clone(),
         server_id: "openbot-workspace".into(),
         description: "test guest".into(),
+        token: None,
     };
     tokio::spawn(async move {
         let _ = openbot_guest::run(cfg, ctx).await;

@@ -252,6 +252,7 @@ async fn rig() -> anyhow::Result<Rig> {
                 hub_url: url.clone(),
                 server_id: "openbot-workspace".into(),
                 description: "vendor test guest".into(),
+                token: None,
             },
             ws,
         )

@@ -147,6 +147,7 @@ async fn a_guest_comes_back_after_the_hub_restarts() -> anyhow::Result<()> {
         hub_url: url.clone(),
         server_id: "reconnect-test".into(),
         description: "a guest that should survive a restart".into(),
+        token: None,
     };
     let guest = tokio::spawn(async move {
         let _ = openbot_guest::run_supervised(cfg, ctx).await;

@@ -47,6 +47,7 @@ async fn rig(policy: Policy) -> anyhow::Result<Rig> {
         hub_url: url.clone(),
         server_id: "openbot-workspace".into(),
         description: "t".into(),
+        token: None,
     };
     tokio::spawn(async move {
         let _ = openbot_guest::run(cfg, ctx).await;

@@ -25,6 +25,17 @@ pub struct GuestConfig {
     pub hub_url: String,
     pub server_id: String,
     pub description: String,
+    /// The hub's per-home token, when whoever started this guest knows it.
+    ///
+    /// Passed rather than looked up because a guest knows a URL and has never
+    /// known a home: the hub that spawned it does know, and `up` starts one
+    /// in-process against a home that may not be the default. Falling back to
+    /// the environment covers a guest started on its own, which is the
+    /// split-deployment case.
+    ///
+    /// See `openbot_proto::Hello::token` for what this defends and what it
+    /// does not.
+    pub token: Option<String>,
 }
 
 /// Longest wait between reconnection attempts.
@@ -132,7 +143,8 @@ pub async fn run(cfg: GuestConfig, ws: Arc<Context>) -> anyhow::Result<()> {
         .with_description(&cfg.description)
         .with_metadata(serde_json::json!({
             openbot_proto::META_WORKSPACE: ws.ws.root(),
-        }));
+        }))
+        .with_token(cfg.token.clone());
     sink.send(Message::Text(serde_json::to_string(&hello)?))
         .await?;
 
