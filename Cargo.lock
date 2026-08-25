@@ -2593,7 +2593,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "openbot-agent"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2614,7 +2614,7 @@ dependencies = [
 
 [[package]]
 name = "openbot-app"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "agent-client-protocol",
  "openbot-desktop",
@@ -2632,7 +2632,7 @@ dependencies = [
 
 [[package]]
 name = "openbot-bots"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2651,7 +2651,7 @@ dependencies = [
 
 [[package]]
 name = "openbot-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -2678,7 +2678,7 @@ dependencies = [
 
 [[package]]
 name = "openbot-desktop"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -2692,7 +2692,7 @@ dependencies = [
 
 [[package]]
 name = "openbot-guest"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2714,7 +2714,7 @@ dependencies = [
 
 [[package]]
 name = "openbot-proto"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2722,7 +2722,7 @@ dependencies = [
 
 [[package]]
 name = "openbot-store"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2733,7 +2733,7 @@ dependencies = [
 
 [[package]]
 name = "openbotd"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "async-trait",
