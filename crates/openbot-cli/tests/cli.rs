@@ -1487,3 +1487,147 @@ fn bare_openbot_writes_no_config_when_nobody_was_asked() {
         "wrote config.toml without anyone agreeing to it"
     );
 }
+
+/// A routine can be rehearsed, and the rehearsal does not move the schedule.
+///
+/// Driven through the shipped binary, which is what `REDESIGN.md` phase 4 asks
+/// for: *"creating a routine and firing Test run records a run"*.
+///
+/// The routine is deliberately one that is **due right now**, and that is the
+/// whole design of this test. The first version compared the `next` line
+/// before and after, and passed against the bug: for a routine that has never
+/// run, the next firing computed from "now" and from "the moment it was
+/// rehearsed" are the same time, so the wrong recorder moved nothing visible.
+/// The difference only appears when a firing is *owed* — which is exactly when
+/// somebody would press a test button, and exactly when losing it matters.
+///
+/// So the assertion is that a firing owed before the rehearsal is still owed
+/// after it, asked of `tick --dry-run`, which is the thing that would actually
+/// have run it.
+#[test]
+fn a_routine_can_be_rehearsed_without_swallowing_a_firing_it_was_owed() {
+    let d = home();
+    let h = d.path();
+    ok(h, &["bot", "new", "Account Health"]);
+    ok(
+        h,
+        &[
+            "routine",
+            "new",
+            "Account Health",
+            "Morning watch list",
+            // Every minute, so a firing is owed the moment it exists.
+            "--cron",
+            "* * * * *",
+            "--instructions",
+            "Rank the portfolio by churn risk.",
+        ],
+    );
+
+    let owed = ok(h, &["routine", "tick", "--dry-run"]);
+    assert!(
+        owed.contains("would run"),
+        "nothing was owed before the rehearsal, so nothing below could be swallowed:\n{owed}"
+    );
+
+    let said = ok(
+        h,
+        &[
+            "routine",
+            "run",
+            "Account Health",
+            "morning-watch-list",
+            "--demo",
+            "--approve",
+            "auto",
+        ],
+    );
+    assert!(
+        said.contains("running account-health/morning-watch-list now"),
+        "the rehearsal did not say what it was running:\n{said}"
+    );
+    assert!(
+        said.contains("the schedule is unchanged"),
+        "the rehearsal did not say the thing a person needs to know before pressing it:\n{said}"
+    );
+
+    // The claim, checked against the scheduler rather than against its own
+    // sentence. A command that says the schedule is unchanged and moves it is
+    // worse than one that says nothing.
+    let still = ok(h, &["routine", "tick", "--dry-run"]);
+    assert!(
+        still.contains("would run"),
+        "the rehearsal swallowed the firing it was rehearsing; that run will never happen and          the history will say it did:\n{still}"
+    );
+
+    // And it happened, and the history says which kind of run it was.
+    // `routine show` is the only place a person can check whether a routine
+    // has actually been running, so a rehearsal that reads there as an
+    // ordinary firing is worse than one that left no trace.
+    let shown = ok(
+        h,
+        &["routine", "show", "Account Health", "morning-watch-list"],
+    );
+    assert!(
+        !shown.contains("never run"),
+        "the rehearsal left no trace at all:\n{shown}"
+    );
+    assert!(
+        shown.contains("(test run)"),
+        "the history shows the rehearsal as an ordinary firing, which is the evidence          somebody would use to conclude the schedule is working:\n{shown}"
+    );
+}
+
+/// A paused routine can still be rehearsed, and says it is paused.
+///
+/// Most of the point: a routine you are still getting right is one you have
+/// not armed yet. Refusing here would mean the only way to test a routine is
+/// to arm it first and hope.
+#[test]
+fn a_paused_routine_can_still_be_rehearsed() {
+    let d = home();
+    let h = d.path();
+    ok(h, &["bot", "new", "Account Health"]);
+    ok(
+        h,
+        &[
+            "routine",
+            "new",
+            "Account Health",
+            "Morning watch list",
+            "--cron",
+            "0 9 * * MON-FRI",
+            "--instructions",
+            "Rank the portfolio by churn risk.",
+        ],
+    );
+    ok(
+        h,
+        &["routine", "pause", "Account Health", "morning-watch-list"],
+    );
+
+    let said = ok(
+        h,
+        &[
+            "routine",
+            "run",
+            "Account Health",
+            "morning-watch-list",
+            "--demo",
+            "--approve",
+            "auto",
+        ],
+    );
+    assert!(
+        said.contains("paused"),
+        "it ran a paused routine without saying so, which is the one thing a person would want \
+         to be told here:\n{said}"
+    );
+
+    // Still paused afterwards. Rehearsing is not arming.
+    let list = ok(h, &["routine", "ls"]);
+    assert!(
+        list.contains("paused"),
+        "the rehearsal armed the routine; pressing a test button must not schedule anything:\n{list}"
+    );
+}

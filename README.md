@@ -133,6 +133,7 @@ openbot group new hiring --members talent-scout,expense-manager
 openbot group post hiring "@talent-scout what did you find?"
 openbot routine new talent-scout morning --cron "0 9 * * *" --instructions "summarise overnight applications"
 openbot routine ls
+openbot routine run talent-scout morning   # rehearse it now; the schedule does not move
 openbot secret set linear-token       # value read from stdin, never from an argument
 openbot connector add linear https://mcp.linear.app/mcp --authorization "Bearer ${linear-token}"
 openbot watch                        # a live view of the computer, with takeover

@@ -831,6 +831,27 @@ enum RoutineCmd {
     Resume { bot: String, id: String },
     /// Delete a routine.
     Rm { bot: String, id: String },
+    /// Run one routine now, whatever its schedule says.
+    ///
+    /// A rehearsal: it does the work and records what happened, and it leaves
+    /// the schedule exactly where it was. Testing a routine at 08:55 must not
+    /// cancel the nine o'clock firing it was testing.
+    ///
+    /// Works on a paused routine too, which is most of the point — a routine
+    /// you are still getting right is one you have not armed yet.
+    Run {
+        bot: String,
+        id: String,
+        /// Answer approvals automatically.
+        ///
+        /// `ask` needs a terminal; without one it becomes `deny`, since an
+        /// unattended request cannot be approved.
+        #[arg(long, value_enum, default_value_t = ApproveMode::Ask)]
+        approve: ApproveMode,
+        /// Use the scripted demo instead of a model.
+        #[arg(long)]
+        demo: bool,
+    },
     /// Run everything that is due, once, and record the outcome.
     ///
     /// Composable by design: point cron, systemd or a container scheduler at
@@ -1648,7 +1669,7 @@ async fn run() -> anyhow::Result<()> {
                             (i, o) => format!("  {i}/{o} tok"),
                         };
                         render::outln!(
-                            "{}  {}  {}{}",
+                            "{}  {}  {}{}{}",
                             run.at.to_rfc3339(),
                             if run.retryable {
                                 "held"
@@ -1658,7 +1679,13 @@ async fn run() -> anyhow::Result<()> {
                                 "fail"
                             },
                             run.summary,
-                            cost
+                            cost,
+                            // Marked, because this is the only place a person
+                            // can check whether a routine has actually been
+                            // running. Three green rows that were all somebody
+                            // pressing a button say the opposite of what they
+                            // appear to say.
+                            if run.manual { "  (test run)" } else { "" }
                         );
                     }
                     for run in &r.runs {
@@ -1699,6 +1726,92 @@ async fn run() -> anyhow::Result<()> {
                     let b = bots.resolve(&bot)?;
                     bots.delete_routine(&b.id, &id)?;
                     println!("deleted {}/{}", b.id, id);
+                }
+                RoutineCmd::Run {
+                    bot,
+                    id,
+                    approve,
+                    demo,
+                } => {
+                    let b = bots.resolve(&bot)?;
+                    let mut r = bots.get_routine(&b.id, &id)?;
+                    render::outln!("running {}/{} now", b.id, r.id);
+                    if !r.enabled {
+                        // Said, not refused. A routine you are still getting
+                        // right is one you have not armed yet, and rehearsing
+                        // it is most of what this command is for.
+                        render::outln!("  this routine is paused; running it anyway");
+                    }
+                    let outcome = run_task(Task {
+                        hub_url: &hub_url,
+                        server: &server,
+                        home: &home,
+                        model_opts: &model_opts,
+                        bots: &bots,
+                        bot: &bots.get(&r.bot)?,
+                        task: &r.instructions,
+                        approver: approve::handler(approve),
+                        demo,
+                        demo_tools: false,
+                        demo_secret: false,
+                        fallback: "Routine ran.",
+                        thread: Thread::Own,
+                        max_steps: DEFAULT_MAX_STEPS,
+                        history: DEFAULT_HISTORY,
+                        watch: None,
+                        cancel: None,
+                        redirects: None,
+                    })
+                    .await;
+                    // No missed-firings preamble, unlike `tick`. This run was
+                    // asked for now; telling the Bot it had been asleep and
+                    // should cover a gap would make a rehearsal do different
+                    // work from the thing being rehearsed.
+                    let run = match &outcome {
+                        Ok(o) => openbot_bots::Run {
+                            at: now,
+                            ok: o.succeeded(),
+                            summary: if o.text.is_empty() {
+                                format!("{:?}", o.reason)
+                            } else {
+                                o.text.chars().take(200).collect()
+                            },
+                            steps: o.steps,
+                            tokens_in: o.usage.input_tokens,
+                            tokens_out: o.usage.output_tokens,
+                            // Nothing to retry: nobody is owed this run, so
+                            // there is no schedule for a retry to belong to.
+                            // `record_manual_run` would ignore it anyway.
+                            retryable: false,
+                            manual: true,
+                        },
+                        Err(e) => openbot_bots::Run {
+                            at: now,
+                            ok: false,
+                            summary: e.to_string().chars().take(200).collect(),
+                            steps: 0,
+                            tokens_in: 0,
+                            tokens_out: 0,
+                            retryable: false,
+                            manual: true,
+                        },
+                    };
+                    render::outln!("  {} {}", if run.ok { "ok" } else { "failed" }, run.summary);
+                    // The recorder that leaves the schedule alone. Using the
+                    // ordinary one here would set `last_run`, and the firing
+                    // this was rehearsing would silently never happen.
+                    bots.record_manual_run(&mut r, run)?;
+                    match r.next_after(now)? {
+                        Some(t) => println!(
+                            "
+  the schedule is unchanged; next {}",
+                            t.to_rfc3339()
+                        ),
+                        None => println!(
+                            "
+  the schedule is unchanged"
+                        ),
+                    }
                 }
                 RoutineCmd::Tick {
                     dry_run,
