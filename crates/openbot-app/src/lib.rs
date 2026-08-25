@@ -1004,6 +1004,38 @@ async fn routine_pause(
         .map_err(|e| e.to_string())
 }
 
+/// Create a routine that fires on a schedule.
+///
+/// The window sends a cron string it composed from a named cadence, so nobody
+/// has to know that `0 9 * * MON-FRI` means weekday mornings. Composed in the
+/// page rather than here because it is a presentation choice: the store keeps
+/// cron, `routine ls` explains cron back, and a second vocabulary in the
+/// middle would give the window and the terminal two ideas of one routine.
+#[tauri::command]
+async fn routine_new(
+    state: State<'_, AppState>,
+    bot: String,
+    name: String,
+    cron: String,
+    instructions: String,
+    timezone: String,
+) -> Result<(), String> {
+    let Some(here) = state.where_.lock().await.clone() else {
+        return Err("not connected".into());
+    };
+    settings::create_routine(
+        &here.openbot,
+        &here.home,
+        &bot,
+        &name,
+        &cron,
+        &instructions,
+        &timezone,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// Run one routine now, without moving its schedule.
 ///
 /// The window's `Test run`. See `settings::test_run` for why a rehearsal
@@ -1802,6 +1834,7 @@ pub fn shell<R: Runtime>(builder: tauri::Builder<R>, mode: Mode) -> tauri::Build
             bot_hide,
             routine_pause,
             routine_run,
+            routine_new,
             groups,
             group_log,
             open_group,

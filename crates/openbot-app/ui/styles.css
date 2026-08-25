@@ -1850,6 +1850,65 @@ textarea {
   grid-area: reason;
 }
 
+/* Six controls, where `.rule-form`'s grid has areas for four — and it is a
+   grid, so the first attempt at this (flex-wrap) did nothing at all and the
+   task field came out 163px wide against a placeholder needing 339. The
+   placeholder is the instruction, so the field gets the room rather than the
+   sentence getting shorter.
+
+   `.rule-form select` puts every select in the `action` area, which is right
+   for one select and wrong for two; each control names its own area here. */
+.routine-form {
+  /* Three rows, because six controls on two do not fit a dialog this wide.
+
+     One row was tried and the owner select — sized by its widest Bot name —
+     took the room `1fr` would have given the field beside it, so "What this
+     routine is called" shipped reading "What th". A floor on that column fixed
+     the field and pushed the time and the button off the right edge instead:
+     `1fr` is a share of what is left, and a floor is a demand, and neither is
+     the same as a layout that fits.
+
+     So each row carries what belongs together: who and what it is called, then
+     when, then what it does and the button that makes it. */
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    "bot  name name"
+    "when at   ."
+    "task task add";
+}
+
+/* Grid items are `auto` sized by default, which lets a long placeholder push
+   a column past the dialog rather than scrolling inside its own field. */
+.routine-form > * {
+  min-width: 0;
+}
+
+.routine-form select#routine-bot {
+  grid-area: bot;
+}
+
+.routine-form #routine-name {
+  grid-area: name;
+}
+
+.routine-form select#routine-when {
+  grid-area: when;
+  width: auto;
+}
+
+.routine-form #routine-at {
+  grid-area: at;
+  width: auto;
+}
+
+.routine-form #routine-task {
+  grid-area: task;
+}
+
+.routine-form button {
+  grid-area: add;
+}
+
 .rule-form button {
   grid-area: add;
 }

@@ -97,6 +97,64 @@ pub async fn set_paused(
     Ok(())
 }
 
+/// Create a routine that fires on a schedule.
+///
+/// The window composes the cron from a named cadence and a time, so nobody has
+/// to know that `0 9 * * MON-FRI` means weekday mornings. It is still sent as
+/// cron, because that is what the store keeps and what `routine ls` explains
+/// back — inventing a second vocabulary here would give the window and the
+/// terminal two different ideas of the same routine.
+///
+/// # Errors
+/// If the binary cannot be run, or refuses the schedule. An impossible cron is
+/// refused when it is written rather than when it would first fire, which is
+/// the only moment a person is looking.
+pub async fn create_routine(
+    openbot: &Path,
+    home: &Path,
+    bot: &str,
+    name: &str,
+    cron: &str,
+    instructions: &str,
+    timezone: &str,
+) -> anyhow::Result<()> {
+    let mut cmd = tokio::process::Command::new(openbot);
+    cmd.arg("routine")
+        .arg("new")
+        .arg(bot)
+        .arg(name)
+        .arg("--cron")
+        .arg(cron)
+        .arg("--instructions")
+        .arg(instructions)
+        .arg("--timezone")
+        .arg(timezone)
+        .arg("--home")
+        .arg(home)
+        .env("NO_COLOR", "1")
+        .env_remove("OPENBOT_HOME")
+        .env_remove("OPENBOT_HUB_URL");
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = cmd
+        .output()
+        .await
+        .map_err(|e| anyhow::anyhow!("could not run {}: {e}", openbot.display()))?;
+    if !out.status.success() {
+        return Err(anyhow::anyhow!(
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+                .trim()
+                .trim_start_matches("Error:")
+                .trim()
+        ));
+    }
+    Ok(())
+}
+
 /// What a rehearsal did, as the window has to show it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestRun {

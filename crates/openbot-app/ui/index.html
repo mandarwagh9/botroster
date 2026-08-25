@@ -478,6 +478,35 @@
       <h2 class="section">Runs on a schedule</h2>
       <dl id="routines-list" class="dialog-fields"></dl>
       <p id="routines-state" class="hint list-state hidden"></p>
+
+      <!-- Making one, here, where the ones that exist are listed. Until now a
+           routine could only be created from a terminal, which made the
+           unattended half of this product a thing you had to read about
+           before you could have it.
+
+           The trigger is a named cadence, not a cron field. `0 9 * * MON-FRI`
+           is a fine thing for the store to keep and a poor thing to ask
+           somebody for, and the review's own note about triggers applies to
+           schedules too: a list of real names is a different product from a
+           syntax box.
+
+           Every field says what it is for in its own placeholder. No help
+           text, no tooltip, no info icon — the empty field teaches. -->
+      <form id="routine-form" class="rule-form routine-form">
+        <select id="routine-bot" aria-label="which Bot owns this routine"></select>
+        <input id="routine-name" spellcheck="false" placeholder="What this routine is called" />
+        <select id="routine-when" aria-label="how often it runs">
+          <option value="0 9 * * *">Every day</option>
+          <option value="0 9 * * MON-FRI">Every weekday</option>
+          <option value="0 9 * * MON">Every Monday</option>
+          <option value="0 * * * *">Every hour</option>
+        </select>
+        <input id="routine-at" type="time" value="09:00" aria-label="what time it runs" />
+        <input id="routine-task" spellcheck="false"
+               placeholder="What it should do, every run — it is replayed as written" />
+        <button type="submit" class="primary">Add routine</button>
+      </form>
+      <p id="routine-error" class="error"></p>
       <p id="routines-empty" class="hint hidden">
         Nothing scheduled. A routine is the run nobody watches, so it is worth
         seeing one listed here even when it is working.

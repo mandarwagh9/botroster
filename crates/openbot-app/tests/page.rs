@@ -2285,6 +2285,12 @@ async fn no_dialog_field_is_narrower_than_the_placeholder_in_it() {
     let clipped = b
         .text_of(concat!(
             "(() => { const c = document.createElement('canvas').getContext('2d');",
+            // Lists that a dialog fills on open are filled here too, because a
+            // column sized by its contents is a different width empty. The
+            // routine form's owner select is sized by the longest Bot name,
+            // and with it empty the field beside it measured comfortable and
+            // shipped reading "What th".
+            "refreshRoutineForm();",
             "const bad = [];",
             "for (const d of document.querySelectorAll('.dialog')) {",
             "  const was = d.classList.contains('hidden');",
@@ -6608,4 +6614,177 @@ async fn the_test_run_button_says_it_is_running_and_refuses_a_second_press() {
         .await
         .unwrap_or_default();
     assert_eq!(runs, "1", "more than one rehearsal was started");
+}
+
+/// A routine can be made from the window, without anybody typing cron.
+///
+/// Until now one could only be created from a terminal, which made the
+/// unattended half of this product something you had to read about before you
+/// could have it. `Test run` and `Pause` were controls for routines the window
+/// had no way to create.
+///
+/// The assertion is on the cron that reaches the runtime. `0 9 * * MON-FRI` is
+/// a fine thing for the store to keep and a poor thing to ask somebody for, so
+/// the page composes it — and composing it wrongly would schedule work at a
+/// time nobody chose, quietly, in the one part of the product nobody watches.
+#[tokio::test]
+async fn a_routine_can_be_made_from_the_window_without_typing_cron() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+    b.text_of("document.getElementById('rules-btn').click(); 'ok'")
+        .await
+        .expect("open settings");
+    settle().await;
+
+    // The owner list is the roster, so a routine cannot be given to a Bot that
+    // does not exist.
+    let owners = b
+        .text_of("[...document.querySelectorAll('#routine-bot option')].map(o=>o.value).join('|')")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        owners, "talent-scout",
+        "the owner list is not the roster, so it can offer a Bot that is not there"
+    );
+
+    b.text_of(concat!(
+        "document.getElementById('routine-name').value = 'Morning digest';",
+        "document.getElementById('routine-when').value = '0 9 * * MON-FRI';",
+        "document.getElementById('routine-at').value = '07:30';",
+        "document.getElementById('routine-task').value = 'summarise overnight applications';",
+        "document.getElementById('routine-form').requestSubmit(); 'ok'"
+    ))
+    .await
+    .expect("add the routine");
+
+    let sent = wait_until(
+        &b,
+        "String(window.__sent('routine_new').length === 1)",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(sent, "the routine never reached the runtime");
+
+    let args = b
+        .text_of("JSON.stringify(window.__sent('routine_new')[0].args)")
+        .await
+        .unwrap_or_default();
+    let v: serde_json::Value = serde_json::from_str(&args).expect("args");
+    assert_eq!(v["bot"], "talent-scout", "{args}");
+    assert_eq!(v["name"], "Morning digest", "{args}");
+    assert_eq!(
+        v["cron"], "30 7 * * MON-FRI",
+        "the named cadence and the time composed to the wrong schedule, so this runs when          nobody asked it to: {args}"
+    );
+    assert_eq!(
+        v["instructions"], "summarise overnight applications",
+        "{args}"
+    );
+    assert!(
+        v["timezone"].as_str().unwrap_or_default().contains('/'),
+        "the routine was scheduled in some other zone than the one the person is in, so          'every weekday at 07:30' fires in the middle of somebody's night: {args}"
+    );
+
+    // The form empties, or the next routine is made by editing the last one.
+    let left = b
+        .text_of(
+            "document.getElementById('routine-name').value + '|' +
+             document.getElementById('routine-task').value",
+        )
+        .await
+        .unwrap_or_default();
+    assert_eq!(left, "|", "the form kept what was just submitted: {left:?}");
+}
+
+/// An hourly routine has no one hour to run at, and the field says so.
+///
+/// A time box that is present and ignored is worse than one that is not there:
+/// it accepts a choice and silently discards it.
+#[tokio::test]
+async fn an_hourly_routine_does_not_ask_what_time_it_runs() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+    b.text_of("document.getElementById('rules-btn').click(); 'ok'")
+        .await
+        .expect("open settings");
+    settle().await;
+
+    let daily = b
+        .text_of("String(!document.getElementById('routine-at').classList.contains('hidden'))")
+        .await
+        .unwrap_or_default();
+    assert_eq!(daily, "true", "a daily routine must be able to say when");
+
+    b.text_of(concat!(
+        "document.getElementById('routine-when').value = '0 * * * *';",
+        "document.getElementById('routine-when').dispatchEvent(new Event('change'));",
+        "document.getElementById('routine-name').value = 'Inbox sweep';",
+        "document.getElementById('routine-task').value = 'triage new tickets';",
+        "document.getElementById('routine-form').requestSubmit(); 'ok'"
+    ))
+    .await
+    .expect("add an hourly routine");
+
+    let hidden = b
+        .text_of("String(document.getElementById('routine-at').classList.contains('hidden'))")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        hidden, "true",
+        "an hourly routine is still being asked what time it runs, and the answer is discarded"
+    );
+
+    let sent = wait_until(
+        &b,
+        "String(window.__sent('routine_new').length === 1)",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(sent, "the hourly routine never reached the runtime");
+    let args = b
+        .text_of("JSON.stringify(window.__sent('routine_new')[0].args)")
+        .await
+        .unwrap_or_default();
+    let v: serde_json::Value = serde_json::from_str(&args).expect("args");
+    assert_eq!(
+        v["cron"], "0 * * * *",
+        "the time field leaked into an hourly schedule: {args}"
+    );
+}
+
+/// A routine with nothing to do is refused before a subprocess is spawned.
+#[tokio::test]
+async fn a_routine_needs_a_name_and_something_to_do() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+    b.text_of("document.getElementById('rules-btn').click(); 'ok'")
+        .await
+        .expect("open settings");
+    settle().await;
+
+    b.text_of(concat!(
+        "document.getElementById('routine-name').value = 'Morning digest';",
+        "document.getElementById('routine-task').value = '';",
+        "document.getElementById('routine-form').requestSubmit(); 'ok'"
+    ))
+    .await
+    .expect("submit an empty one");
+    settle().await;
+
+    let said = b
+        .text_of("document.getElementById('routine-error').textContent")
+        .await
+        .unwrap_or_default();
+    assert!(
+        said.contains("something to do"),
+        "the window said nothing about why it did not make the routine: {said:?}"
+    );
+    let sent = b
+        .text_of("String(window.__sent('routine_new').length)")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        sent, "0",
+        "a subprocess was spawned to be told a box is empty, which the page already knew"
+    );
 }

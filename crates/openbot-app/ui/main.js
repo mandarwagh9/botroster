@@ -2353,6 +2353,42 @@ async function refreshRules() {
   });
 }
 
+/// The cron a named cadence and a time compose to.
+///
+/// `0 9 * * MON-FRI` is a fine thing for the store to keep and a poor thing to
+/// ask somebody for. The select carries the day pattern with a placeholder
+/// hour, and the time field replaces the first two fields — so the vocabulary
+/// a person sees is "every weekday at 09:00" and what is stored is still cron,
+/// which `routine ls` explains back in those same words.
+///
+/// Hourly ignores the time, because a routine that runs every hour has no one
+/// hour to run at. The field is hidden rather than ignored silently.
+function cronFrom(pattern, at) {
+  const rest = pattern.split(" ").slice(2).join(" ");
+  if (pattern.startsWith("0 * ")) return pattern;
+  const [h, m] = (at || "09:00").split(":");
+  return `${Number(m)} ${Number(h)} ${rest}`;
+}
+
+/// Fill the routine form's Bot list from the roster, and keep the time field
+/// honest about whether it applies.
+function refreshRoutineForm() {
+  const sel = $("routine-bot");
+  const had = sel.value;
+  sel.replaceChildren();
+  for (const [name, id] of idOf) {
+    // Bots only. A group has members rather than one owner, and a routine
+    // always has exactly one.
+    if (!name || String(id).includes("group")) continue;
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  }
+  if (had) sel.value = had;
+  show($("routine-at"), !$("routine-when").value.startsWith("0 * "));
+}
+
 /// Rehearse a routine, and say what happened where it was asked for.
 ///
 /// A real run against the real computer, which is the point: a rehearsal that
@@ -2508,11 +2544,51 @@ async function refreshWiring() {
   ]);
 }
 
+$("routine-when").addEventListener("change", () =>
+  show($("routine-at"), !$("routine-when").value.startsWith("0 * ")),
+);
+
+$("routine-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const err = $("routine-error");
+  err.textContent = "";
+  const bot = $("routine-bot").value;
+  const name = $("routine-name").value.trim();
+  const task = $("routine-task").value.trim();
+  // Said here rather than left to the binary. The runtime refuses these too,
+  // but a round trip to a subprocess to be told a box is empty is a slow way
+  // to learn something the page already knows.
+  if (!bot || !name || !task) {
+    err.textContent = "a routine needs an owner, a name and something to do";
+    return;
+  }
+  try {
+    await invoke("routine_new", {
+      bot,
+      name,
+      cron: cronFrom($("routine-when").value, $("routine-at").value),
+      instructions: task,
+      // The machine's own zone, so "every weekday at 09:00" means nine in the
+      // morning where the person is. Sending UTC would make a routine written
+      // at breakfast fire in the middle of the night for most of the world.
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+    });
+  } catch (e2) {
+    err.textContent = String(e2);
+    return;
+  }
+  $("routine-name").value = "";
+  $("routine-task").value = "";
+  refreshWiring();
+});
+
 $("rules-btn").addEventListener("click", () => {
   ruleError.textContent = "";
   ruleTool.value = "";
   ruleReason.value = "";
   show(rulesDialog, true);
+  $("routine-error").textContent = "";
+  refreshRoutineForm();
   refreshRules();
   refreshWiring();
 });
