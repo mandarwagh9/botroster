@@ -1202,9 +1202,30 @@ async fn an_agent_that_was_killed_stops_reporting_itself_alive() {
     // six seconds for an EOF that something still holding the pipe was never
     // going to send. `kill -- -PID` addresses the group.
     #[cfg(not(windows))]
-    let killed = std::process::Command::new("kill")
-        .args(["-9", &format!("-{pid}")])
-        .status();
+    let killed = {
+        // The group first, then the pid, and *both* outcomes examined.
+        //
+        // `Command::status()` is `Ok` whenever the command ran, whatever it
+        // reported — so the previous `killed.is_ok()` passed for a `kill` that
+        // printed "No such process" and did nothing, and the test then spent
+        // twenty seconds waiting for an EOF nobody had caused. It was checking
+        // that `kill` exists.
+        let run = |arg: String| {
+            std::process::Command::new("kill")
+                .args(["-9", &arg])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        };
+        let group = run(format!("-{pid}"));
+        let single = run(pid.to_string());
+        assert!(
+            group || single,
+            "neither `kill -9 -{pid}` nor `kill -9 {pid}` reported success, so nothing was              killed and what follows would be measuring a healthy agent"
+        );
+        Ok::<(), ()>(())
+    };
     assert!(killed.is_ok(), "could not end the agent to test the check");
 
     // EOF has to travel up the pipe and through the SDK's close callback.
@@ -1219,7 +1240,16 @@ async fn an_agent_that_was_killed_stops_reporting_itself_alive() {
     });
     assert!(
         noticed,
-        "the agent was killed twenty seconds ago and the engine still says it is alive; the window \
-         would still be showing `connected`"
+        "the agent (pid {pid}) was killed twenty seconds ago and the engine still says it is \
+         alive; the window would still be showing `connected`. Still running: {}",
+        std::process::Command::new("ps")
+            .args(["-o", "pid=,args="])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter(|l| l.contains(" acp"))
+                .collect::<Vec<_>>()
+                .join(" | "))
+            .unwrap_or_else(|e| format!("(could not list processes: {e})"))
     );
 }
