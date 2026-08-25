@@ -76,6 +76,26 @@ let showHidden = false;
 // ask's buttons leaves it answerable by nobody until it times out.
 const asks = [];
 
+const waitingEl = $("waiting");
+
+/// Say how many approvals are blocking a person, or say nothing at all.
+///
+/// Called wherever `asks` changes, because a count that is only refreshed on
+/// some of those paths is worse than no count: it goes stale pointing at work
+/// that is already done, and the next person to trust it stops trusting it.
+///
+/// Hidden rather than zeroed when the queue is empty. Amber is the only warm
+/// colour in this product and it means "a person is blocking progress"; a
+/// standing "0 waiting" would put that colour on screen permanently and drain
+/// the meaning out of it.
+function renderWaiting() {
+  const n = asks.length;
+  waitingEl.classList.toggle("hidden", n === 0);
+  if (n === 0) return;
+  waitingEl.textContent = n === 1 ? "1 waiting on you" : `${n} waiting on you`;
+  waitingEl.title = "Show what is waiting";
+}
+
 function setStatus(text, kind) {
   status.textContent = text;
   status.className = "status" + (kind ? " " + kind : "");
@@ -896,6 +916,7 @@ async function answerAsk(id, optionId) {
 function removeAsk(id) {
   const at = asks.findIndex((ask) => ask.id === id);
   if (at >= 0) asks.splice(at, 1);
+  renderWaiting();
 }
 
 /// Hand over a credential, and only take the question down once it has landed.
@@ -1062,6 +1083,7 @@ function enqueueAsk(ask) {
   // bypass has none to give, so it still stops and asks.
   if (bypass && !ask.secret && autoApprove(ask)) return;
   asks.push(ask);
+  renderWaiting();
   renderDialog();
 }
 
@@ -1207,6 +1229,7 @@ function forgetAsks(ids) {
     for (const id of ids) removeAsk(id);
   } else {
     asks.length = 0;
+    renderWaiting();
   }
   renderDialog();
 }
@@ -1216,6 +1239,7 @@ function forgetAsks(ids) {
 /// them, and the case the queue exists for is several tool calls together.
 function refuseAsks() {
   const queued = asks.splice(0, asks.length);
+  renderWaiting();
   renderDialog();
   return Promise.all(
     queued.map((ask) =>

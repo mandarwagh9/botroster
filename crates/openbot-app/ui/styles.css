@@ -1025,6 +1025,41 @@ textarea {
   font-style: italic;
 }
 
+/* How many approvals are blocking a person, held in the chrome.
+ *
+ * Amber, because this is the one thing amber means in this product: a person is
+ * blocking progress. It is a fill rather than text so the hue stays recognisably
+ * amber on both themes, which is why the status fills keep their bright value
+ * in light mode while status *text* is re-picked.
+ *
+ * A button rather than a label: the only useful thing to do with the knowledge
+ * that something is waiting is to go and look at it. */
+.waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: var(--waiting-fill);
+  color: #10151b;
+  font-family: var(--micro);
+  font-size: var(--fs-11);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  animation: rise var(--t) var(--ease) both;
+}
+
+.waiting:hover {
+  filter: brightness(1.06);
+}
+
+.waiting:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* A tool step is one row: a mark that carries its state, a verb phrase, the
    detail that arrives with the result, and how long it took. Quiet by design:
    activity is context for the conversation, not the conversation.

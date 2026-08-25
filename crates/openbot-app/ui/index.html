@@ -209,6 +209,17 @@
              screen a new install opens on. -->
         <button id="edit-bot" class="link hidden">Edit</button>
         <button id="computer" class="link computer-btn"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="8.5" rx="1.5"/><path d="M6 13.5h4"/></svg><span>Agent Computer</span></button>
+        <!-- How many approvals are waiting on a person, held in the chrome so
+             it is true wherever they are in the app. DIRECTION.md pairs the
+             inline gate with a persistent count for a reason: the dialog is
+             only visible on the conversation that raised it, and a person who
+             stepped away needs the app itself to say that it is blocked.
+
+             Amber is the only warm colour in the product and it means exactly
+             this. Absent, not zero, when nothing is waiting: a standing "0"
+             would put that colour on screen while nothing needs anybody, which
+             is the one thing amber must never do. -->
+        <button id="waiting" class="waiting hidden" type="button" aria-live="polite"></button>
         <span id="status" class="status">connected</span>
       </header>
 

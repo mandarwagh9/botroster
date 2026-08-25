@@ -5142,3 +5142,107 @@ async fn a_step_row_can_be_opened_from_the_keyboard() {
         .unwrap_or_default();
     assert_eq!(open, "1", "Enter on a focused row did not open its record");
 }
+
+/// The chrome says how many approvals are blocking a person.
+///
+/// The dialog is only visible on the conversation that raised it, so a person
+/// who stepped away, or who is reading a different Bot, has nothing telling
+/// them the app is blocked. `DIRECTION.md` pairs the inline gate with a
+/// persistent count for exactly that reason.
+///
+/// Absent rather than zero when nothing is waiting. Amber is the only warm
+/// colour in this product and it means "a person is blocking progress"; a
+/// standing "0 waiting" would put that colour on screen permanently and drain
+/// the meaning out of it, which is the failure `DIRECTION.md` calls a bug by
+/// name.
+#[tokio::test]
+async fn the_chrome_says_how_many_approvals_are_waiting() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    let hidden = b
+        .text_of("String(document.getElementById('waiting').classList.contains('hidden'))")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        hidden, "true",
+        "the count is on screen with nothing waiting, so amber means nothing"
+    );
+
+    b.text_of(&format!(
+        "window.__fire('permission-request', {}); 'ok'",
+        ask("a1", "s1", "shell.exec")
+    ))
+    .await
+    .expect("one approval");
+    settle().await;
+
+    let one = b
+        .text_of("document.getElementById('waiting').textContent")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        one, "1 waiting on you",
+        "one approval must not be announced as a plural"
+    );
+
+    b.text_of(&format!(
+        "window.__fire('permission-request', {}); 'ok'",
+        ask("a2", "s1", "fs.write")
+    ))
+    .await
+    .expect("a second approval");
+    settle().await;
+    let two = b
+        .text_of("document.getElementById('waiting').textContent")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        two, "2 waiting on you",
+        "the count did not follow the queue"
+    );
+}
+
+/// And it goes away again when the queue empties.
+///
+/// The failure this rules out is worse than not having a count: one that only
+/// counts up goes stale pointing at work already done, and the first time
+/// somebody looks and finds nothing there, they stop believing it. Answering an
+/// approval is the ordinary path, so it is the one asserted.
+#[tokio::test]
+async fn the_waiting_count_clears_when_the_queue_does() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    b.text_of(&format!(
+        "window.__fire('permission-request', {}); 'ok'",
+        ask("a1", "s1", "fs.write")
+    ))
+    .await
+    .expect("an approval");
+    settle().await;
+    let shown = b
+        .text_of("String(document.getElementById('waiting').classList.contains('hidden'))")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        shown, "false",
+        "the count never appeared, so clearing it proves nothing"
+    );
+
+    // Answered the way a person answers it.
+    // `.danger` is the refusal in both shapes the dialog takes: the agent's own
+    // decline option when it offers one, and the "Refuse" the window adds when
+    // it does not. Matching on the word "Refuse" only finds the second.
+    b.click("#dialog-options .danger").await.expect("refuse it");
+    settle().await;
+
+    let cleared = b
+        .text_of("String(document.getElementById('waiting').classList.contains('hidden'))")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        cleared, "true",
+        "the count still claims something is waiting after the queue emptied"
+    );
+}
