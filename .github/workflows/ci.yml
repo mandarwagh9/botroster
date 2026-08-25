@@ -244,11 +244,64 @@ jobs:
           OPENBOT_BUILTIN_KEY: ${{ secrets.OPENBOT_BUILTIN_KEY }}
         run: sh scripts/sidecar.sh
 
+      # The failure this exists to prevent is silent. A secret that is unset,
+      # misnamed, or set to an empty string makes `option_env!` yield nothing;
+      # the build then succeeds, all five installers are produced and attached,
+      # and every one of them ships with no model. It is indistinguishable from
+      # a good release on the Actions page, and the first person to discover it
+      # is somebody who downloaded one.
+      #
+      # The length is printed and the value never is. That is enough to tell
+      # "empty" from "set to something implausible", which is the distinction
+      # worth having when a key was pasted into the wrong box.
+      - name: the shipped credential is present
+        shell: bash
+        env:
+          OPENBOT_BUILTIN_KEY: ${{ secrets.OPENBOT_BUILTIN_KEY }}
+        run: |
+          set -eu
+          if [ -z "${OPENBOT_BUILTIN_KEY:-}" ]; then
+            echo "OPENBOT_BUILTIN_KEY is unset or empty."
+            echo
+            echo "Installers built from this would carry no model, and would ask"
+            echo "whoever downloads them to configure one - which is the thing a"
+            echo "shipped model exists to avoid. Failing here rather than"
+            echo "publishing that quietly."
+            echo
+            echo "Set it at Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "a credential is present (${#OPENBOT_BUILTIN_KEY} characters)"
+
       - name: bundle
         working-directory: crates/openbot-app
         env:
           OPENBOT_BUILTIN_KEY: ${{ secrets.OPENBOT_BUILTIN_KEY }}
         run: cargo tauri build
+
+      # And it actually reached the binary. The step above proves the secret
+      # arrived at the runner; this proves it survived compilation, which is a
+      # different claim - a stale cached object file would break it silently,
+      # which is what `build.rs` guards and this confirms.
+      #
+      # `grep -c` prints a count and never the match. GitHub masks the value in
+      # logs regardless, but not relying on that is cheaper than checking it.
+      - name: the credential reached the shipped runtime
+        shell: bash
+        env:
+          OPENBOT_BUILTIN_KEY: ${{ secrets.OPENBOT_BUILTIN_KEY }}
+        run: |
+          set -eu
+          staged=$(find crates/openbot-app/binaries -type f | head -1)
+          test -n "$staged" || { echo "no sidecar was staged"; exit 1; }
+          if grep -qa -- "$OPENBOT_BUILTIN_KEY" "$staged"; then
+            echo "the shipped runtime carries the credential"
+          else
+            echo "the staged runtime does NOT contain the credential."
+            echo "The secret reached the runner but not the binary: a cached"
+            echo "object file, or option_env! not being re-evaluated."
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
