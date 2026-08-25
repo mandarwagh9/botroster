@@ -55,7 +55,7 @@ fn nowhere_hub() -> &'static str {
                 std::time::Duration::from_millis(200),
             )
             .is_err(),
-            "something is listening on the port these tests picked to be empty ({port});              every run would connect to it instead of starting its own stack"
+            "something is listening on the port these tests picked to be empty ({port}); every run would connect to it instead of starting its own stack"
         );
         format!("ws://127.0.0.1:{port}/v1/tools")
     })
@@ -1581,7 +1581,7 @@ fn a_routine_can_be_rehearsed_without_swallowing_a_firing_it_was_owed() {
     let still = ok(h, &["routine", "tick", "--dry-run"]);
     assert!(
         still.contains("would run"),
-        "the rehearsal swallowed the firing it was rehearsing; that run will never happen and          the history will say it did:\n{still}"
+        "the rehearsal swallowed the firing it was rehearsing; that run will never happen and the history will say it did:\n{still}"
     );
 
     // And it happened, and the history says which kind of run it was.
@@ -1598,7 +1598,7 @@ fn a_routine_can_be_rehearsed_without_swallowing_a_firing_it_was_owed() {
     );
     assert!(
         shown.contains("(test run)"),
-        "the history shows the rehearsal as an ordinary firing, which is the evidence          somebody would use to conclude the schedule is working:\n{shown}"
+        "the history shows the rehearsal as an ordinary firing, which is the evidence somebody would use to conclude the schedule is working:\n{shown}"
     );
 }
 
@@ -1656,7 +1656,7 @@ fn a_rehearsal_can_report_itself_as_json() {
     assert_eq!(v["paused"], false, "{line}");
     assert!(
         v["next"].is_string(),
-        "a client cannot tell a person the schedule is unchanged without being told what it          is: {line}"
+        "a client cannot tell a person the schedule is unchanged without being told what it is: {line}"
     );
     assert!(
         !v["summary"].as_str().unwrap_or_default().is_empty(),

@@ -1892,8 +1892,7 @@ async fn a_routine_can_be_paused_and_resumed_from_the_window() {
 
     // The running one pauses.
     b.text_of(
-        "[...document.querySelectorAll('#routines-list .row-actions')][0]
-           .querySelector('button:nth-child(2)').click(); 'ok'",
+        "[...document.querySelectorAll('#routines-list .row-actions')][0] .querySelector('button:nth-child(2)').click(); 'ok'",
     )
     .await
     .expect("pause");
@@ -1914,8 +1913,7 @@ async fn a_routine_can_be_paused_and_resumed_from_the_window() {
 
     // The paused one resumes: the same control, the other direction.
     b.text_of(
-        "[...document.querySelectorAll('#routines-list .row-actions')][1]
-           .querySelector('button:nth-child(2)').click(); 'ok'",
+        "[...document.querySelectorAll('#routines-list .row-actions')][1] .querySelector('button:nth-child(2)').click(); 'ok'",
     )
     .await
     .expect("resume");
@@ -5368,9 +5366,7 @@ async fn a_dead_runtime_stops_reading_as_connected() {
     // disabled with the button.
     let typing = b
         .text_of(
-            "(() => { const i = document.getElementById('input');
-                      i.value = 'half a paragraph';
-                      return String(!i.disabled && i.value === 'half a paragraph'); })()",
+            "(() => { const i = document.getElementById('input'); i.value = 'half a paragraph'; return String(!i.disabled && i.value === 'half a paragraph'); })()",
         )
         .await
         .unwrap_or_default();
@@ -5384,8 +5380,7 @@ async fn a_dead_runtime_stops_reading_as_connected() {
     // one action; it leads to the connect panel, and connecting again must
     // undo every part of this state rather than the visible part of it.
     b.text_of(
-        "window.__replies.runtime_alive = true;
-         document.getElementById('runtime-reconnect').click(); 'ok'",
+        "window.__replies.runtime_alive = true; document.getElementById('runtime-reconnect').click(); 'ok'",
     )
     .await
     .expect("reconnect");
@@ -5405,14 +5400,13 @@ async fn a_dead_runtime_stops_reading_as_connected() {
         .expect("connect again");
     let recovered = wait_until(
         &b,
-        "String(!document.getElementById('send').disabled
-                 && document.getElementById('runtime-gone').classList.contains('hidden'))",
+        "String(!document.getElementById('send').disabled && document.getElementById('runtime-gone').classList.contains('hidden'))",
         Duration::from_secs(10),
     )
     .await;
     assert!(
         recovered,
-        "the window reconnected still showing the last runtime's death, with Send dead; one crash          would mute it for the rest of the session"
+        "the window reconnected still showing the last runtime's death, with Send dead; one crash would mute it for the rest of the session"
     );
 }
 
@@ -5442,9 +5436,7 @@ async fn disconnecting_is_not_reported_as_a_crash() {
     // Not a contrivance: `disconnect` drops the viewer and the computer this
     // window started, and waits on the children it is killing.
     b.text_of(
-        "window.__replies.runtime_alive = false;
-         window.__replies.disconnect = () => new Promise((r) => setTimeout(r, 4000));
-         document.getElementById('disconnect').click(); 'ok'",
+        "window.__replies.runtime_alive = false; window.__replies.disconnect = () => new Promise((r) => setTimeout(r, 4000)); document.getElementById('disconnect').click(); 'ok'",
     )
     .await
     .expect("disconnect");
@@ -5489,10 +5481,7 @@ async fn a_turn_that_fails_over_a_dead_runtime_says_the_runtime_died() {
     open_session(&b, "s1").await;
 
     b.text_of(
-        "window.__throw = { prompt: 'openbot acp is gone' };
-         window.__replies.runtime_alive = false;
-         document.getElementById('input').value = 'do the thing';
-         document.getElementById('composer').requestSubmit(); 'ok'",
+        "window.__throw = { prompt: 'openbot acp is gone' }; window.__replies.runtime_alive = false; document.getElementById('input').value = 'do the thing'; document.getElementById('composer').requestSubmit(); 'ok'",
     )
     .await
     .expect("a turn that fails");
@@ -5531,9 +5520,7 @@ async fn a_turn_that_fails_for_any_other_reason_still_says_what_it_was_told() {
     open_session(&b, "s1").await;
 
     b.text_of(
-        "window.__throw = { prompt: 'the model refused' };
-         document.getElementById('input').value = 'do the thing';
-         document.getElementById('composer').requestSubmit(); 'ok'",
+        "window.__throw = { prompt: 'the model refused' }; document.getElementById('input').value = 'do the thing'; document.getElementById('composer').requestSubmit(); 'ok'",
     )
     .await
     .expect("a turn that fails");
@@ -5571,10 +5558,7 @@ async fn a_turn_that_fails_for_any_other_reason_still_says_what_it_was_told() {
 /// which "the list kept its scroll position" means anything.
 async fn roster_of(b: &Browser, n: usize) {
     b.text_of(&format!(
-        "window.__replies.roster = Array.from({{ length: {n} }}, (_, i) => ({{
-           id: 'bot-' + i, name: 'Bot ' + i, title: '', description: '',
-           hidden: false, messages: 0 }}));
-         refreshRoster(); 'ok'"
+        "window.__replies.roster = Array.from({{ length: {n} }}, (_, i) => ({{ id: 'bot-' + i, name: 'Bot ' + i, title: '', description: '', hidden: false, messages: 0 }})); refreshRoster(); 'ok'"
     ))
     .await
     .expect("a big roster");
@@ -5648,13 +5632,7 @@ async fn a_roster_that_keeps_its_rows_still_shows_what_changed() {
 
     // Reordered, one gone, one renamed, one gaining history.
     b.text_of(
-        "window.__replies.roster = [
-           { id: 'bot-3', name: 'Bot 3', title: '', description: '', hidden: false, messages: 9 },
-           { id: 'bot-1', name: 'Bot 1', title: 'keeps the books', description: '',
-             hidden: false, messages: 0 },
-           { id: 'bot-0', name: 'Renamed', title: '', description: '', hidden: true, messages: 0 },
-         ];
-         refreshRoster(); 'ok'",
+        "window.__replies.roster = [ { id: 'bot-3', name: 'Bot 3', title: '', description: '', hidden: false, messages: 9 }, { id: 'bot-1', name: 'Bot 1', title: 'keeps the books', description: '', hidden: false, messages: 0 }, { id: 'bot-0', name: 'Renamed', title: '', description: '', hidden: true, messages: 0 }, ]; refreshRoster(); 'ok'",
     )
     .await
     .expect("the roster changes");
@@ -5694,10 +5672,7 @@ async fn a_roster_that_keeps_its_rows_still_shows_what_changed() {
     // And the open Bot still reads as open, which is the one piece of state
     // the row carries that nothing else on screen repeats.
     b.text_of(
-        "window.__replies.roster = [
-           { id: 'talent-scout', name: 'Talent Scout', title: '', description: '',
-             hidden: false, messages: 0 }];
-         refreshRoster(); 'ok'",
+        "window.__replies.roster = [ { id: 'talent-scout', name: 'Talent Scout', title: '', description: '', hidden: false, messages: 0 }]; refreshRoster(); 'ok'",
     )
     .await
     .expect("back to the open Bot");
@@ -5733,11 +5708,7 @@ async fn a_broken_connector_read_does_not_take_the_routines_with_it() {
     open_session(&b, "s1").await;
 
     b.text_of(
-        "window.__throw = { connectors: 'the connector store is unreadable' };
-         window.__replies.routines = [
-           { bot: 'talent-scout', bot_name: 'Talent Scout', id: 'nightly',
-             enabled: true, trigger: 'every day at 09:00', next: null }];
-         document.getElementById('rules-btn').click(); 'ok'",
+        "window.__throw = { connectors: 'the connector store is unreadable' }; window.__replies.routines = [ { bot: 'talent-scout', bot_name: 'Talent Scout', id: 'nightly', enabled: true, trigger: 'every day at 09:00', next: null }]; document.getElementById('rules-btn').click(); 'ok'",
     )
     .await
     .expect("open settings");
@@ -5785,8 +5756,7 @@ async fn a_list_says_nothing_about_being_empty_until_it_knows() {
     open_session(&b, "s1").await;
 
     b.text_of(
-        "window.__replies.routines = () => new Promise((r) => setTimeout(() => r([]), 2500));
-         document.getElementById('rules-btn').click(); 'ok'",
+        "window.__replies.routines = () => new Promise((r) => setTimeout(() => r([]), 2500)); document.getElementById('rules-btn').click(); 'ok'",
     )
     .await
     .expect("open settings over a slow read");
@@ -5822,8 +5792,7 @@ async fn a_list_says_nothing_about_being_empty_until_it_knows() {
     // And when the answer does arrive, the empty state is finally the truth.
     let settled = wait_until(
         &b,
-        "String(!document.getElementById('routines-empty').classList.contains('hidden')
-                && document.getElementById('routines-state').classList.contains('hidden'))",
+        "String(!document.getElementById('routines-empty').classList.contains('hidden') && document.getElementById('routines-state').classList.contains('hidden'))",
         Duration::from_secs(10),
     )
     .await;
@@ -5889,9 +5858,7 @@ async fn a_running_turn_says_so_where_the_person_is_reading() {
 
     // A turn that does not answer, which is exactly the interval under test.
     b.text_of(
-        "window.__replies.prompt = () => new Promise(() => {});
-         document.getElementById('input').value = 'do the thing';
-         document.getElementById('composer').requestSubmit(); 'ok'",
+        "window.__replies.prompt = () => new Promise(() => {}); document.getElementById('input').value = 'do the thing'; document.getElementById('composer').requestSubmit(); 'ok'",
     )
     .await
     .expect("a turn that hangs");
@@ -5911,10 +5878,7 @@ async fn a_running_turn_says_so_where_the_person_is_reading() {
     // log's own box, which is the assertion that a status pill cannot pass.
     let inside = b
         .text_of(
-            "(() => { const l = document.getElementById('log').getBoundingClientRect();
-                      const r = document.querySelector('#log .msg.pending').getBoundingClientRect();
-                      return String(r.left >= l.left && r.right <= l.right + 1
-                                    && r.top >= l.top && r.bottom <= l.bottom + 1); })()",
+            "(() => { const l = document.getElementById('log').getBoundingClientRect(); const r = document.querySelector('#log .msg.pending').getBoundingClientRect(); return String(r.left >= l.left && r.right <= l.right + 1 && r.top >= l.top && r.bottom <= l.bottom + 1); })()",
         )
         .await
         .unwrap_or_default();
@@ -5991,10 +5955,7 @@ async fn the_computer_is_on_screen_without_being_started() {
 
     let showing = b
         .text_of(
-            "(() => { const r = document.getElementById('rail');
-                      const i = document.getElementById('computer-idle');
-                      return String(!!r && !r.classList.contains('collapsed')
-                                    && !i.classList.contains('hidden')); })()",
+            "(() => { const r = document.getElementById('rail'); const i = document.getElementById('computer-idle'); return String(!!r && !r.classList.contains('collapsed') && !i.classList.contains('hidden')); })()",
         )
         .await
         .unwrap_or_default();
@@ -6177,8 +6138,7 @@ async fn a_computer_that_dies_can_be_started_again_from_the_rail() {
     .expect("start another");
     let again = wait_until(
         &b,
-        "String(!document.getElementById('computer-frame').classList.contains('hidden')
-                && window.__sent('open_computer').length === 2)",
+        "String(!document.getElementById('computer-frame').classList.contains('hidden') && window.__sent('open_computer').length === 2)",
         Duration::from_secs(10),
     )
     .await;
@@ -6292,8 +6252,7 @@ async fn expanding_the_computer_stays_in_this_window_and_does_not_restart_it() {
 
     let covers = b
         .text_of(
-            "(() => { const r = document.getElementById('rail').getBoundingClientRect();
-                      return String(r.width > innerWidth * 0.7 && r.height > innerHeight * 0.7); })()",
+            "(() => { const r = document.getElementById('rail').getBoundingClientRect(); return String(r.width > innerWidth * 0.7 && r.height > innerHeight * 0.7); })()",
         )
         .await
         .unwrap_or_default();
@@ -6306,9 +6265,7 @@ async fn expanding_the_computer_stays_in_this_window_and_does_not_restart_it() {
     // not the same iframe re-navigated.
     let kept = b
         .text_of(
-            "(() => { const f = document.getElementById('computer-frame');
-                      return String(f === window.__frameWas
-                                    && (f.getAttribute('src') || '').includes('7777')); })()",
+            "(() => { const f = document.getElementById('computer-frame'); return String(f === window.__frameWas && (f.getAttribute('src') || '').includes('7777')); })()",
         )
         .await
         .unwrap_or_default();
@@ -6336,10 +6293,7 @@ async fn expanding_the_computer_stays_in_this_window_and_does_not_restart_it() {
     // still answers Tab looks unavailable and is not.
     let sealed = b
         .text_of(
-            "(() => { const w = document.getElementById('workspace');
-                      return String([...w.children].every(
-                        (p) => p.id === 'rail' ? !p.hasAttribute('inert')
-                                              : p.hasAttribute('inert'))); })()",
+            "(() => { const w = document.getElementById('workspace'); return String([...w.children].every( (p) => p.id === 'rail' ? !p.hasAttribute('inert') : p.hasAttribute('inert'))); })()",
         )
         .await
         .unwrap_or_default();
@@ -6383,10 +6337,7 @@ async fn escape_shrinks_the_expanded_computer_and_gives_the_app_back() {
 
     let down = b
         .text_of(
-            "(() => { const r = document.getElementById('rail');
-                      const w = document.getElementById('workspace');
-                      return String(!r.classList.contains('expanded')
-                                    && [...w.children].every((p) => !p.hasAttribute('inert'))); })()",
+            "(() => { const r = document.getElementById('rail'); const w = document.getElementById('workspace'); return String(!r.classList.contains('expanded') && [...w.children].every((p) => !p.hasAttribute('inert'))); })()",
         )
         .await
         .unwrap_or_default();
@@ -6425,9 +6376,7 @@ async fn stopping_the_computer_takes_the_expanded_view_down_with_it() {
 
     let recovered = wait_until(
         &b,
-        "String(!document.getElementById('rail').classList.contains('expanded')
-                && [...document.getElementById('workspace').children]
-                     .every((p) => !p.hasAttribute('inert')))",
+        "String(!document.getElementById('rail').classList.contains('expanded') && [...document.getElementById('workspace').children] .every((p) => !p.hasAttribute('inert')))",
         Duration::from_secs(10),
     )
     .await;
@@ -6584,9 +6533,7 @@ async fn the_test_run_button_says_it_is_running_and_refuses_a_second_press() {
 
     let busy = wait_until(
         &b,
-        "(() => { const t = [...document.querySelectorAll('#routines-list button')]
-                    .find((x) => x.textContent === 'Running…');
-                  return String(!!t && t.disabled); })()",
+        "(() => { const t = [...document.querySelectorAll('#routines-list button')] .find((x) => x.textContent === 'Running…'); return String(!!t && t.disabled); })()",
         Duration::from_secs(5),
     )
     .await;
@@ -6597,8 +6544,7 @@ async fn the_test_run_button_says_it_is_running_and_refuses_a_second_press() {
 
     let back = wait_until(
         &b,
-        "String(!![...document.querySelectorAll('#routines-list button')]
-                 .find((x) => x.textContent === 'Test run' && !x.disabled))",
+        "String(!![...document.querySelectorAll('#routines-list button')] .find((x) => x.textContent === 'Test run' && !x.disabled))",
         Duration::from_secs(15),
     )
     .await;
@@ -6674,7 +6620,7 @@ async fn a_routine_can_be_made_from_the_window_without_typing_cron() {
     assert_eq!(v["name"], "Morning digest", "{args}");
     assert_eq!(
         v["cron"], "30 7 * * MON-FRI",
-        "the named cadence and the time composed to the wrong schedule, so this runs when          nobody asked it to: {args}"
+        "the named cadence and the time composed to the wrong schedule, so this runs when nobody asked it to: {args}"
     );
     assert_eq!(
         v["instructions"], "summarise overnight applications",
@@ -6688,8 +6634,7 @@ async fn a_routine_can_be_made_from_the_window_without_typing_cron() {
     // The form empties, or the next routine is made by editing the last one.
     let left = b
         .text_of(
-            "document.getElementById('routine-name').value + '|' +
-             document.getElementById('routine-task').value",
+            "document.getElementById('routine-name').value + '|' + document.getElementById('routine-task').value",
         )
         .await
         .unwrap_or_default();

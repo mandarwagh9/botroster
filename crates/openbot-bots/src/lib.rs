@@ -3043,7 +3043,7 @@ mod routine_tests {
 
         assert!(
             r.is_due(nine_oh_five).unwrap(),
-            "a rehearsal marked the routine as having run; the nine o'clock firing will never              happen and the history will say it did"
+            "a rehearsal marked the routine as having run; the nine o'clock firing will never happen and the history will say it did"
         );
         assert_eq!(
             r.last_run, None,
