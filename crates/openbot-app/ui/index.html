@@ -209,7 +209,6 @@
              alone hold the invariant after any transition but not on the
              screen a new install opens on. -->
         <button id="edit-bot" class="link hidden">Edit</button>
-        <button id="computer" class="link computer-btn"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="8.5" rx="1.5"/><path d="M6 13.5h4"/></svg><span>Agent Computer</span></button>
         <!-- How many approvals are waiting on a person, held in the chrome so
              it is true wherever they are in the app. DIRECTION.md pairs the
              inline gate with a persistent count for a reason: the dialog is
@@ -291,22 +290,6 @@
         </div>
       </div>
 
-      <!-- The Agent Computer. An iframe onto the shipped viewer rather than a
-           second implementation of it, so the takeover lock a person relies on
-           is the one the hub already enforces and already has tests. -->
-      <section id="computer-panel" class="computer-panel hidden">
-        <header class="computer-head">
-          <h3>Agent Computer</h3>
-          <p class="hint">
-            Take control here for a password, a 2FA code or a CAPTCHA — never
-            in chat. While you hold it the Bot is locked out of this computer.
-          </p>
-          <button id="close-computer" class="link">Close</button>
-        </header>
-        <p id="computer-error" class="error"></p>
-        <iframe id="computer-frame" title="Agent Computer"></iframe>
-      </section>
-
       <form id="composer" class="composer hidden">
         <!-- `@` names a teammate, a routine or a connected app; `/` names a
              saved skill. Above the box rather than below it, so it never
@@ -344,6 +327,51 @@
         </div>
       </form>
     </section>
+
+    <!-- The Agent Computer, as a peer of the conversation rather than
+         something behind a button.
+
+         It is the one thing this product has that a chat app does not: named
+         teammates working on one durable computer. Putting it behind a toggle
+         in the conversation column said the opposite — that it was an
+         occasional accessory to the chat. The rail is always here; the
+         computer inside it is started when somebody wants one, and says so
+         plainly when there is none, because a pane that is always present
+         must not mean a subprocess that is always running.
+
+         An iframe onto the shipped viewer rather than a second
+         implementation of it, so the takeover lock a person relies on is the
+         one the hub already enforces and already has tests. -->
+    <aside id="rail" class="rail" aria-label="Agent Computer">
+      <header class="rail-head">
+        <h3>Agent Computer</h3>
+        <button id="rail-toggle" class="link" aria-expanded="true"
+                aria-controls="computer-panel">Collapse</button>
+      </header>
+
+      <section id="computer-panel" class="computer-panel">
+        <!-- No computer is running. Not an error and not styled as one: it is
+             the ordinary state of a fresh window, and it carries the one
+             action that changes it. -->
+        <div id="computer-idle" class="computer-idle">
+          <p id="computer-idle-why">
+            No computer is running yet. Starting one gives every Bot here a
+            browser and a workspace to act in — and gives you somewhere to
+            watch them do it.
+          </p>
+          <button id="computer-start" class="primary">Start the computer</button>
+        </div>
+        <p id="computer-error" class="error"></p>
+        <iframe id="computer-frame" title="Agent Computer" class="hidden"></iframe>
+        <footer class="rail-foot hidden" id="computer-live">
+          <p class="hint">
+            Take control here for a password, a 2FA code or a CAPTCHA — never
+            in chat. While you hold it the Bot is locked out of this computer.
+          </p>
+          <button id="close-computer" class="link">Stop the computer</button>
+        </footer>
+      </section>
+    </aside>
   </div>
 
   <!-- Approval. Above everything, because nothing else on screen matters

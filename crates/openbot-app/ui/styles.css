@@ -554,8 +554,19 @@ textarea {
 .workspace {
   flex: 1;
   display: grid;
-  grid-template-columns: 248px 1fr;
+  /* Roster, conversation, computer. The third column is the product's whole
+     argument, so it holds a column of its own rather than a button.
+
+     Collapsing narrows the column; it never removes the rail from the tree.
+     An iframe that is unmounted and remounted is a fresh navigation, so a
+     rail that came and went would restart the viewer — and stop a computer
+     somebody is using — every time it was tidied out of the way. */
+  grid-template-columns: 248px 1fr 380px;
   min-height: 0;
+}
+
+.workspace:has(#rail.collapsed) {
+  grid-template-columns: 248px 1fr 40px;
 }
 
 .roster {
@@ -832,9 +843,6 @@ textarea {
   font-size: var(--fs-12);
 }
 
-.computer-btn {
-  margin-left: auto;
-}
 
 /* The connection pill. Semantic ink on its wash; the dot carries the state. */
 .status {
@@ -1464,37 +1472,86 @@ textarea {
 
 /* --------------------------------------------------------- computer panel */
 
-.computer-panel {
+.rail {
+  background: var(--sidebar);
+  border-left: 1px solid var(--line-soft);
   display: flex;
   flex-direction: column;
-  min-height: 420px;
-  margin: 12px 24px 0;
-  border: 1px solid var(--line);
-  border-radius: var(--r-card);
+  min-height: 0;
   overflow: hidden;
-  background: var(--panel);
-  animation: rise var(--t) var(--ease) both;
 }
 
-.computer-head {
+.rail-head {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--line-soft);
+  gap: 10px;
+  padding: 14px 12px 10px;
 }
 
-.computer-head h3 {
+.rail-head h3 {
   margin: 0;
   font-size: var(--fs-13);
   font-weight: 600;
   white-space: nowrap;
 }
 
-.computer-head .hint {
-  margin: 0;
+.rail-head .link {
+  margin-left: auto;
+}
+
+/* Collapsed: the heading and the body go, the control stays. A collapsed rail
+   that cannot be reopened is a rail that has been deleted. */
+.rail.collapsed .rail-head h3,
+.rail.collapsed .computer-panel {
+  display: none;
+}
+
+.rail.collapsed .rail-head {
+  padding: 14px 4px;
+}
+
+.computer-panel {
+  display: flex;
+  flex-direction: column;
   flex: 1;
-  font-size: var(--fs-12);
+  min-height: 0;
+  margin: 0 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--panel);
+}
+
+/* No computer running. The ordinary state of a fresh window, so it is quiet
+   type on the panel rather than anything that reads as a failure. */
+/* Centred in the panel rather than pinned to the top of it. The rail is as
+   tall as the window, so top-aligned copy left six hundred pixels of empty
+   box under three lines of text — which reads as something that failed to
+   load rather than as space held for a computer. */
+.computer-idle {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px 20px;
+  color: var(--muted);
+  font-size: var(--fs-13);
+  line-height: 1.55;
+}
+
+.computer-idle p {
+  margin: 0;
+}
+
+.rail-foot {
+  padding: 10px 12px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.rail-foot .hint {
+  margin: 0 0 8px;
 }
 
 #computer-frame {

@@ -2692,13 +2692,15 @@ async fn the_computer_panel_is_tall_enough_for_the_viewer_it_holds() {
     let Some((b, _p)) = page().await else { return };
     open_session(&b, "s1").await;
 
+    // No class fiddling any more: the panel lives in a rail that is always
+    // there. The previous version removed `hidden`, measured, and put it back
+    // — which against a panel that is never hidden measured the same number
+    // either way and would have passed over a rail that had collapsed to
+    // nothing.
     let size = b
         .text_of(concat!(
             "(() => { const p = document.getElementById('computer-panel');",
-            "p.classList.remove('hidden');",
-            "const h = Math.round(p.getBoundingClientRect().height);",
-            "p.classList.add('hidden');",
-            "return String(h); })()",
+            "return String(Math.round(p.getBoundingClientRect().height)); })()",
         ))
         .await
         .unwrap();
@@ -3251,11 +3253,10 @@ async fn no_text_in_any_surface_falls_below_the_contrast_it_needs() {
             "edit-dialog",
         ),
         ("palette", "openPalette()", "palette"),
-        (
-            "agent computer",
-            "document.getElementById('computer').click()",
-            "computer-panel",
-        ),
+        // Always on screen now, so "opening" it is expanding the rail. Swept
+        // all the same: it is a surface with text on it, and the sweep is
+        // about what that text measures, not about how it got there.
+        ("agent computer", "setRail(true)", "rail"),
     ];
 
     let Some((b, _p)) = page().await else { return };
@@ -3367,15 +3368,12 @@ async fn no_text_in_any_surface_falls_below_the_contrast_it_needs() {
             &mut bad,
         );
 
-        // Leave the page as the next pass expects it: the approval answered,
-        // and the computer panel closed, since its opener is a toggle and a
-        // second click would close rather than open it.
-        b.text_of(concat!(
-            "document.querySelector('#dialog-options button')?.click(); ",
-            "document.getElementById('close-computer').click(); 'ok'"
-        ))
-        .await
-        .unwrap();
+        // Leave the page as the next pass expects it: the approval answered.
+        // The computer needs no undoing — the rail is not a thing that opens,
+        // so expanding it twice is expanding it.
+        b.text_of("document.querySelector('#dialog-options button')?.click(); 'ok'")
+            .await
+            .unwrap();
         settle().await;
     }
     b.text_of("document.documentElement.style.colorScheme = ''; 'ok'")
@@ -5915,5 +5913,279 @@ async fn a_running_turn_says_so_where_the_person_is_reading() {
     assert_eq!(
         gone, "0",
         "the window is still saying it is waiting for something that arrived"
+    );
+}
+
+/// The computer is on screen without anything having been started.
+///
+/// It is the one thing this product has that a chat app does not, and it used
+/// to sit behind a toggle in the conversation column — which said the
+/// opposite: that it was an occasional accessory to the chat. It is a peer of
+/// the conversation now.
+///
+/// The other half of the same sentence, and the reason the rail is not simply
+/// "always running": a pane that is always present must not mean a subprocess
+/// that is always spawned. `open_computer` starts `openbot watch` and waits
+/// for it to announce a port. Nobody should pay for that by connecting.
+#[tokio::test]
+async fn the_computer_is_on_screen_without_being_started() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    let showing = b
+        .text_of(
+            "(() => { const r = document.getElementById('rail');
+                      const i = document.getElementById('computer-idle');
+                      return String(!!r && !r.classList.contains('collapsed')
+                                    && !i.classList.contains('hidden')); })()",
+        )
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        showing, "true",
+        "the rail is not on screen offering a computer, which is the whole of this change"
+    );
+
+    let started = b
+        .text_of("String(window.__sent('open_computer').length)")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        started, "0",
+        "connecting spawned a viewer subprocess nobody asked for; the rail is present, not running"
+    );
+
+    // And the frame is not sitting there black over a computer that does not
+    // exist. Either the offer or the computer, never both and never neither.
+    let frame = b
+        .text_of("String(document.getElementById('computer-frame').classList.contains('hidden'))")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        frame, "true",
+        "an empty black rectangle is not an honest idle state"
+    );
+}
+
+/// Collapsing the rail does not stop the computer.
+///
+/// Tidying a pane out of the way is not a reason to kill a process somebody is
+/// using, and the backend already draws exactly this distinction — `disconnect`
+/// stops a computer this window started and deliberately leaves one it did
+/// not. The rail keeps its iframe mounted for the same reason: unmounting and
+/// remounting an iframe is a fresh navigation, so a rail that came and went
+/// would restart the viewer every time it was collapsed.
+///
+/// This is the assertion that would catch the lazy version of this change,
+/// where collapse reuses the close handler because they used to be one button.
+#[tokio::test]
+async fn collapsing_the_rail_does_not_stop_the_computer() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    b.text_of(concat!(
+        "window.__replies.open_computer = 'http://127.0.0.1:7777/?k=x';",
+        "document.getElementById('computer-start').click(); 'ok'"
+    ))
+    .await
+    .expect("start a computer");
+    let live = wait_until(
+        &b,
+        "String(!document.getElementById('computer-frame').classList.contains('hidden'))",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(
+        live,
+        "the computer never came up, so collapsing it proves nothing"
+    );
+
+    b.text_of("document.getElementById('rail-toggle').click(); 'ok'")
+        .await
+        .expect("collapse");
+    settle().await;
+
+    let collapsed = b
+        .text_of("String(document.getElementById('rail').classList.contains('collapsed'))")
+        .await
+        .unwrap_or_default();
+    assert_eq!(collapsed, "true", "the rail did not collapse");
+
+    let stopped = b
+        .text_of("String(window.__sent('close_computer').length)")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        stopped, "0",
+        "collapsing the rail stopped the computer; a pane being tidied away killed a process"
+    );
+
+    // And the iframe kept its address, which is what keeps the viewer from
+    // being restarted the moment somebody expands the rail again.
+    let src = b
+        .text_of("document.getElementById('computer-frame').getAttribute('src') || ''")
+        .await
+        .unwrap_or_default();
+    assert!(
+        src.contains("127.0.0.1:7777"),
+        "the frame lost its address while collapsed, so expanding restarts the viewer: {src:?}"
+    );
+
+    // Expanding brings it back rather than starting a second one.
+    b.text_of("document.getElementById('rail-toggle').click(); 'ok'")
+        .await
+        .expect("expand");
+    settle().await;
+    let opened = b
+        .text_of("String(window.__sent('open_computer').length)")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        opened, "1",
+        "expanding the rail started a second viewer over the one already running"
+    );
+}
+
+/// A computer that dies can be started again from the rail.
+///
+/// The poll that notices a dead viewer used to end with "close this and open
+/// it again", which was accurate when the panel was something you closed. In a
+/// rail that is always here, closing is not a gesture any more — so a check
+/// moved into a container that never closes is a check with no way to re-arm,
+/// and the rail would show a dead frame forever. That is precisely the bug the
+/// poll was written to prevent, reintroduced by moving its container.
+#[tokio::test]
+async fn a_computer_that_dies_can_be_started_again_from_the_rail() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    b.text_of(concat!(
+        "window.__replies.open_computer = 'http://127.0.0.1:7777/?k=x';",
+        "window.__replies.computer_alive = true;",
+        "document.getElementById('computer-start').click(); 'ok'"
+    ))
+    .await
+    .expect("start a computer");
+    let live = wait_until(
+        &b,
+        "String(!document.getElementById('computer-frame').classList.contains('hidden'))",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(live, "the computer never came up");
+
+    b.text_of("window.__replies.computer_alive = false; 'ok'")
+        .await
+        .expect("it dies");
+
+    let noticed = wait_until(
+        &b,
+        "String(!document.getElementById('computer-idle').classList.contains('hidden'))",
+        Duration::from_secs(15),
+    )
+    .await;
+    assert!(
+        noticed,
+        "the computer has been gone for fifteen seconds and the rail still shows its last frame"
+    );
+    let why = b
+        .text_of("document.getElementById('computer-idle-why').textContent")
+        .await
+        .unwrap_or_default();
+    assert!(
+        why.contains("stopped being served"),
+        "the rail went back to the first-run offer as if nothing had happened: {why:?}"
+    );
+
+    // And the frame was blanked, not merely covered. A still picture of a
+    // computer that is gone is worse than an empty panel, because only one of
+    // them is accurate — and a hidden frame that kept its address paints that
+    // picture again the moment anything shows it.
+    let stale = b
+        .text_of("document.getElementById('computer-frame').getAttribute('src') || '(none)'")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        stale, "(none)",
+        "the dead computer's address is still in the frame, ready to repaint its last moment"
+    );
+
+    // And the offer works: this is the re-arm the old recovery text assumed a
+    // Close button would provide.
+    b.text_of(concat!(
+        "window.__replies.computer_alive = true;",
+        "document.getElementById('computer-start').click(); 'ok'"
+    ))
+    .await
+    .expect("start another");
+    let again = wait_until(
+        &b,
+        "String(!document.getElementById('computer-frame').classList.contains('hidden')
+                && window.__sent('open_computer').length === 2)",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(
+        again,
+        "the rail offered to start another computer and the offer did nothing"
+    );
+}
+
+/// A step replayed from history carries no duration, because none was measured.
+///
+/// Found by looking at a shot rather than by a test: every step in a reopened
+/// conversation read `0ms`. That is not a fast step. A saved conversation is
+/// poured back through the same function that draws live rows — which is what
+/// keeps the two from drifting apart — so timing it from the wall clock timed
+/// the redraw, and the redraw takes no time at all.
+///
+/// The runtime does record `elapsed_ms` per tool call, but ACP's tool-call
+/// update has no field to carry it, so for history there is genuinely no
+/// duration to show. Showing none is the honest rendering of that; showing
+/// `0ms` is a measurement of the wrong thing presented as a measurement of the
+/// right one.
+#[tokio::test]
+async fn a_step_replayed_from_history_does_not_claim_to_have_taken_no_time() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    // Reopen the Bot with a saved conversation behind it, which is the path
+    // every thread older than this window takes.
+    b.text_of(concat!(
+        "window.__replies.open_bot = { session: 's1', name: 'Talent Scout', history: [",
+        "  { kind: 'user', text: 'read the notes' },",
+        "  { kind: 'tool', text: 'fs.read {}', args: { path: 'notes.md' } },",
+        "  { kind: 'result', text: '\\u2713 {\"contents\":\"hi\"}' } ] };",
+        "document.querySelector('#bots .bot').click(); 'ok'"
+    ))
+    .await
+    .expect("reopen with history");
+
+    let drawn = wait_until(
+        &b,
+        "String(document.querySelectorAll('#log .msg.tool').length === 1)",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(drawn, "the saved conversation never came back");
+
+    let shown = b
+        .text_of("document.querySelector('#log .msg.tool .step-dur').textContent")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        shown, "",
+        "a step nobody timed is claiming a duration; {shown:?} is how long the redraw took"
+    );
+
+    // And the row is otherwise complete, so this is not passing because the
+    // history failed to render at all.
+    let said = b
+        .text_of("document.querySelector('#log .msg.tool').textContent")
+        .await
+        .unwrap_or_default();
+    assert!(
+        said.contains("notes.md"),
+        "the replayed step did not render, so the empty duration proves nothing: {said:?}"
     );
 }

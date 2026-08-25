@@ -58,7 +58,7 @@ secretValueInput.addEventListener("keydown", (e) => {
 const nameDialog = $("name-dialog");
 const newName = $("new-name");
 const nameError = $("name-error");
-const computerPanel = $("computer-panel");
+const rail = $("rail");
 const computerFrame = $("computer-frame");
 const computerError = $("computer-error");
 
@@ -348,6 +348,23 @@ function jsonTail(text, from) {
 /// The tool step currently open: the row the next result should complete.
 let openStep = null;
 
+/// True while a saved conversation is being poured back into the log.
+///
+/// Replayed rows are drawn by the same function that draws live ones, which is
+/// what keeps the two from drifting apart — and means anything measured from
+/// the wall clock while drawing is measuring the replay. See `startedAt`.
+let replaying = false;
+
+/// Replay a saved conversation without timing our own redraw.
+function replayHistory(history) {
+  replaying = true;
+  try {
+    for (const chunk of history) appendChunk(chunk);
+  } finally {
+    replaying = false;
+  }
+}
+
 function appendChunk(chunk) {
   if (!chunk || !chunk.text) return;
 
@@ -453,7 +470,14 @@ function appendChunk(chunk) {
     // those differ by well under a millisecond, and this is the honest thing to
     // measure from here. If the duration ever needs to be the runtime's own,
     // that is a protocol extension, not a change to this line.
-    el.dataset.startedAt = String(performance.now());
+    // Only when this window watched it happen. A conversation reopened from
+    // disk replays its whole history through here in one tick, and timing that
+    // measures the replay: every step in a month-old thread came back reading
+    // `0ms`, which is not a fast step, it is a number nobody measured. The
+    // runtime does record `elapsed_ms` per call, but ACP's tool-call update
+    // has no field to carry it, so for history there is genuinely no duration
+    // to show — and no duration is the honest rendering of that.
+    if (!replaying) el.dataset.startedAt = String(performance.now());
     openStep = el;
   } else {
     const body = document.createElement("span");
@@ -1029,7 +1053,7 @@ async function openGroup(name) {
     openName = opened.name;
     botName.textContent = opened.name;
     botMark.replaceChildren(markEl(idOf.get(opened.name) || opened.name, opened.name));
-    for (const chunk of opened.history) appendChunk(chunk);
+    replayHistory(opened.history);
     show(noBot, false);
     show(log, true);
     show(composer, true);
@@ -1086,7 +1110,7 @@ async function openBot(name) {
     // What the Bot already remembers. This arrives in the reply rather than as
     // events, so there is no window in which the page is filtering chunks
     // against a session id it has not been told yet.
-    for (const chunk of opened.history) appendChunk(chunk);
+    replayHistory(opened.history);
     show(noBot, false);
     show(log, true);
     show(composer, true);
@@ -2529,27 +2553,74 @@ $("secret-form").addEventListener("submit", async (e) => {
   refreshSecrets();
 });
 
-$("computer").addEventListener("click", async () => {
-  if (!computerPanel.classList.contains("hidden")) return closeComputer();
+/// Show the computer, and start one if there is none.
+///
+/// The header button and the palette entry both land here, and both mean the
+/// same thing when a person presses them: *show me the computer*. It used to
+/// be a toggle over a hidden panel, which made a second press mean "hide it"
+/// and a first press mean "start a subprocess" — one control, two unrelated
+/// consequences, and no way to look at the rail without owning the decision.
+async function revealComputer() {
+  setRail(true);
+  if (!computerFrame.getAttribute("src")) await startComputer();
+}
+
+/// Start the viewer and point the rail at it.
+async function startComputer() {
   computerError.textContent = "";
-  show(computerPanel, true);
+  $("computer-start").disabled = true;
   try {
     // The address carries a one-time key. It is assigned once, here, rather
     // than kept anywhere the page could leak it into a link or a log.
     computerFrame.src = await invoke("open_computer");
+    showComputer(true);
     watchComputer();
   } catch (err) {
     computerError.textContent = String(err);
     computerFrame.removeAttribute("src");
+    showComputer(false);
+  } finally {
+    $("computer-start").disabled = false;
   }
-});
+}
 
-/// While the panel is open, notice if the computer stops being served.
+/// Which of the two things the rail is showing: a computer, or the offer of
+/// one. Never both, and never neither.
+function showComputer(running) {
+  show(computerFrame, running);
+  show($("computer-live"), running);
+  show($("computer-idle"), !running);
+}
+
+/// Collapse or expand the rail. Layout only.
+///
+/// **It must not stop the viewer.** Tidying a pane out of the way is not a
+/// reason to kill a process somebody is using, and the backend already draws
+/// this distinction — `disconnect` stops a computer this window started and
+/// deliberately leaves one it did not. The rail keeps its iframe mounted for
+/// the same reason: unmounting and remounting an iframe is a fresh
+/// navigation, so a rail that came and went would restart the viewer every
+/// time it was collapsed.
+function setRail(open) {
+  rail.classList.toggle("collapsed", !open);
+  const btn = $("rail-toggle");
+  btn.setAttribute("aria-expanded", String(open));
+  btn.textContent = open ? "Collapse" : "Show";
+}
+
+/// While a computer is running, notice if it stops being served.
 ///
 /// An iframe onto a dead process keeps showing what it last painted, which
 /// looks exactly like a computer sitting idle. Polling is the only option
 /// here: the frame is another process's window and there is no event to
 /// listen for.
+///
+/// It used to say "close this and open it again", which was accurate when the
+/// panel was something you closed. In a rail that is always here, closing is
+/// not a gesture any more, so the recovery is the one the rail already
+/// offers: the idle state, with the button that starts another. Moving a
+/// check into a container that never closes is exactly how a check quietly
+/// stops having a way to re-arm.
 let watchingComputer = null;
 
 function watchComputer() {
@@ -2564,14 +2635,16 @@ function watchComputer() {
     if (alive) return;
     clearInterval(watchingComputer);
     watchingComputer = null;
-    // Blank it first: a still picture of a computer that is gone is worse
-    // than an empty panel, because only one of them is accurate.
+    // Blanked first: a still picture of a computer that is gone is worse than
+    // an empty panel, because only one of them is accurate.
     computerFrame.removeAttribute("src");
-    computerError.textContent =
-      "the computer stopped being served — close this and open it again";
+    showComputer(false);
+    $("computer-idle-why").textContent =
+      "The computer stopped being served. Starting another gives the Bots here somewhere to act again.";
   }, 3000);
 }
 
+/// Stop the viewer. The rail stays; the computer does not.
 async function closeComputer() {
   // Blank the frame before stopping the viewer, so the panel never shows a
   // frozen last frame of a computer that is no longer being watched.
@@ -2579,14 +2652,19 @@ async function closeComputer() {
   watchingComputer = null;
   computerFrame.removeAttribute("src");
   computerError.textContent = "";
-  show(computerPanel, false);
+  showComputer(false);
   try {
     await invoke("close_computer");
   } catch (err) {
     reportProblem(err, "could not close the computer");
   }
 }
+
+$("computer-start").addEventListener("click", startComputer);
 $("close-computer").addEventListener("click", closeComputer);
+$("rail-toggle").addEventListener("click", () =>
+  setRail(rail.classList.contains("collapsed")),
+);
 
 // ------------------------------------------------------------- palette
 
@@ -2608,7 +2686,7 @@ function paletteEntries(query) {
   const actions = [
     { label: "Settings", run: () => $("rules-btn").click() },
     { label: "Credentials", run: () => $("credentials").click() },
-    { label: "Agent Computer", run: () => $("computer").click() },
+    { label: "Agent Computer", run: revealComputer },
     { label: "New Bot", run: () => $("new-bot").click() },
     { label: "Show hidden chats", run: () => $("toggle-hidden").click() },
     { label: "Disconnect", run: () => $("disconnect").click() },
