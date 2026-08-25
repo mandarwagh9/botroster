@@ -20,6 +20,17 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    env:
+      # Chrome's own renderer sandbox is on by default now, and it cannot
+      # initialise on the Ubuntu runner: Chrome refuses to start there and the
+      # whole page suite fails with "the browser never published a debugging
+      # port". This is the container-as-root case the flag exists for, and a CI
+      # runner is a disposable machine that browses only its own fixtures.
+      #
+      # Linux only, deliberately. macOS and Windows can sandbox, so leaving it
+      # off there means CI still exercises the shipped default on two of three
+      # platforms rather than testing an arrangement no user has.
+      OPENBOT_BROWSER_NO_SANDBOX: ${{ matrix.os == 'ubuntu-latest' && '1' || '0' }}
     strategy:
       fail-fast: false
       matrix:
