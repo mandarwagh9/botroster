@@ -195,6 +195,60 @@ S.s05 = {
   },
 };
 
+// ---------------------------------------------------------------- s15
+S.s15 = {
+  what: "a full run log, for the README",
+  // The picture at the top of the README. `s05` is the same state with three
+  // steps and fills a third of the column; `s08` fills all of it with sixty
+  // identical `fs.read` rows, which is a scrollback stress case and reads as
+  // one. Neither shows what the product does.
+  //
+  // This is a whole piece of work: a brief, the Bot's own account of what it
+  // is doing, and every one of the four things a computer gives a Bot — list,
+  // read, write, run — each with what it returned and how long it took, and
+  // one still going at the bottom.
+  pre() {
+    window.__replies.connected = true;
+    window.__replies.roster = BOTS;
+    window.__replies.open_bot = {
+      session: "s1",
+      name: "Talent Scout",
+      history: [
+        c("user", "screen this month's applications and draft a shortlist"),
+        c("agent", "Starting from what is already in the workspace."),
+        c("tool", "fs.list .", { args: { path: "." } }),
+        c("result", "✓ {\"entries\":[\"applications\",\"roles\",\"notes.md\"]}"),
+        c("tool", "fs.read applications/2026-08.jsonl", { args: { path: "applications/2026-08.jsonl" } }),
+        c("result", "✓ {\"contents\":\"" + "x".repeat(2400) + "\"}"),
+        c("agent", "Forty-one applications. Nine name Rust in the last two years; I'll read those in full before ranking them."),
+        c("tool", "fs.read applications/a-candidate.md", { args: { path: "applications/a-candidate.md" } }),
+        c("result", "✓ {\"contents\":\"" + "x".repeat(3100) + "\"}"),
+        c("tool", "fs.read applications/b-candidate.md", { args: { path: "applications/b-candidate.md" } }),
+        c("result", "✓ {\"contents\":\"" + "x".repeat(2600) + "\"}"),
+        c("tool", "fs.read roles/rust-platform.md", { args: { path: "roles/rust-platform.md" } }),
+        c("result", "✓ {\"contents\":\"" + "x".repeat(900) + "\"}"),
+        c("tool", "browser.open https://github.com/a-candidate", { args: { url: "https://github.com/a-candidate" } }),
+        c("result", "✓ {\"title\":\"a-candidate (Rust, distributed systems)\"}"),
+        c("agent", "Three stand out. Writing the shortlist with the evidence for each, so it can be checked rather than taken on trust."),
+        c("tool", "fs.write shortlist.md", { args: { path: "shortlist.md" } }),
+        // `bytes_written`, which is what `fs.write` actually returns and what
+        // `STEP_SUMMARY` reads. `bytes` rendered a row with no size on it — a
+        // picture of the product doing less than it does.
+        c("result", "✓ {\"bytes_written\":1841}"),
+      ],
+    };
+  },
+  async post() {
+    await openFirstBot();
+    // One step still going, so the picture shows something happening *now* as
+    // distinct from what already happened.
+    window.__fire("chunk", c("tool", "shell.exec wc -l shortlist.md", { args: { command: "wc -l shortlist.md" } }));
+    await sleep(60);
+    window.__fire("chunk", c("progress", "running"));
+    await sleep(120);
+  },
+};
+
 // ---------------------------------------------------------------- s06
 S.s06 = {
   what: "thread with a pending shell.exec approval",

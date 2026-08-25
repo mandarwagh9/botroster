@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/botroster-thread.png" alt="The BOTROSTER desktop client. A sidebar lists four Bots — Talent Scout, Release Notes, Expense Manager, Support Triage — each with the job it does. The open thread shows Talent Scout working through a task: it wrote a file, read it back, listed the workspace and ran a command, each step a single line with a green tick." width="900">
+  <img src="docs/botroster-readme-thread.png" alt="The BOTROSTER desktop client. A sidebar lists four Bots — Talent Scout, Release Notes, Expense Manager, Support Triage — each with the job it does. Talent Scout is part-way through screening applications: it listed the workspace, read three files, opened a candidate's GitHub page and wrote a shortlist, each step one line with a green tick and what it returned, and one command still running at the bottom. A third column on the right holds the Agent Computer." width="900">
 </p>
 
 <h1 align="center">BOTROSTER</h1>
@@ -211,7 +211,7 @@ key and forgetting to export it is a mistake worth reporting.
 ## Design
 
 <p align="center">
-  <img src="docs/botroster-approval.png" alt="An approval request in BOTROSTER: a Bot has asked to run a shell command, and the window shows the command with the choices — allow once, allow for the rest of this session, or not this time." width="900">
+  <img src="docs/botroster-readme-approval.png" alt="An approval request in BOTROSTER. A Bot has asked to run `cargo test --workspace`; the window shows the command, the directory and the timeout, with the choices allow once, allow for the rest of this session, or not this time. An amber chip in the header reads “1 waiting on you”, and the run log behind it shows the steps that led here." width="900">
 </p>
 
 **Approvals fail closed.** A hook that times out, crashes or answers with something unreadable

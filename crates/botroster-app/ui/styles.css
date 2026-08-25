@@ -1531,7 +1531,33 @@ textarea {
 }
 
 .rail.collapsed .rail-head {
-  padding: 14px 4px;
+  padding: 14px 0;
+  justify-content: center;
+}
+
+/* Collapsed, the chevron is the whole control: the word does not fit in a
+   40px strip and was being cut in half by the rail's own `overflow: hidden`.
+   `sr-only` rather than `display: none` — the button still has to say what it
+   does to anything that is not looking at it. */
+.rail.collapsed #rail-toggle-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.rail.collapsed .rail-head .link {
+  margin-left: 0;
+}
+
+/* Pointing the way it will move: right to send it away, left to bring it
+   back. */
+.rail.collapsed .rail-toggle .icon {
+  transform: scaleX(-1);
 }
 
 .computer-panel {

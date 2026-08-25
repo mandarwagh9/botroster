@@ -119,7 +119,7 @@ this repository's code does not license its marks to anyone either.
 | Asset | Where it is used | Origin | Status |
 |---|---|---|---|
 | `docs/brand/app-icon-source.png` (penguin on violet) | source for `crates/botroster-app/icons/*` and the `.mark.product` data URI in `ui/styles.css` | **Supplied by the repository owner.** Not drawn in-repo, not taken from any upstream in this file. | ⚠️ **Origin unconfirmed.** See below. |
-| `docs/botroster-*.png` (seven screenshots) | `README.md` | **First party.** Screen captures of this project's own desktop client, taken from a local build. No third-party UI, artwork, wordmark or window chrome from another product appears in them. | ✅ Apache-2.0 with the rest of the repository. |
+| `docs/botroster-*.png` (nine screenshots) | `README.md` | **First party.** Screen captures of this project's own desktop client. The two named `botroster-readme-*` are rendered by `scripts/ux-shots.mjs` from the shipped `ui/`, so the picture at the top of the README cannot drift from the product; the rest were taken by hand from local builds and are cited in `.claude/product-review/reports/design-client.md` as dated evidence of what the client looked like then, which is why they are not refreshed. No third-party UI, artwork, wordmark or window chrome from another product appears in them. | ✅ Apache-2.0 with the rest of the repository. |
 
 The screenshot row looks like a formality and is not. §5 says a component is recorded before merging,
 and the rule only works if it is applied to the boring cases too — the one asset that arrived without

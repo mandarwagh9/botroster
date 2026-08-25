@@ -350,8 +350,19 @@
              view of an offer to start something is not a view of anything. -->
         <button id="rail-expand" class="link hidden" aria-expanded="false"
                 aria-controls="computer-panel">Expand</button>
-        <button id="rail-toggle" class="link" aria-expanded="true"
-                aria-controls="computer-panel">Collapse</button>
+        <!-- The label goes when the rail does. A collapsed rail is a 40px
+             strip and "Show" needs 48, so the word was simply cut in half by
+             the rail's own `overflow: hidden` — visible in a screenshot and in
+             nothing the gates measure, because the field-width check sweeps
+             inputs in dialogs and this is a button in a pane.
+
+             The chevron carries the meaning in that width; the word stays in
+             the accessibility tree, and `title` puts it back on hover. -->
+        <button id="rail-toggle" class="link rail-toggle" aria-expanded="true"
+                aria-controls="computer-panel" title="Collapse">
+          <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"/></svg>
+          <span id="rail-toggle-label">Collapse</span>
+        </button>
       </header>
 
       <section id="computer-panel" class="computer-panel">

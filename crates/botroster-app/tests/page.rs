@@ -6774,3 +6774,39 @@ async fn a_routine_needs_a_name_and_something_to_do() {
         "a subprocess was spawned to be told a box is empty, which the page already knew"
     );
 }
+
+/// No control is drawn wider than the space it is given.
+///
+/// The collapsed rail is a 40px strip and its one control said "Show", which
+/// needs 48 — so the word was cut in half by the rail's own `overflow:
+/// hidden`. It shipped, and was found in a screenshot.
+///
+/// Nothing measured it. `no_dialog_field_is_narrower_than_the_placeholder_in_it`
+/// sweeps `input` elements inside `.dialog`, which is neither a button nor a
+/// pane, and the contrast and axe passes do not care about geometry. A control
+/// clipped by its container is invisible to every gate this suite had.
+///
+/// Both states, because the bug only exists in one of them and a test that
+/// checked the comfortable one would have passed all along.
+#[tokio::test]
+async fn no_control_is_cut_off_by_the_pane_it_sits_in() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    const CLIPPED: &str = "(() => { const bad = []; for (const el of document.querySelectorAll('button, a')) { if (!el.getClientRects().length) continue; const over = el.scrollWidth - el.clientWidth; if (over > 1) bad.push((el.id || el.className || el.tagName) + ' overflows its own box by ' + over); let p = el.parentElement; while (p && p !== document.body) { const ps = getComputedStyle(p); if (ps.overflowX === 'hidden' || ps.overflow === 'hidden') { const er = el.getBoundingClientRect(), pr = p.getBoundingClientRect(); if (er.right - pr.right > 1 || pr.left - er.left > 1) { bad.push((el.id || el.textContent.trim().slice(0, 20)) + ' is cut off by ' + (p.id || p.className)); } break; } p = p.parentElement; } } return JSON.stringify(bad); })()";
+
+    for (state, js) in [
+        ("expanded", "setRail(true)"),
+        ("collapsed", "setRail(false)"),
+    ] {
+        b.text_of(&format!("{js}; 'ok'"))
+            .await
+            .expect("set the rail");
+        settle().await;
+        let bad = b.text_of(CLIPPED).await.unwrap_or_default();
+        assert_eq!(
+            bad, "[]",
+            "with the rail {state}, a control is drawn outside the box that clips it: {bad}"
+        );
+    }
+}

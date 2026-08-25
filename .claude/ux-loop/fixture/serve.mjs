@@ -116,6 +116,12 @@ export const SCENARIOS = [
   // most people meet first.
   ["s13", "connect fails: no model configured"],
   ["s14", "bypass on: answered without asking, and recorded"],
+  // The README's picture. Not a gap in the audit — s05 already covers a thread
+  // mid-run — but the shot at the top of the README is the first thing anybody
+  // sees of this product, and it should be rendered from the shipped client by
+  // the same harness as everything else rather than captured by hand and left
+  // to go stale.
+  ["s15", "a full run log, for the README"],
 ];
 
 if (import.meta.url === `file://${process.argv[1].replace(/\\/g, "/")}`) {

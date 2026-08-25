@@ -2779,7 +2779,10 @@ function setRail(open) {
   rail.classList.toggle("collapsed", !open);
   const btn = $("rail-toggle");
   btn.setAttribute("aria-expanded", String(open));
-  btn.textContent = open ? "Collapse" : "Show";
+  // The label only. Setting `textContent` here would take the chevron with it,
+  // and a collapsed rail whose one control has no glyph is a blank strip.
+  $("rail-toggle-label").textContent = open ? "Collapse" : "Show";
+  btn.title = open ? "Collapse" : "Show the Agent Computer";
 }
 
 /// While a computer is running, notice if it stops being served.
