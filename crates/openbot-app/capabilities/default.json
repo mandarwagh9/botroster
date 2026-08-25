@@ -1,6 +1,0 @@
-{
-  "identifier": "default",
-  "description": "The main window of OPENBOT: core permissions only — no plugin surfaces, no shell, no file access. Everything the app can do goes through the Rust commands the engine exposes.",
-  "windows": ["main"],
-  "permissions": ["core:default"]
-}

@@ -17,7 +17,7 @@ import { createRequire } from "node:module";
 import { start, SCENARIOS, ROOT } from "../.claude/ux-loop/fixture/serve.mjs";
 
 // The harness keeps its npm dependencies under .claude/ux-loop so that
-// crates/openbot-app/ui stays npm-free and has no build step. Node resolves
+// crates/botroster-app/ui stays npm-free and has no build step. Node resolves
 // upward from this file and would never find them, so resolve explicitly.
 const require = createRequire(join(ROOT, ".claude", "ux-loop", "package.json"));
 const { chromium } = require("playwright");

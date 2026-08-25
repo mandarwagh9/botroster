@@ -21,7 +21,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-All three must be clean. On Windows, stop any running `openbot.exe` or `openbot-app.exe` first;
+All three must be clean. On Windows, stop any running `botroster.exe` or `botroster-app.exe` first;
 a held binary makes `cargo build` fail with "Access is denied", and the tests then run against a
 stale one.
 
@@ -33,8 +33,8 @@ Long is fine. Record the reasoning, the alternatives you rejected, and what you 
 
 - Code from elsewhere without a row in [`PROVENANCE.md`](PROVENANCE.md).
 - A test that cannot fail.
-- A change that weakens either structural invariant: `openbot-guest` must never be able to reach
-  `openbotd` (`crates/openbot-guest/tests/isolation.rs`), and the policy gate stays in the hub.
+- A change that weakens either structural invariant: `botroster-guest` must never be able to reach
+  `botrosterd` (`crates/botroster-guest/tests/isolation.rs`), and the policy gate stays in the hub.
 
 ## Licence
 

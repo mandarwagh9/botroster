@@ -1,8 +1,8 @@
 # Provenance
 
-Every component in `openbot` that derives from someone else's work, what licence it carries, and what
+Every component in `botroster` that derives from someone else's work, what licence it carries, and what
 that obliges us to do. This file is a hard requirement of the project, not documentation courtesy:
-it is what makes `openbot` safe for other people to adopt and redistribute.
+it is what makes `botroster` safe for other people to adopt and redistribute.
 
 **Rule:** nothing enters this repository without a row in this table.
 
@@ -17,7 +17,7 @@ is published for source transparency and local builds.
 
 | What we take | From | How |
 |---|---|---|
-| Computer Hub wire protocol (frames, methods, handshake, error codes) | `crates/common/xai-tool-protocol` | **Reimplemented** in `openbot-proto` from the published types, to stay wire-compatible. Structural derivation: attributed under Apache-2.0 §4. |
+| Computer Hub wire protocol (frames, methods, handshake, error codes) | `crates/common/xai-tool-protocol` | **Reimplemented** in `botroster-proto` from the published types, to stay wire-compatible. Structural derivation: attributed under Apache-2.0 §4. |
 | Hub transport / registry / resolver concepts (local-shadows-remote) | `crates/common/xai-computer-hub-core` | Design adopted; our own implementation |
 | Guest tool-server shape (`--capabilities` probe, in-guest `/ready` + `/statusz`, daemonize, hub-connect dwell) | `crates/codegen/xai-grok-workspace/src/bin/workspace_server.rs` | Design adopted; our own implementation |
 | Skills / plugins / hooks / permissions / sandbox **file formats** | `/build/features/*` docs + config crates | Format adopted verbatim for compatibility. Formats are interfaces, not expression. |
@@ -57,25 +57,25 @@ repository without a row, and a dependency is a dependency however respectable i
 | Protocol semantics: method names, the permission model, capability negotiation | the published spec | Implemented against, as any client of a standard is. |
 
 No files are modified, so Apache-2.0 §4(b) does not apply. Its `LICENSE` and any `NOTICE` ship with
-the crate and must be carried into any binary distribution of OPENBOT, the same as every other
-Apache-2.0 dependency. Openbot is the **Agent** side; §9 of the spec records which client-side methods
+the crate and must be carried into any binary distribution of BOTROSTER, the same as every other
+Apache-2.0 dependency. Botroster is the **Agent** side; §9 of the spec records which client-side methods
 it deliberately never calls, and why that is a security position rather than an unfinished one.
 
 ### `tauri-apps/tauri`: Apache-2.0 / MIT
 
-The shell of the OPENBOT desktop client (`crates/openbot-app`) is built on Tauri 2: a Rust windowing
+The shell of the BOTROSTER desktop client (`crates/botroster-app`) is built on Tauri 2: a Rust windowing
 and webview layer, so the client keeps one toolchain with the rest of the project instead of
 shipping an Electron-sized runtime. Listed here under §5's "a dependency is a dependency" rule, and
 because §9 names Tauri as the client's engine.
 
 | What we take | From | How |
 |---|---|---|
-| Window, webview, and command bridge between the page and the Rust commands | `tauri` / `tauri-build` 2.11.x (crates.io) | **Depended on, not copied.** The frontend (static HTML/CSS/JS in `crates/openbot-app/ui`) is ours; the runtime is the crate. |
+| Window, webview, and command bridge between the page and the Rust commands | `tauri` / `tauri-build` 2.11.x (crates.io) | **Depended on, not copied.** The frontend (static HTML/CSS/JS in `crates/botroster-app/ui`) is ours; the runtime is the crate. |
 | Native folder picker | `rfd` 0.17 (crates.io, MIT) | Depended on, not copied. |
 | Dialog request ids in the shell | `uuid` 1.x (crates.io, Apache-2.0/MIT) | Depended on, not copied. |
 
 No files are modified, so §4(b) does not apply. Apache-2.0/MIT notice text ships with the crates and
-must be carried into any binary distribution of OPENBOT, like every other dependency. The webview
+must be carried into any binary distribution of BOTROSTER, like every other dependency. The webview
 itself is the OS's own (WebView2 on Windows, WKWebView on macOS, webkit2gtk on Linux), not
 third-party code we redistribute.
 
@@ -87,8 +87,8 @@ Apache-2.0 **§6 explicitly withholds trademark rights.** The code grant does no
   use.** No logos, no wordmarks, no "compatible with"/"powered by" branding, no confusingly similar
   naming.
 - Referring to them factually ("derived from grok-build") is nominative use and is fine. Presenting
-  `openbot` *as* Grok Bot is not.
-- `openbot` is a placeholder name pending a trademark search.
+  `botroster` *as* Grok Bot is not.
+- `botroster` is a placeholder name pending a trademark search.
 
 ## 3. Clean-room boundary
 
@@ -108,7 +108,7 @@ successor's source is published.
 
 ## 4. Our own licence
 
-`openbot` first-party code is **Apache-2.0**, matching the primary upstream so the combination is
+`botroster` first-party code is **Apache-2.0**, matching the primary upstream so the combination is
 frictionless and downstream users inherit one coherent grant.
 
 ### Brand assets
@@ -118,8 +118,8 @@ this repository's code does not license its marks to anyone either.
 
 | Asset | Where it is used | Origin | Status |
 |---|---|---|---|
-| `docs/brand/app-icon-source.png` (penguin on violet) | source for `crates/openbot-app/icons/*` and the `.mark.product` data URI in `ui/styles.css` | **Supplied by the repository owner.** Not drawn in-repo, not taken from any upstream in this file. | ⚠️ **Origin unconfirmed.** See below. |
-| `docs/openbot-*.png` (seven screenshots) | `README.md` | **First party.** Screen captures of this project's own desktop client, taken from a local build. No third-party UI, artwork, wordmark or window chrome from another product appears in them. | ✅ Apache-2.0 with the rest of the repository. |
+| `docs/brand/app-icon-source.png` (penguin on violet) | source for `crates/botroster-app/icons/*` and the `.mark.product` data URI in `ui/styles.css` | **Supplied by the repository owner.** Not drawn in-repo, not taken from any upstream in this file. | ⚠️ **Origin unconfirmed.** See below. |
+| `docs/botroster-*.png` (seven screenshots) | `README.md` | **First party.** Screen captures of this project's own desktop client, taken from a local build. No third-party UI, artwork, wordmark or window chrome from another product appears in them. | ✅ Apache-2.0 with the rest of the repository. |
 
 The screenshot row looks like a formality and is not. §5 says a component is recorded before merging,
 and the rule only works if it is applied to the boring cases too — the one asset that arrived without

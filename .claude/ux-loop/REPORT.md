@@ -1,4 +1,4 @@
-# REPORT — OPENBOT UX loop
+# REPORT — BOTROSTER UX loop
 
 Branch `ux/overnight-0820`, cut from `ux/overnight-2026-08-20`. Nothing merged.
 
@@ -11,8 +11,8 @@ then run the app for ten minutes before merging anything.
 ## 1. Launch to first work
 
 **Before: there was no path.** Not a large number — none. Verified against the installed
-binary at `%LOCALAPPDATA%\OPENBOT\openbot.exe`, not inferred: `~/.openbot` has `bots/` and
-`volumes/` but no `config.toml`, so `openbot acp` exits 1. With a config but no key it still
+binary at `%LOCALAPPDATA%\BOTROSTER\botroster.exe`, not inferred: `~/.botroster` has `bots/` and
+`volumes/` but no `config.toml`, so `botroster acp` exits 1. With a config but no key it still
 exits 1. Neither the model nor the key is settable anywhere in the window — `Settings` is
 `#rules-btn`, inside `#workspace`, which is hidden until the connect that is failing
 succeeds. The README's stated escape hatch ("open Settings") describes a surface that does
@@ -222,7 +222,7 @@ child-exit report that carries stderr. A test asserting "not the old string" wou
 passed and shipped a window telling somebody with an unset API key about a transport.
 
 **The preflight gate blocked the run for something harmless** — it matched any process named
-`openbot*`, so the installed app being open failed everything. A gate that stops the run for
+`botroster*`, so the installed app being open failed everything. A gate that stops the run for
 something harmless is a gate that gets switched off.
 
 **This branch has other writers.** `104dc9a` and `e478fe8` are not from either loop. Do not

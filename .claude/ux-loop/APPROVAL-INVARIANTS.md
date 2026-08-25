@@ -16,7 +16,7 @@ it.
    dismiss-and-continue.
    > **AMENDED AT LAUNCH (2026-08-20).** The shipped behaviour is that Escape does *nothing*
    > to an approval — it does not resolve it and does not dismiss it. That is pinned by
-   > `crates/openbot-app/tests/page.rs::escape_closes_a_panel_but_never_an_approval`. Both
+   > `crates/botroster-app/tests/page.rs::escape_closes_a_panel_but_never_an_approval`. Both
    > behaviours fail closed. The gate asserts the **shipped** behaviour, and the divergence
    > is filed as BACKLOG B09 for the operator. Do not "fix" the code to match the line above
    > without that decision.
@@ -49,7 +49,7 @@ remove it* — in one sentence, once, never again. Nothing above forbids adding 
 What it forbids is buying that sentence with any of: focus on an affirmative, a softened
 session grant, truncated arguments, a countdown, or a dismissal that resolves.
 
-`crates/openbotd`, `crates/openbot-guest` and `crates/openbot-proto` are read-only. If a
+`crates/botrosterd`, `crates/botroster-guest` and `crates/botroster-proto` are read-only. If a
 UX improvement requires changing *what* gets gated, it goes to the operator, not into a
 commit.
 
@@ -62,7 +62,7 @@ this window existed.
 
 **What it does not do.** It does not move the gate. The hub still evaluates policy on every
 call and still refuses anything a `deny` rule covers; a client has never been able to approve
-past one, and invariant 5 is untouched. `openbotd`, `openbot-guest` and `openbot-proto` are
+past one, and invariant 5 is untouched. `botrosterd`, `botroster-guest` and `botroster-proto` are
 not involved. What bypass removes is the person, not the control plane.
 
 The rules it must keep, each pinned by a test in `page.rs`:

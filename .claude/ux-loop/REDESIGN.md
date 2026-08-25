@@ -1,4 +1,4 @@
-# OPENBOT client redesign
+# BOTROSTER client redesign
 
 **Design read:** dense desktop product UI for people supervising autonomous agents, with a console
 language, leaning toward instrumentation typography and status-only colour — not a chat app.
@@ -17,7 +17,7 @@ side. `DIRECTION.md` already committed to something else and was right:
 > This is a console, not a chat app. Chat is the input method. The product is a set of named
 > teammates working on one durable computer under your gate.
 
-Copying the bubbles would land OPENBOT as a worse version of a thing that already exists, and would
+Copying the bubbles would land BOTROSTER as a worse version of a thing that already exists, and would
 throw away the only structural advantage it has. A clone that looks worse is the weakest position
 available. The goal is not parity of appearance. It is that a person watching four Bots work sees
 more, sooner, than they would in the reference.
@@ -34,7 +34,7 @@ Two things are true at once and both matter:
 ## 1. What the reference genuinely teaches
 
 Interaction principles only. No colour, type, spacing, icon or layout is lifted; each of these is
-restated in OPENBOT's own language before it becomes work.
+restated in BOTROSTER's own language before it becomes work.
 
 1. **The computer is a permanent peer pane.** Theirs sits in a right rail with a live thumbnail and
    a caption, present even when idle. Ours is behind a button. This is already `BACKLOG.md` B03, and
@@ -51,12 +51,12 @@ restated in OPENBOT's own language before it becomes work.
    placement is the answer: not buried in a menu, adjacent to the toggle that arms it.
 
 4. **Triggers are named integrations, not a generic event field.** Their menu reads Slack message,
-   Git event, Linear issue, Sentry alert, PagerDuty incident, Webhook. OPENBOT's event model already
-   supports this shape — `openbot-bots` has source matching, conditions and nested path lookups, all
+   Git event, Linear issue, Sentry alert, PagerDuty incident, Webhook. BOTROSTER's event model already
+   supports this shape — `botroster-bots` has source matching, conditions and nested path lookups, all
    tested. It has no surface. A dropdown of real names is a different product from a JSON field.
 
    **Withdrawn, 2026-08-25, after building the schedule half.** The missing piece is not the
-   surface. Events reach OPENBOT only through `openbot event post <source> --payload <json>` —
+   surface. Events reach BOTROSTER only through `botroster event post <source> --payload <json>` —
    "point a webhook at this, or use it by hand" — and `--source` is documented as *"anything you
    name"*. There is no listener, no endpoint, and no integration behind any of those names.
 
@@ -126,7 +126,7 @@ The other standing constraints, from `CLAUDE.md`:
 - No new token without adding it to `DIRECTION.md` in the same commit, with a reason.
 - `scripts/ux-verify.sh` gates every change: axe, contrast, keyboard, the approval invariants, and
   bundle size.
-- `crates/openbotd`, `openbot-guest` and `openbot-proto` stay read-only from here. Presentation only.
+- `crates/botrosterd`, `botroster-guest` and `botroster-proto` stay read-only from here. Presentation only.
 
 ---
 
@@ -155,12 +155,12 @@ later phase would otherwise be built against tokens that are going to move.
 
 ### Phase 1 — The thread becomes a run log
 
-The signature change, and the one that makes OPENBOT look like a different category of product.
+The signature change, and the one that makes BOTROSTER look like a different category of product.
 
 - A tool step is a structured row: verb, target, result, duration. Collapsible. Copyable.
 - The model's prose is one row type among several, not the frame everything else sits inside.
 - Elapsed time appears, which means `serve.rs` stops dropping `elapsed_ms` (F-DC3 — a small change in
-  `openbot-desktop`, the one crate outside the UI this phase touches).
+  `botroster-desktop`, the one crate outside the UI this phase touches).
 - Approvals render inline at the point in the log where they happened.
 
 *Gate:* `page.rs` asserts a tool row exposes verb, target, result and duration as distinct nodes, and

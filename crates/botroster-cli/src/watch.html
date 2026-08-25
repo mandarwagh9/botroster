@@ -1,0 +1,244 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>botroster · computer</title>
+<style>
+:root{
+  --bg:#fbfbfa; --fg:#1a1a19; --muted:#6b6b66; --line:#e6e5e1;
+  --accent:#2f6f5e; --warn:#8a6d1f; --bad:#9b3232; --card:#fff;
+  --live:#2f6f5e;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#131312; --fg:#e9e8e4; --muted:#8e8d87; --line:#2a2a27;
+  --accent:#6fbfa5; --warn:#d3b05a; --bad:#e08a8a; --card:#1a1a18;
+  --live:#6fbfa5;
+}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:15px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
+  display:flex;flex-direction:column;overflow:hidden}
+
+header{display:flex;align-items:center;gap:.75rem;padding:.7rem 1rem;
+  border-bottom:1px solid var(--line);flex:none}
+.brand{font-weight:600;letter-spacing:-.01em}
+.brand span{color:var(--muted);font-weight:400}
+.spacer{flex:1}
+
+/* The status chip is the one thing that must never be ambiguous. */
+.chip{display:inline-flex;align-items:center;gap:.45rem;
+  font:12px ui-monospace,SFMono-Regular,Menlo,monospace;
+  border:1px solid var(--line);border-radius:99px;padding:.25rem .7rem;
+  color:var(--muted);white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:99px;background:var(--muted);flex:none}
+.chip.live .dot{background:var(--live);animation:pulse 2s ease-in-out infinite}
+.chip.driving{color:#fff;background:var(--bad);border-color:var(--bad);font-weight:600}
+.chip.driving .dot{background:#fff;animation:none}
+.chip.lost{color:var(--bad);border-color:var(--bad)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+button{font:inherit;font-size:.86rem;padding:.4rem .85rem;border-radius:7px;
+  border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+button.danger{background:var(--bad);border-color:var(--bad);color:#fff;font-weight:600}
+button:disabled{opacity:.45;cursor:default}
+
+main{flex:1;display:flex;align-items:center;justify-content:center;
+  padding:1rem;min-height:0}
+#stage{position:relative;max-width:100%;max-height:100%;
+  border:1px solid var(--line);border-radius:10px;overflow:hidden;
+  background:var(--card);line-height:0;
+  box-shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.06)}
+/* Driving is a whole-frame state change, not a badge that can be missed. */
+body.driving #stage{border-color:var(--bad);box-shadow:0 0 0 3px var(--bad)}
+#shot{display:block;max-width:100%;max-height:calc(100vh - 8.5rem);
+  width:auto;height:auto}
+body.driving #shot{cursor:crosshair}
+
+#empty{padding:4rem 3rem;text-align:center;color:var(--muted);line-height:1.6;
+  font-size:.9rem;max-width:34rem}
+#empty b{color:var(--fg);font-weight:600;display:block;margin-bottom:.4rem;
+  font-size:1rem}
+
+footer{display:flex;align-items:center;gap:.9rem;padding:.6rem 1rem;
+  border-top:1px solid var(--line);flex:none;
+  font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
+#url{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#hint{font-family:inherit;font-size:.8rem}
+</style>
+
+<header>
+  <div class="brand">botroster <span>· computer</span></div>
+  <div class="chip live" id="status"><i class="dot"></i><span id="statusText">connecting</span></div>
+  <div class="spacer"></div>
+  <button id="take" class="primary">Take control</button>
+</header>
+
+<main>
+  <div id="stage">
+    <img id="shot" alt="" hidden>
+    <div id="empty">
+      <b>Nothing open yet</b>
+      This shows the browser inside the Bot's computer, live.
+      Watching does not start anything — when the Bot opens a page, it appears here.
+    </div>
+  </div>
+</main>
+
+<footer>
+  <span id="url">—</span>
+  <span id="dims"></span>
+  <span id="rate"></span>
+  <span id="hint"></span>
+</footer>
+
+<script>
+const K = new URLSearchParams(location.search).get("k") || "";
+const $ = id => document.getElementById(id);
+const shot = $("shot"), empty = $("empty");
+
+let driving = false;      // whether this viewer holds the computer
+let frame = null;         // last {width,height}
+let alive = true;
+let shown = 0, lastRate = performance.now();
+
+const api = (path, body) => fetch(path + "?k=" + encodeURIComponent(K), {
+  method: body === undefined ? "GET" : "POST",
+  headers: body === undefined ? {} : {"content-type": "application/json"},
+  body: body === undefined ? undefined : JSON.stringify(body),
+}).then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(new Error(t))));
+
+function status(kind, text) {
+  const c = $("status");
+  c.className = "chip " + kind;
+  $("statusText").textContent = text;
+}
+
+function setDriving(on) {
+  driving = on;
+  document.body.classList.toggle("driving", on);
+  $("take").textContent = on ? "Give it back" : "Take control";
+  $("take").className = on ? "danger" : "primary";
+  if (on) {
+    status("driving", "you are driving — the Bot is locked out");
+    $("hint").textContent = "click, type and scroll as usual · Esc gives it back";
+  } else {
+    status("live", "the Bot has the computer");
+    $("hint").textContent = "take control to click or type yourself";
+  }
+}
+
+// ── frames ──────────────────────────────────────────────────────────
+// Self-pacing: the next request goes out when the last one lands, so a slow
+// guest lowers the frame rate instead of queueing work nobody will see.
+async function pump() {
+  try {
+    const f = await api("/frame");
+    alive = true;
+    if (f.idle) {
+      shot.hidden = true; empty.hidden = false;
+      $("url").textContent = "—"; $("dims").textContent = "";
+      if (!driving) status("live", "waiting for a page");
+    } else if (f.locked) {
+      status("lost", "someone else is driving this computer");
+    } else {
+      shot.src = "data:image/jpeg;base64," + f.jpeg_b64;
+      shot.hidden = false; empty.hidden = true;
+      frame = f;
+      $("url").textContent = f.url || "";
+      $("dims").textContent = Math.round(f.width) + "×" + Math.round(f.height);
+      if (!driving) status("live", "the Bot has the computer");
+      shown++;
+      const dt = performance.now() - lastRate;
+      if (dt > 2000) {
+        $("rate").textContent = (shown * 1000 / dt).toFixed(1) + " fps";
+        shown = 0; lastRate = performance.now();
+      }
+    }
+  } catch (e) {
+    if (alive) status("lost", "lost the hub — " + String(e.message).slice(0, 60));
+    alive = false;
+  }
+  setTimeout(pump, alive ? 0 : 1500);
+}
+
+// ── input, only while driving ───────────────────────────────────────
+// Map a click on the rendered image back to CSS pixels in the page. The frame
+// carries its own viewport size because the image may be scaled to fit, and
+// reading the natural size alone is wrong whenever the device pixel ratio is
+// not 1.
+function toPage(ev) {
+  const r = shot.getBoundingClientRect();
+  return {
+    x: (ev.clientX - r.left) * (frame.width / r.width),
+    y: (ev.clientY - r.top) * (frame.height / r.height),
+  };
+}
+
+shot.addEventListener("click", ev => {
+  if (!driving || !frame) return;
+  const p = toPage(ev);
+  api("/input", {kind: "click", x: p.x, y: p.y}).catch(() => {});
+});
+
+shot.addEventListener("wheel", ev => {
+  if (!driving || !frame) return;
+  ev.preventDefault();
+  const p = toPage(ev);
+  api("/input", {kind: "scroll", x: p.x, y: p.y, dy: ev.deltaY}).catch(() => {});
+}, {passive: false});
+
+// Typed characters are buffered for a beat and sent together. One HTTP round
+// trip and one CDP call per keystroke makes fast typing feel like wading.
+let buf = "", flushTimer = null;
+function flush() {
+  flushTimer = null;
+  if (!buf) return;
+  const text = buf; buf = "";
+  api("/input", {kind: "type", text}).catch(() => {});
+}
+const NAMED = new Set(["Enter","Tab","Escape","Backspace","Delete",
+  "ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Home","End","PageUp","PageDown"]);
+
+document.addEventListener("keydown", ev => {
+  if (!driving) return;
+  if (ev.key === "Escape") { ev.preventDefault(); flush(); release(); return; }
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return;   // leave browser shortcuts alone
+  if (NAMED.has(ev.key)) {
+    ev.preventDefault(); flush();
+    api("/input", {kind: "key", key: ev.key}).catch(() => {});
+  } else if (ev.key.length === 1) {
+    ev.preventDefault();
+    buf += ev.key;
+    if (!flushTimer) flushTimer = setTimeout(flush, 60);
+  }
+});
+
+// ── taking and giving back ──────────────────────────────────────────
+async function take() {
+  $("take").disabled = true;
+  try {
+    await api("/takeover", {reason: "a person is at the keyboard"});
+    setDriving(true);
+  } catch (e) {
+    status("lost", String(e.message).slice(0, 70));
+  } finally { $("take").disabled = false; }
+}
+async function release() {
+  $("take").disabled = true;
+  try { await api("/release", {}); setDriving(false); }
+  catch (e) { status("lost", String(e.message).slice(0, 70)); }
+  finally { $("take").disabled = false; }
+}
+$("take").addEventListener("click", () => (driving ? release() : take()));
+
+// Leaving the page gives the computer back. The hub also releases when this
+// connection drops, so this is politeness, not the safety net.
+addEventListener("pagehide", () => {
+  if (driving) navigator.sendBeacon("/release?k=" + encodeURIComponent(K), "{}");
+});
+
+setDriving(false);
+pump();
+</script>

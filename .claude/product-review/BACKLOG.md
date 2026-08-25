@@ -30,7 +30,7 @@ The architecture is sound and the perimeter is missing.
 ## Tier 1 — the product does not do what it says
 
 ### T1-1 — routines never fire. `done`
-`P0` · reach: everyone who creates a routine · `reports/parity.md` §3, `crates/openbot-cli/src/up.rs:236`
+`P0` · reach: everyone who creates a routine · `reports/parity.md` §3, `crates/botroster-cli/src/up.rs:236`
 
 The cron parses, the due-check works, `tick` runs what is due, and **nothing calls `tick`**. The only
 timer in `up` is the snapshot timer. A user who sets a 9am routine and closes the laptop gets
@@ -84,7 +84,7 @@ No timeout on a forwarded `tool.call`, no cancel path, no disconnect propagation
 ## Tier 2 — the security story is not yet what the README implies
 
 ### T2-1 — the hub authenticates nobody. `doing` (Origin half done; the per-home token still `open` — it is what defends against a local process)
-`P0` · reach: all users · `crates/openbotd/src/server.rs:62`
+`P0` · reach: all users · `crates/botrosterd/src/server.rs:62`
 
 `let principal = dev_principal()` — no token, no `Origin` check, on a fixed `127.0.0.1:8443`. Any
 local process, and plausibly any web page the user visits, can open a session. Approvals are
@@ -100,9 +100,9 @@ built and then asked to trust whoever knocks.
 ### T2-2 — `shell.exec` hands over the credential the crate graph protects. `done` (environment half; the filesystem half needs a real isolation boundary and is recorded as such in isolation.rs)
 `P0` · reach: all users · `reports/guest-tools.md` F-GT1
 
-`isolation.rs` proves no crate edge from the guest to `openbotd` and panics with "this is the reason
-a prompt injection cannot exfiltrate a credential". Then `openbot up` runs hub, secret store and
-guest in one process, and `shell.exec` inherits its environment — so `cat ~/.openbot/secrets.json`
+`isolation.rs` proves no crate edge from the guest to `botrosterd` and panics with "this is the reason
+a prompt injection cannot exfiltrate a credential". Then `botroster up` runs hub, secret store and
+guest in one process, and `shell.exec` inherits its environment — so `cat ~/.botroster/secrets.json`
 is one approved command away, and the model key is already in the environment.
 
 *Durable fix:* `env_clear` plus an explicit allowlist. The crate-graph invariant is real and worth
@@ -115,7 +115,7 @@ Allow-listed, any URL, no approval. Also a loopback SSRF reach. And `browser.scr
 overwrites any workspace file while `fs.write` asks.
 
 ### T2-4 — Chrome's own sandbox was disabled by a false premise. `done 6f477d4`
-`P0` · reach: all users — **fixed.** Opt-in via `OPENBOT_BROWSER_NO_SANDBOX=1`; 19 live browser
+`P0` · reach: all users — **fixed.** Opt-in via `BOTROSTER_BROWSER_NO_SANDBOX=1`; 19 live browser
 tests pass with it enabled. The vocabulary that justified it is corrected across five crates and
 `review.sh` G5 now scans Rust source so it cannot return.
 
@@ -145,7 +145,7 @@ good version already exists in the tree.
 `P1` · reach: all users · `reports/cli-devex.md` F-CD11, F-CD12
 
 `permission` documented as credentials, `secret` blank, `bot set` carrying `dup`'s text. Model flags
-on every command: 8 of 9 option lines on `openbot servers -h` are noise.
+on every command: 8 of 9 option lines on `botroster servers -h` are noise.
 
 ---
 
@@ -171,7 +171,7 @@ the moment a Bot works for longer than a screenshot.
 ## Tier 5 — the open-source thesis, cheaply
 
 ### T5-1 — xAI's commercial caps are hard-coded in an unmetered self-hosted product. `open`
-`P1` · reach: some users, but it is the whole argument · `crates/openbot-bots/src/lib.rs:37,1594,2236`
+`P1` · reach: some users, but it is the whole argument · `crates/botroster-bots/src/lib.rs:37,1594,2236`
 
 `MAX_BOTS = 50`, `MAX_GROUP = 6`, `MAX_ROUTINES = 50`. These are a managed platform's billing
 limits, copied into a product whose entire pitch is that you run it yourself. There is even a test

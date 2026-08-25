@@ -3,12 +3,12 @@
 ## Reporting
 
 Please report vulnerabilities privately through
-[GitHub Security Advisories](https://github.com/mandarwagh9/openbot/security/advisories/new)
+[GitHub Security Advisories](https://github.com/mandarwagh9/botroster/security/advisories/new)
 rather than a public issue. You will get an acknowledgement within a few days.
 
 ## What is in scope
 
-OPENBOT runs model-directed code against a real filesystem, shell and browser, holds third-party
+BOTROSTER runs model-directed code against a real filesystem, shell and browser, holds third-party
 credentials in a broker, and enforces a policy gate in the hub. Anything that lets an agent, a page
 it visits, or a connected client do one of these is in scope:
 
@@ -16,7 +16,7 @@ it visits, or a connected client do one of these is in scope:
 - act without an approval that the policy says is required, or answer an approval it was not asked
 - reach outside the workspace root through `fs.*` or `shell.exec` when confinement is on
 - read another session's tool calls, arguments or results
-- have `openbot-guest` reach `openbotd` (the isolation boundary)
+- have `botroster-guest` reach `botrosterd` (the isolation boundary)
 
 ## The model key in an official build
 
@@ -33,14 +33,14 @@ That is a deliberate trade and worth being exact about, because it is not the us
 - It is **not** your key. It belongs to whoever cut the release, and it is rate-limited and rotated
   by them. If a build stops working, that is what happened.
 - **A build from source has no key at all**, and nothing about this applies to it: `option_env!`
-  yields nothing and OPENBOT asks you to name a model, exactly as it did before.
+  yields nothing and BOTROSTER asks you to name a model, exactly as it did before.
 
 If you would rather not use a shared credential — and there are good reasons not to, including that
-the shipped provider retains prompts and completions — name your own model and OPENBOT will use it
+the shipped provider retains prompts and completions — name your own model and BOTROSTER will use it
 instead:
 
 ```sh
-openbot config set --model qwen3:1.7b --dialect openai --base-url http://localhost:11434/v1 --api-key-env ''
+botroster config set --model qwen3:1.7b --dialect openai --base-url http://localhost:11434/v1 --api-key-env ''
 ```
 
 Nothing leaves your machine on that arrangement.

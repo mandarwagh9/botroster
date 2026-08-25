@@ -13,6 +13,6 @@ labels: bug
 **Evidence** (output, screenshot, or the failing command)
 
 **Environment**
-- openbot commit:
+- botroster commit:
 - OS:
 - `rustc --version`:

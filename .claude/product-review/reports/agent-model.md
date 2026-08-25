@@ -1,15 +1,15 @@
 # Agent & Model — review
 
-**Reviewed:** in full — `crates/openbot-agent/src/` (`agent.rs`, `hub_client.rs`, `model.rs`,
+**Reviewed:** in full — `crates/botroster-agent/src/` (`agent.rs`, `hub_client.rs`, `model.rs`,
 `transient.rs`, `lib.rs`, `providers/http.rs`, `providers/scripted.rs`, `providers/mod.rs`) and
-`crates/openbot-bots/src/lib.rs`. Read in full for anchors and coverage: `tests/agent_loop.rs`,
+`crates/botroster-bots/src/lib.rs`. Read in full for anchors and coverage: `tests/agent_loop.rs`,
 `tests/vendor.rs`, `tests/continuity.rs`, `tests/handoff_tool.rs`. Read in outline only (test names
 and doc headers, not every assertion): `tests/approvals.rs`, `tests/refused.rs`, `tests/secrets.rs`,
-`crates/openbot-bots/src/schedule.rs` — none of them changed a finding. `CLAUDE.md`,
+`crates/botroster-bots/src/schedule.rs` — none of them changed a finding. `CLAUDE.md`,
 `CONTRIBUTING.md`, `docs/SPEC.md` §4–§8. Read out of scope, only far enough to confirm or kill a
-finding: `openbot-cli/src/main.rs` (the two run paths and `routine tick`),
-`openbot-cli/src/config.rs`, `openbotd/src/hub.rs` (`tool_call`, `disconnect`),
-`openbot-guest/src/tools.rs` (schemas and timeouts). No file was modified.
+finding: `botroster-cli/src/main.rs` (the two run paths and `routine tick`),
+`botroster-cli/src/config.rs`, `botrosterd/src/hub.rs` (`tool_call`, `disconnect`),
+`botroster-guest/src/tools.rs` (schemas and timeouts). No file was modified.
 
 **Verdict:** Inside a single run this loop is genuinely frontier-grade, and in places better than
 what it is copying: cancellation windows reasoned out to the instant, `tool_use`/`tool_result`
@@ -23,14 +23,14 @@ run a frontier product would not even have reported.
 ## Findings
 
 ### F-AM1 — A tool server that dies mid-call hangs the run forever, and the only way out discards the run
-`P0` · `reach: some users` · `crates/openbot-agent/src/agent.rs:731`, `crates/openbot-agent/src/hub_client.rs:308`
+`P0` · `reach: some users` · `crates/botroster-agent/src/agent.rs:731`, `crates/botroster-agent/src/hub_client.rs:308`
 
 **What is true now.** `HubClient::call` awaits its oneshot with no deadline
 (`hub_client.rs:308`), and `drive` awaits `call_tool` bare — it is the one await in the loop that is
 *not* wrapped in the cancel `select!` that guards the model turn at `agent.rs:588`. The harness's
 only liveness guarantee is that the peer eventually answers or the socket dies. Neither is
-guaranteed. `openbotd`'s `tool.call` path inserts a relay and returns `None`
-(`openbotd/src/hub.rs:1230-1259`); nothing times it out — there are deadlines for `session.bind`
+guaranteed. `botrosterd`'s `tool.call` path inserts a relay and returns `None`
+(`botrosterd/src/hub.rs:1230-1259`); nothing times it out — there are deadlines for `session.bind`
 (30s), approvals (120s) and `PreToolUse` hooks, but none for the tool itself. And `Hub::disconnect`
 reaps relays only by *origin*: `st.relays.retain(|_, r| r.origin_conn != *id)` and
 `st.calls.retain(|_, c| c.origin != *id)` (`hub.rs:381-382`). Both keys are the harness's
@@ -38,7 +38,7 @@ connection. So when the *guest* socket drops with a call outstanding, the relay 
 is ever synthesised, and the harness's `w_rx` never resolves. `pending_relays()` (`hub.rs:275`)
 exists to count exactly these and nothing ever drains them.
 
-**Why it matters.** `openbot run` sits on "thinking" indefinitely. The first Ctrl-C prints
+**Why it matters.** `botroster run` sits on "thinking" indefinitely. The first Ctrl-C prints
 "stopping — press Ctrl-C again to quit without saving" and does nothing, because cancellation is
 only observed at the top of the loop and the loop is inside `call_tool`. The second Ctrl-C calls
 `std::process::exit(130)` (`main.rs:2582`), which skips the `bots.append(&b.id, fresh)` at
@@ -67,7 +67,7 @@ suite's own timeout.
 ---
 
 ### F-AM2 — The history window hands the provider a `tool_result` with no `tool_use`, and a routine loses the firing
-`P0` · `reach: most users` · `crates/openbot-bots/src/lib.rs:465-471`, `crates/openbot-cli/src/main.rs:2522`, `crates/openbot-cli/src/main.rs:2847`
+`P0` · `reach: most users` · `crates/botroster-bots/src/lib.rs:465-471`, `crates/botroster-cli/src/main.rs:2522`, `crates/botroster-cli/src/main.rs:2847`
 
 **What is true now.** `BotStore::history(id, Some(n))` returns `parse_lines(tail_lines(path, n))` —
 the last *n* lines of the JSONL log, chosen with no regard for what they are. The CLI seeds every
@@ -125,7 +125,7 @@ returned window begins with a `ToolResult`. Today roughly half of them do.
 ---
 
 ### F-AM3 — Compaction placeholders are written to the Bot's permanent conversation
-`P1` · `reach: some users` · `crates/openbot-agent/src/agent.rs:512`, `crates/openbot-agent/src/agent.rs:826`, `crates/openbot-cli/src/main.rs:2604`
+`P1` · `reach: some users` · `crates/botroster-agent/src/agent.rs:512`, `crates/botroster-agent/src/agent.rs:826`, `crates/botroster-cli/src/main.rs:2604`
 
 **What is true now.** `compact` mutates `messages` in place, overwriting old `ToolResult` contents
 with `"[earlier result dropped to fit the context — run the tool again if you still need it]"`.
@@ -157,9 +157,9 @@ and assert no stored `ToolResult` contains `"run the tool again"`. Today it does
 ---
 
 ### F-AM4 — Nothing retries: one 429 or one dropped connection ends the run
-`P1` · `reach: most users` · `crates/openbot-agent/src/agent.rs:588-601`, `crates/openbot-agent/src/providers/http.rs:142`
+`P1` · `reach: most users` · `crates/botroster-agent/src/agent.rs:588-601`, `crates/botroster-agent/src/providers/http.rs:142`
 
-**What is true now.** There is no retry, no backoff and no jitter anywhere in `openbot-agent` — I
+**What is true now.** There is no retry, no backoff and no jitter anywhere in `botroster-agent` — I
 grepped the crate for it. `http.rs:142` carefully classifies 408/429/5xx as `Overloaded`, and
 `agent.rs:590` reacts to it by returning `model_failed(e)` and ending the run. The classification is
 used only to *label* the corpse: `FinishReason::ModelFailed { transient: true }`, which a routine
@@ -170,7 +170,7 @@ interactive run gets nothing at all — the user sees the run stop and retypes t
 likely as a run goes on, because every turn resends a larger conversation. A twenty-step run that
 dies at step eighteen on a rate limit is the single most expensive failure this loop can have, and
 the recovery on offer is "run it again", which re-pays for all eighteen steps and re-executes every
-side effect. Grok Bot users will not experience this; OPENBOT users will experience it weekly. It is
+side effect. Grok Bot users will not experience this; BOTROSTER users will experience it weekly. It is
 also the difference between `transient: true` meaning something and meaning nothing: the flag says
 "waiting would fix this" and then nobody waits.
 
@@ -192,7 +192,7 @@ backoff. Then serve unbroken 429s and assert the run gives up after the cap rath
 ---
 
 ### F-AM5 — The transient/permanent classification is discarded at two boundaries, so a routine skips a day for a thirty-second outage
-`P1` · `reach: some users` · `crates/openbot-agent/src/agent.rs:173-175`, `crates/openbot-agent/src/transient.rs:41`, `crates/openbot-cli/src/main.rs:1432-1440`, `crates/openbot-agent/src/providers/http.rs:154`
+`P1` · `reach: some users` · `crates/botroster-agent/src/agent.rs:173-175`, `crates/botroster-agent/src/transient.rs:41`, `crates/botroster-cli/src/main.rs:1432-1440`, `crates/botroster-agent/src/providers/http.rs:154`
 
 **What is true now.** Two places compute the answer and then throw it away.
 
@@ -209,7 +209,7 @@ Second: `http.rs:154` maps every body-level provider error to `ModelError::Rejec
 `vendor.rs:1042` proves the case that matters, feeding in Anthropic's
 `{"type":"error","error":{"type":"overloaded_error",...}}` delivered with a 200 — which
 `provider_error` correctly extracts and then labels permanent. Gateways in front of these APIs do
-this routinely, and `--base-url` exists so people can point OPENBOT at one.
+this routinely, and `--base-url` exists so people can point BOTROSTER at one.
 
 I am aware of `a_hub_failure_is_a_failure_too_and_is_not_assumed_retryable` (`acp/mod.rs:392`) and
 am not arguing with it. That test answers "should an ACP client silently re-issue this turn?" —
@@ -238,7 +238,7 @@ body — today it asserts only that the message survives.
 ---
 
 ### F-AM6 — Compaction is best-effort with a hard floor, and cannot shrink text at all
-`P1` · `reach: some users` · `crates/openbot-agent/src/agent.rs:69-101`, `crates/openbot-agent/src/agent.rs:47`
+`P1` · `reach: some users` · `crates/botroster-agent/src/agent.rs:69-101`, `crates/botroster-agent/src/agent.rs:47`
 
 **What is true now.** `compact` has no post-condition. It walks messages older than `KEEP_RECENT`,
 replaces `ToolResult` contents, and returns however many it replaced — whether or not the budget was
@@ -281,7 +281,7 @@ doing". A second one with `keep_recent: 6` and six 8k results, asserting the sam
 ---
 
 ### F-AM7 — `context_budget` is configuration nothing can set
-`P1` · `reach: some users` · `crates/openbot-agent/src/agent.rs:255-261`, `crates/openbot-cli/src/config.rs:47-68`
+`P1` · `reach: some users` · `crates/botroster-agent/src/agent.rs:255-261`, `crates/botroster-cli/src/config.rs:47-68`
 
 **What is true now.** `AgentConfig::context_budget` is `pub`, carries a doc comment explaining why
 it must be tunable — *"models differ by an order of magnitude in how much they can hold: the default
@@ -300,13 +300,13 @@ could easily have held, so long tasks degrade for no reason. A field that reads 
 is unreachable is worse than no field: it makes the gap look solved.
 
 **The durable fix.** Put it where the other model-shaped limits already live —
-`ModelSettings.context_budget`, `openbot config set --context-budget`, a `--context-budget` run flag
-through `ModelOverrides`, plumbed into both `AgentConfig` constructions. `openbot config show`
+`ModelSettings.context_budget`, `botroster config set --context-budget`, a `--context-budget` run flag
+through `ModelOverrides`, plumbed into both `AgentConfig` constructions. `botroster config show`
 already prints `max_tokens` (`main.rs:1485`); it should print this too, since `status` exists to
 report what a run would actually use. If it should instead be derived from the model id, derive it —
 but then `context_budget` should not be a public field pretending otherwise.
 
-**How to prove it.** The README/flag test (`openbot-cli/tests/readme.rs`) plus an assertion that a
+**How to prove it.** The README/flag test (`botroster-cli/tests/readme.rs`) plus an assertion that a
 `--context-budget` value reaches `AgentConfig`. The sharper test: the `config` suite already checks
 that flags override the file for `max_tokens` (`config.rs:465-478`) — the same test for this field
 fails to compile today.
@@ -314,7 +314,7 @@ fails to compile today.
 ---
 
 ### F-AM8 — A drained inbox is destroyed before the work that consumes it
-`P1` · `reach: some users` · `crates/openbot-cli/src/main.rs:2520-2523`, `crates/openbot-bots/src/lib.rs:1305-1343`
+`P1` · `reach: some users` · `crates/botroster-cli/src/main.rs:2520-2523`, `crates/botroster-bots/src/lib.rs:1305-1343`
 
 **What is true now.** The run path calls `recover_inbox`, then `history`, then
 `drain_inbox` (`main.rs:2521-2523`) — before the model has been contacted. `drain_inbox` renames
@@ -350,7 +350,7 @@ window and passes; this one covers the wide one and does not.
 ---
 
 ### F-AM9 — A group thread carries no speaker, so a Bot is seeded with another Bot's replies and tool calls as its own
-`P1` · `reach: some users` · `crates/openbot-bots/src/lib.rs:1786-1800`, `crates/openbot-cli/src/main.rs:2847-2848`, `crates/openbot-cli/src/main.rs:2891`
+`P1` · `reach: some users` · `crates/botroster-bots/src/lib.rs:1786-1800`, `crates/botroster-cli/src/main.rs:2847-2848`, `crates/botroster-cli/src/main.rs:2891`
 
 **What is true now.** `append_group` serialises raw `Message` values into the shared log. A `Message`
 is `{role, content}` — there is no author field anywhere in `model.rs:96-100`. `group post` picks one
@@ -387,7 +387,7 @@ the request body.
 ---
 
 ### F-AM10 — An empty assistant turn is reported as a completed run carrying the previous run's answer
-`P1` · `reach: some users` · `crates/openbot-agent/src/agent.rs:816-821`, `crates/openbot-agent/src/providers/http.rs:455`
+`P1` · `reach: some users` · `crates/botroster-agent/src/agent.rs:816-821`, `crates/botroster-agent/src/providers/http.rs:455`
 
 **What is true now.** `finish` scans the *whole* message vector backwards for the last assistant
 message with non-empty text — and that vector begins with the seeded history (`agent.rs:504`). So
@@ -398,7 +398,7 @@ OpenAI-compatible endpoint that returns content as an array of parts, or that pu
 `reasoning_content` and leaves `content` null. `content` is then empty, `finish_reason` is `"stop"`,
 the loop returns `Completed`, and `succeeded()` is `true`.
 
-**Why it matters.** This is a false success, not a cosmetic one. `openbot run` prints a stale
+**Why it matters.** This is a false success, not a cosmetic one. `botroster run` prints a stale
 answer with no indication it is stale. A routine records `Run { ok: true, summary: <last week's
 answer> }` (`main.rs:1420-1424`) and `last_run` advances, so the day's work is marked done and never
 retried. Someone reading the run history sees a healthy routine. The failure mode is silent by
@@ -429,7 +429,7 @@ already uses.
 ---
 
 ### F-AM11 — Unparseable tool arguments become `{}` and are dispatched, and the model never learns why
-`P2` · `reach: some users` · `crates/openbot-agent/src/providers/http.rs:465`
+`P2` · `reach: some users` · `crates/botroster-agent/src/providers/http.rs:465`
 
 **What is true now.** `serde_json::from_str(raw).unwrap_or_else(|_| json!({}))`. A model that emits
 invalid JSON in `function.arguments` has its call silently rewritten to an empty object, and the
@@ -459,7 +459,7 @@ JSON as the problem. Today the hub is called with `{}`.
 ---
 
 ### F-AM12 — One dialect covers every OpenAI-shaped endpoint, with nowhere to vary a parameter per endpoint
-`P2` · `reach: some users` · `crates/openbot-agent/src/providers/http.rs:24-27`, `crates/openbot-agent/src/providers/http.rs:428`
+`P2` · `reach: some users` · `crates/botroster-agent/src/providers/http.rs:24-27`, `crates/botroster-agent/src/providers/http.rs:428`
 
 **What is true now.** `Dialect` is a two-value enum, and `Dialect::OpenAiChat` is documented as
 covering *"OpenAI, xAI, Groq, Together, Ollama, vLLM, and anything else that ships an
@@ -502,7 +502,7 @@ configured field rather than `max_tokens`, alongside the existing default-shape 
   (`agent.rs:56-61`, `agent_loop.rs:616-622`) that a broken pairing is a 400 from every vendor.
 - **I did not run the test suite**, per the brief; `cargo check` was not needed since no finding
   turns on compilation. Claims about what tests do come from reading them.
-- **The hub-side relay leak in F-AM1** I read but did not exercise: `openbotd` is another
+- **The hub-side relay leak in F-AM1** I read but did not exercise: `botrosterd` is another
   department's scope, and I verified only that `disconnect` reaps by `origin_conn` and that no timer
   touches `relays`. If some path I did not find synthesises a failure for an orphaned relay, F-AM1's
   trigger narrows to a wedged-but-connected guest — the harness-side gap (no timeout, no cancel

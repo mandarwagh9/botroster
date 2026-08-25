@@ -1,0 +1,3363 @@
+"use strict";
+
+const invoke = window.__TAURI__.core.invoke;
+const listen = window.__TAURI__.event.listen;
+
+const $ = (id) => document.getElementById(id);
+
+const connectPanel = $("connect");
+const connectBtn = $("connect-btn");
+const connectError = $("connect-error");
+const workspace = $("workspace");
+const botsList = $("bots");
+const rosterEmpty = $("roster-empty");
+const rosterError = $("roster-error");
+const toggleHidden = $("toggle-hidden");
+const botName = $("bot-name");
+const botTitle = $("bot-title");
+const botMark = $("bot-mark");
+const status = $("status");
+const log = $("log");
+const noBot = $("no-bot");
+const composer = $("composer");
+const input = $("input");
+const sendBtn = $("send");
+const cancelBtn = $("cancel");
+const dialog = $("dialog");
+const dialogTool = $("dialog-tool");
+const dialogFields = $("dialog-fields");
+const dialogOptions = $("dialog-options");
+const dialogQueue = $("dialog-queue");
+const dialogError = $("dialog-error");
+const dialogHeading = $("dialog-heading");
+const dialogSecret = $("dialog-secret");
+const secretLabel = $("dialog-secret-label");
+const secretWhy = $("dialog-secret-why");
+const secretValueInput = $("dialog-secret-value");
+const attachBtn = $("attach");
+const attachedList = $("attached");
+
+/// Files attached to the next message: `{name, path}` from `attach_file`.
+///
+/// The file is already in the workspace by the time it lands here: attaching
+/// copies immediately rather than at send, so a person finds out straight away
+/// if it cannot be read, instead of after writing a message.
+const attached = [];
+
+// Enter submits the credential, because a single-field form where Enter does
+// nothing is a form people retype. Escape is not bound here: the approval
+// dialog already refuses to close on Escape, and a credential prompt is the
+// last place to add an accidental way out that looks like a refusal but
+// might be read as one.
+secretValueInput.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  const ask = asks[0];
+  if (ask && ask.secret) supplySecret(ask.id);
+});
+const nameDialog = $("name-dialog");
+const newName = $("new-name");
+const nameError = $("name-error");
+const rail = $("rail");
+const computerFrame = $("computer-frame");
+const computerError = $("computer-error");
+
+/** The conversation on screen, or null before one is chosen. */
+let session = null;
+/** Which Bot that conversation belongs to, for the header and the roster. */
+let openName = null;
+/** A turn is running: the composer is busy and Stop is live. */
+let busy = false;
+/** Whether the roster is showing hidden Bots: the docs' "Show hidden chats". */
+let showHidden = false;
+
+// Approvals waiting on a person, oldest first. A queue rather than one live
+// dialog: the agent may ask about two tools at once, and overwriting the first
+// ask's buttons leaves it answerable by nobody until it times out.
+const asks = [];
+
+const waitingEl = $("waiting");
+
+/// Say how many approvals are blocking a person, or say nothing at all.
+///
+/// Called wherever `asks` changes, because a count that is only refreshed on
+/// some of those paths is worse than no count: it goes stale pointing at work
+/// that is already done, and the next person to trust it stops trusting it.
+///
+/// Hidden rather than zeroed when the queue is empty. Amber is the only warm
+/// colour in this product and it means "a person is blocking progress"; a
+/// standing "0 waiting" would put that colour on screen permanently and drain
+/// the meaning out of it.
+function renderWaiting() {
+  const n = asks.length;
+  waitingEl.classList.toggle("hidden", n === 0);
+  if (n === 0) return;
+  waitingEl.textContent = n === 1 ? "1 waiting on you" : `${n} waiting on you`;
+  waitingEl.title = "Show what is waiting";
+}
+
+function setStatus(text, kind) {
+  status.textContent = text;
+  status.className = "status" + (kind ? " " + kind : "");
+}
+
+/// Report something that failed, once, in two places that each do their job.
+///
+/// The pill says *what* failed, in a few words, because it is two words of
+/// chrome and always visible. The record — whatever the runtime, the hub or the
+/// agent actually said — goes in the problem banner behind a disclosure, where
+/// it can be read in full and selected to paste into an issue.
+///
+/// This replaces the old `setStatus(String(err), …)`, which appeared in nine
+/// places and put an entire sentence into the pill: unreadable past its width,
+/// uncopyable, and with no indication there was more to it.
+function reportProblem(err, what) {
+  setStatus(what, "error");
+  $("problem-what").textContent = what;
+  $("problem-raw").textContent = String(err);
+  show($("problem"), true);
+}
+
+
+/// Every modal in the window, and the one that outranks the rest.
+///
+/// An explicit list, not a query for `[role="dialog"]`. A query would tie
+/// containment to an ARIA attribute somebody could remove for an unrelated
+/// reason, and it would leave nothing for a test to quantify over; the query
+/// would be the assertion. Ids rather than elements because several of these
+/// are declared much further down this file than `show` is, and reading a
+/// `const` in its temporal dead zone throws.
+///
+/// The list is joined to the page, or it is just a list. A dialog present in
+/// the markup but missing from here is measurably not modal (the composer
+/// takes focus straight back out of it), and a join between this list and a
+/// table in a test does not catch that. `every_modal_in_the_page_is_in_the_list`
+/// reads `index.html` and is the assertion that does.
+///
+/// `dialog` outranks the rest for the same reason it is drawn above them: it
+/// cannot be dismissed and a Bot is blocked until it is answered.
+const MODAL_IDS = [
+  "dialog",
+  "palette",
+  "rules-dialog",
+  "secrets-dialog",
+  "name-dialog",
+  "edit-dialog",
+];
+const TOP_MODAL = "dialog";
+
+/// Where focus goes when the last modal closes.
+let returnFocusTo = null;
+
+/// Make the window's modality true, whichever box is open.
+///
+/// Every one of these carries `aria-modal="true"`, and the attribute alone
+/// does nothing: an overlay stops a pointer and never stops a keyboard, so
+/// without this a panel opens with focus still on the composer and the
+/// composer can take focus back from behind it.
+///
+/// Focus lands on the box, never on a control inside it, except where a
+/// dialog then focuses its own field, which New Bot and Edit do and should.
+/// For the approval box that rule is load-bearing: its options come in the
+/// agent's order with the permitting one normally first, so focusing a
+/// button would put one Return between a keyboard and an approval nobody
+/// read.
+///
+/// Containment is `inert` on everything but the top box, so the browser owns
+/// the edge cases (Shift+Tab off the first control, controls added later, a
+/// second modal underneath) instead of a list of focusable selectors here
+/// going quietly out of date.
+function applyModality() {
+  const app = document.getElementById("app");
+  const modals = MODAL_IDS.map((id) => document.getElementById(id)).filter(Boolean);
+  const open = modals.filter((m) => !m.classList.contains("hidden"));
+  const top = open.find((m) => m.id === TOP_MODAL) || open[open.length - 1] || null;
+
+  // Recorded once, on the way in from outside every modal, so opening a
+  // second one over the first still hands focus back to where a person was.
+  if (top && !returnFocusTo && !modals.some((m) => m.contains(document.activeElement))) {
+    returnFocusTo = document.activeElement;
+  }
+  for (const child of app.children) {
+    child.toggleAttribute("inert", Boolean(top) && child !== top);
+  }
+  // Not on every re-render: a queue advancing must not yank focus off a
+  // control somebody has already tabbed to.
+  if (top && !top.contains(document.activeElement)) top.focus();
+  if (!top && returnFocusTo) {
+    const back = returnFocusTo;
+    returnFocusTo = null;
+    // After the `inert` above is cleared, or the element receiving focus
+    // cannot take it. `isConnected` because it may have been re-rendered away.
+    if (back.isConnected) back.focus();
+  }
+}
+
+function show(el, on) {
+  el.classList.toggle("hidden", !on);
+  // One hook, so the many `show(...)` calls that open and close these boxes
+  // cannot each forget.
+  if (MODAL_IDS.includes(el.id)) applyModality();
+}
+
+// ------------------------------------------------------------- attachments
+
+/// Draw the chips. Named for the file somebody picked, not for the path it
+/// landed at: `attachments/notes-2.md` is what the Bot is told, and showing it
+/// here would answer a question nobody asked with a name they did not choose.
+function renderAttached() {
+  attachedList.innerHTML = "";
+  // Two files of one name must not look identical. Attaching `quarterly.md`
+  // from two folders is the ordinary case (it is the case the store's `-2`
+  // suffix exists for), and two chips reading `quarterly.md` make the remove
+  // buttons a coin flip. The tooltip carries the path, and a tooltip is
+  // something you have to already know is there.
+  //
+  // Numbered by the order they were attached, which is the order they are on
+  // screen and the order they land in, so `(2)` is the second one either way.
+  const seen = new Map();
+  for (const item of attached) {
+    const n = (seen.get(item.name) || 0) + 1;
+    seen.set(item.name, n);
+    item.nth = n;
+  }
+  const total = new Map();
+  for (const item of attached) {
+    total.set(item.name, (total.get(item.name) || 0) + 1);
+  }
+  for (const item of attached) {
+    const li = document.createElement("li");
+    const label = document.createElement("span");
+    label.textContent =
+      total.get(item.name) > 1 ? `${item.name} (${item.nth})` : item.name;
+    // The path is available without taking room, for the case where two
+    // files of one name make the chips ambiguous.
+    li.title = item.path;
+    const drop = document.createElement("button");
+    drop.type = "button";
+    drop.setAttribute("aria-label", `Remove ${item.name}`);
+    drop.textContent = "×";
+    drop.addEventListener("click", () => {
+      const at = attached.indexOf(item);
+      if (at >= 0) attached.splice(at, 1);
+      renderAttached();
+    });
+    li.appendChild(label);
+    li.appendChild(drop);
+    attachedList.appendChild(li);
+  }
+  show(attachedList, attached.length > 0);
+}
+
+// Applies to requests that arrive after it is turned on. A click that
+// instantly answered a dialog already on screen — one the person was mid-way
+// through reading — would be the opposite of a considered decision.
+$("bypass").addEventListener("click", () => setBypass(!bypass));
+
+attachBtn.addEventListener("click", async () => {
+  if (!session) return;
+  try {
+    attached.push(await invoke("attach_file"));
+    renderAttached();
+  } catch (err) {
+    // Dismissing the picker is not a failure and must not raise a message.
+    if (String(err).includes("cancelled")) return;
+    reportProblem(err, "could not attach that file");
+  }
+});
+
+// ---------------------------------------------------------------- transcript
+
+/// Who a transcript line is from, for anyone not reading the colours.
+///
+/// Without these, the six kinds (the person's own words, the Bot's, its
+/// reasoning, a tool call, a progress note and a result) are told apart by
+/// styling and by nothing else: all `<div class="msg …">` with text in them.
+/// `every_message_kind_is_styled` proves each one is decorated, which is also
+/// a proof that the distinction is decoration: alignment and background,
+/// both invisible to a screen reader, which would hear one undifferentiated
+/// stream and could not tell a Bot's private reasoning from what it actually
+/// said.
+///
+/// Labels differ at the first word. "Bot" and "Bot thinking" are told apart
+/// only after the listener has already committed to hearing speech, which is
+/// the audible version of allow and deny looking alike.
+///
+/// No fallback entry. A kind missing from here renders with no prefix, which
+/// fails `every_message_kind_says_who_it_is_from`; a default label would
+/// make that test unfalsifiable.
+const SPEAKER = {
+  user: "You",
+  agent: "Bot",
+  thought: "Reasoning",
+  tool: "Tool call",
+  progress: "Progress",
+  result: "Result",
+};
+
+/// What a tool step says about itself, as a sentence a person reads.
+///
+/// The shell sends the tool's name with its raw arguments, and later the
+/// result as `✓ {json}` or `✗ {json}`. A thread that shows both verbatim is
+/// a debug log. For the tools this page knows, the pair is summarised into one
+/// phrase ("Wrote notes.md · 93 bytes"); for anything else the raw line stands,
+/// so a new tool is shown rather than hidden. The full text is always on the
+/// row's title, so nothing is lost, only tidied.
+/// `1 entry` rather than `1 entries`. A count of one is common enough in a
+/// workspace that getting it wrong is visible in the ordinary case.
+function plural(n, one, many) {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+const STEP_SUMMARY = {
+  "fs.write": (a, r) => [
+    "Wrote",
+    a.path,
+    r && r.bytes_written != null ? plural(r.bytes_written, "byte", "bytes") : null,
+  ],
+  "fs.read": (a, r) => [
+    "Read",
+    a.path,
+    r && r.contents != null ? plural(r.contents.length, "character", "characters") : null,
+  ],
+  "fs.list": (a, r) => [
+    "Listed",
+    // "." is the workspace root, and a lone full stop reads as a typo.
+    !a.path || a.path === "." ? "the workspace" : a.path,
+    r && Array.isArray(r.entries) ? plural(r.entries.length, "entry", "entries") : null,
+  ],
+  "fs.delete": (a) => ["Deleted", a.path, null],
+  "shell.exec": (a, r) => ["Ran", a.command, r && r.exit_code != null ? (r.exit_code === 0 ? "ok" : `exit ${r.exit_code}`) : null],
+  "browser.open": (a, r) => ["Opened", a.url, r && r.title ? r.title : null],
+  "browser.read": () => ["Read the page", null, null],
+  "browser.click": (a) => ["Clicked", a.selector || a.text, null],
+  "browser.fill": (a) => ["Filled", a.selector, null],
+  "browser.screenshot": () => ["Took a screenshot", null, null],
+  "bot.send": (a) => ["Handed off to", a.to || a.bot, null],
+  "bot.list": () => ["Listed the team", null, null],
+};
+
+/// Try to parse the JSON half of a tool or result line. `null` when it is not
+/// JSON, which is the ordinary case for a free-text result.
+function jsonTail(text, from) {
+  const t = text.slice(from).trim();
+  if (!t.startsWith("{") && !t.startsWith("[")) return null;
+  try { return JSON.parse(t); } catch { return null; }
+}
+
+/// The tool step currently open: the row the next result should complete.
+let openStep = null;
+
+/// True while a saved conversation is being poured back into the log.
+///
+/// Replayed rows are drawn by the same function that draws live ones, which is
+/// what keeps the two from drifting apart — and means anything measured from
+/// the wall clock while drawing is measuring the replay. See `startedAt`.
+let replaying = false;
+
+/// Replay a saved conversation without timing our own redraw.
+function replayHistory(history) {
+  replaying = true;
+  try {
+    for (const chunk of history) appendChunk(chunk);
+  } finally {
+    replaying = false;
+  }
+}
+
+function appendChunk(chunk) {
+  if (!chunk || !chunk.text) return;
+
+  // Anything arriving is the end of waiting for it, whatever it turns out to
+  // be. One place, rather than one per kind: a row this function does not know
+  // about yet would otherwise appear underneath a line still claiming nothing
+  // had come back.
+  closeWaiting();
+
+  // A result completes the open step in place rather than adding a row.
+  if (chunk.kind === "result" && openStep) {
+    completeStep(openStep, chunk);
+    openStep = null;
+    // And straight back to waiting: a tool result is what the model was
+    // waiting for, so the next thing happening is another model call. If the
+    // turn is in fact over, the row is taken down a moment later by the same
+    // `finally` that took down the last one.
+    if (busy) openWaiting("waiting for the model");
+    followLog();
+    return;
+  }
+  // Progress belongs to the open step and is shown as its state, not as rows.
+  if (chunk.kind === "progress" && openStep) {
+    openStep.dataset.state = chunk.text;
+    const st = openStep.querySelector(".step-state");
+    if (st) st.textContent = chunk.text;
+    return;
+  }
+
+  const el = document.createElement("div");
+  el.className = "msg " + chunk.kind;
+  const who = SPEAKER[chunk.kind];
+  if (who) {
+    const label = document.createElement("span");
+    label.className = "sr-only";
+    // The colon and space are read as a pause, and matter: without them a
+    // screen reader runs the label into the first word.
+    label.textContent = who + ": ";
+    el.appendChild(label);
+  }
+
+  if (chunk.kind === "tool") {
+    const sp = chunk.text.indexOf(" ");
+    const name = sp > 0 ? chunk.text.slice(0, sp) : chunk.text;
+    // From the shell as data. `text` is truncated to a readable length, so the
+    // JSON inside it does not parse once an argument is long: an `fs.write`
+    // carrying a real file printed raw JSON while a short `fs.read` beside it
+    // read as a sentence. Falling back to the text keeps older chunks working.
+    const args = chunk.args ?? (sp > 0 ? jsonTail(chunk.text, sp) : null);
+    el.dataset.tool = name;
+    el.dataset.args = args ? JSON.stringify(args) : "";
+    // A real button, not a div with a click handler. The row is a control that
+    // opens a record, so it has to be reachable by keyboard and has to say what
+    // it does to a screen reader; `aria-expanded` is the whole of that contract
+    // and costs one attribute.
+    const head = document.createElement("button");
+    head.type = "button";
+    head.className = "step-head";
+    head.setAttribute("aria-expanded", "false");
+    head.appendChild(stepMark("running"));
+    const text = document.createElement("span");
+    text.className = "step-text";
+    const summary = STEP_SUMMARY[name];
+    const [verb, object] = summary && args ? summary(args, null) : [null, null];
+    if (verb) {
+      const v = document.createElement("span");
+      v.className = "step-verb";
+      v.textContent = verb;
+      text.appendChild(v);
+      if (object) {
+        const o = document.createElement("span");
+        o.className = "step-object";
+        o.textContent = object;
+        text.appendChild(o);
+      }
+    } else {
+      const v = document.createElement("span");
+      v.className = "tool-name";
+      v.textContent = name;
+      text.appendChild(v);
+      if (sp > 0) text.appendChild(document.createTextNode(" " + chunk.text.slice(sp + 1)));
+    }
+    head.appendChild(text);
+    const state = document.createElement("span");
+    state.className = "step-state";
+    head.appendChild(state);
+    const dur = document.createElement("span");
+    dur.className = "step-dur";
+    head.appendChild(dur);
+    el.appendChild(head);
+    // Kept as the raw record rather than only as a tooltip. `title` stays so a
+    // hover still previews it; the copyable copy is the one that matters.
+    el.dataset.raw = chunk.text;
+    el.title = chunk.text;
+    head.addEventListener("click", () => toggleStepRaw(el));
+    // Stamped here because nothing upstream carries it. The runtime measures a
+    // tool call's real duration and puts it on `ToolCallFinished`, but the
+    // window drives the CLI over ACP, and ACP's tool-call update has no field
+    // for it - so the number dies at that boundary rather than in this file.
+    //
+    // What is recorded instead is what the window observed: the wall time
+    // between the call appearing and its result arriving. On a local transport
+    // those differ by well under a millisecond, and this is the honest thing to
+    // measure from here. If the duration ever needs to be the runtime's own,
+    // that is a protocol extension, not a change to this line.
+    // Only when this window watched it happen. A conversation reopened from
+    // disk replays its whole history through here in one tick, and timing that
+    // measures the replay: every step in a month-old thread came back reading
+    // `0ms`, which is not a fast step, it is a number nobody measured. The
+    // runtime does record `elapsed_ms` per call, but ACP's tool-call update
+    // has no field to carry it, so for history there is genuinely no duration
+    // to show — and no duration is the honest rendering of that.
+    if (!replaying) el.dataset.startedAt = String(performance.now());
+    openStep = el;
+  } else {
+    const body = document.createElement("span");
+    body.textContent = chunk.text;
+    el.appendChild(body);
+    if (chunk.kind === "result") el.title = chunk.text;
+  }
+  log.appendChild(el);
+  followLog();
+}
+
+/// Follow the log only when the reader is already at the bottom.
+///
+/// It used to jump to the bottom on every arriving line, which is exactly wrong
+/// while a Bot is working: the moment somebody scrolls up to read what a step
+/// did, the next step yanks them back down. The result is that the log is
+/// unreadable precisely when there is something worth reading in it.
+///
+/// The threshold is generous. Landing within a couple of lines of the bottom
+/// counts as being at the bottom, because a person who has not deliberately
+/// scrolled away expects to keep following, and sub-pixel scroll positions
+/// should not decide it.
+function followLog() {
+  const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+  if (nearBottom) log.scrollTop = log.scrollHeight;
+}
+
+/// Open or close a step's raw record.
+///
+/// The record is the exact text the shell sent: the call with its arguments,
+/// and the result underneath. Nothing is summarised here on purpose - the row
+/// above already carries the readable version, and this is the copy somebody
+/// pastes into an issue when the readable version is not enough.
+function toggleStepRaw(step) {
+  const head = step.querySelector(".step-head");
+  const open = step.querySelector(".step-raw");
+  if (open) {
+    open.remove();
+    if (head) head.setAttribute("aria-expanded", "false");
+    return;
+  }
+  const pre = document.createElement("pre");
+  pre.className = "step-raw";
+  pre.textContent = step.dataset.raw || "";
+  step.appendChild(pre);
+  if (head) head.setAttribute("aria-expanded", "true");
+}
+
+/// The tick or cross at the head of a step row.
+function stepMark(state) {
+  const m = document.createElement("span");
+  m.className = "step-mark";
+  m.dataset.state = state;
+  m.setAttribute("aria-hidden", "true");
+  return m;
+}
+
+/// Fill a step row in with its result: the mark becomes a tick or a cross,
+/// and the summary gains its detail ("· 93 bytes") when the tool is known.
+/// A step that was still running when the turn ended.
+///
+/// The window cannot know whether the call landed. The computer went away
+/// mid-flight, and "no result came back" is not the same fact as "it did not
+/// run" — a shell command that was already executing does not stop because the
+/// transport did. Both of the obvious renderings assert something false: a
+/// spinner left turning says it is still happening, and a failure mark says it
+/// did not happen. So the step says what is actually known, which is that
+/// nobody knows.
+///
+/// This is the WHAT IS SAFE line of the error doctrine, on the one surface
+/// where silence is worst: a person looking at an abandoned `shell.exec` needs
+/// to know whether to run it again.
+/// The turn is running and nothing has come back yet, said where the reading is.
+///
+/// The whole design of this state used to be `setStatus("thinking…")`: one
+/// twelve-pixel word in the top-right corner, roughly nine hundred pixels from
+/// the six-hundred-and-forty-pixel column the eye is actually in. This is the
+/// majority of the wall-clock time a person spends with a working Bot, and the
+/// interval in which they decide whether to press Stop — with the only
+/// evidence for that decision in the opposite corner from the control.
+///
+/// The model call does not stream and should not: `providers/http.rs` sends
+/// `"stream": false` deliberately, and `serve.rs` drops `AgentEvent::Thinking`,
+/// so there is genuinely nothing to show between the last tool result and the
+/// answer. What there is, is elapsed time — which is a measurement, and the
+/// reason this is a counter and not a spinner. A spinner asserts progress it
+/// has not measured, which is the mistake `abandonOpenStep` exists to avoid.
+///
+/// Ticks at 100ms so the number moves rather than jumping; DIRECTION allows
+/// motion that communicates a state transition, and a measured counter
+/// changing is the least decorative motion available.
+let waiting = null;
+let waitingTick = null;
+
+function openWaiting(what) {
+  closeWaiting();
+  const el = document.createElement("div");
+  el.className = "msg pending";
+  const started = performance.now();
+  const label = document.createElement("span");
+  label.textContent = what;
+  const dur = document.createElement("span");
+  dur.className = "step-dur";
+  // `#log` is `role="log"`, which is a live region. A number changing ten
+  // times a second inside one is not information, it is an interruption that
+  // does not stop.
+  dur.setAttribute("aria-hidden", "true");
+  el.append(label, dur);
+  log.appendChild(el);
+  waiting = el;
+  const tick = () => (dur.textContent = humanMs(performance.now() - started));
+  tick();
+  waitingTick = setInterval(tick, 100);
+  followLog();
+}
+
+function closeWaiting() {
+  clearInterval(waitingTick);
+  waitingTick = null;
+  if (waiting) waiting.remove();
+  waiting = null;
+}
+
+function abandonOpenStep() {
+  if (!openStep) return;
+  const mark = openStep.querySelector(".step-mark");
+  if (mark) mark.dataset.state = "unknown";
+  openStep.classList.add("unknown");
+  const st = openStep.querySelector(".step-state");
+  if (st) st.textContent = "";
+  const text = openStep.querySelector(".step-text");
+  if (text) {
+    const d = document.createElement("span");
+    d.className = "step-detail";
+    d.textContent = "no result came back — this may or may not have run";
+    text.appendChild(d);
+  }
+  openStep = null;
+}
+
+/// A duration a person reads at a glance, not a number they parse.
+///
+/// Sub-second work is the common case and `0.004s` tells nobody anything, so
+/// milliseconds stay milliseconds until a second is genuinely the better unit.
+/// Above a minute the seconds stop mattering and the shape of the wait is what
+/// is being read.
+function humanMs(ms) {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60000);
+  return `${m}m ${Math.round((ms - m * 60000) / 1000)}s`;
+}
+
+function completeStep(step, chunk) {
+  const ok = chunk.text.startsWith("✓");
+  const mark = step.querySelector(".step-mark");
+  if (mark) mark.dataset.state = ok ? "ok" : "failed";
+  // How long it took. Every other column on this row says what happened; none
+  // said how long it took, which is the first thing anyone watching a Bot work
+  // wants to know and the reason a slow step was indistinguishable from a stuck
+  // one.
+  const started = Number(step.dataset.startedAt);
+  const dur = step.querySelector(".step-dur");
+  if (dur && Number.isFinite(started)) dur.textContent = humanMs(performance.now() - started);
+  step.classList.toggle("failed", !ok);
+  const st = step.querySelector(".step-state");
+  if (st) st.textContent = "";
+  const summary = STEP_SUMMARY[step.dataset.tool];
+  let args = null;
+  try { args = step.dataset.args ? JSON.parse(step.dataset.args) : null; } catch { args = null; }
+  const result = jsonTail(chunk.text, 1);
+  if (summary && args && ok) {
+    const [, , detail] = summary(args, result);
+    if (detail) {
+      const d = document.createElement("span");
+      d.className = "step-detail";
+      d.textContent = detail;
+      step.querySelector(".step-text").appendChild(d);
+    }
+  } else if (!ok) {
+    // A failure shows its reason in full; it is the one time the raw record is
+    // the thing a person needs to read.
+    const d = document.createElement("span");
+    d.className = "step-detail";
+    d.textContent = chunk.text.slice(1).trim();
+    step.querySelector(".step-text").appendChild(d);
+  }
+  step.title = `${step.title}\n${chunk.text}`;
+  step.dataset.raw = `${step.dataset.raw || ""}\n${chunk.text}`;
+  // Already open means it is being read right now, so the result belongs in it
+  // immediately rather than waiting for the next open.
+  const shownRaw = step.querySelector(".step-raw");
+  if (shownRaw) shownRaw.textContent = step.dataset.raw;
+  // Said to a screen reader: the outcome, with the record behind it.
+  const sr = document.createElement("span");
+  sr.className = "sr-only";
+  sr.textContent = (ok ? " Result: " : " Failed: ") + chunk.text.slice(1).trim();
+  step.appendChild(sr);
+}
+// ------------------------------------------------------------------- marks
+
+/// A Bot's mark: one letter on a colour of its own.
+///
+/// Keyed on the id, never the name. `botroster bot set --rename` keeps the id
+/// precisely so a rename carries the conversation, the groups and the
+/// routines with it; a mark that changed colour on rename would be the one
+/// thing about the Bot that did not survive being renamed, and it is the part
+/// a person recognises fastest.
+///
+/// Generated rather than uploaded. For a tool you run yourself, a picture to
+/// manage per Bot is a worse default than a colour that is simply always
+/// there, and the job an avatar does in a sidebar of ten Bots is to be
+/// distinguishable, which this does without anybody deciding anything.
+function markOf(id, name) {
+  // FNV-1a: tiny, deterministic, and spreads adjacent ids. `bot-1` and
+  // `bot-2` must not come out the same colour, which is the case a sum over
+  // characters gets wrong.
+  let h = 0x811c9dc5;
+  for (const ch of String(id)) {
+    h ^= ch.codePointAt(0);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  // The first letter or digit, so "  ledger" and "@ledger" both read L and
+  // not a space or a symbol. Falls back to the id, then to a dot, because a
+  // mark is never blank.
+  const from = [...String(name)].find((c) => /\p{L}|\p{N}/u.test(c));
+  const glyph = (from || [...String(id)].find((c) => /\p{L}|\p{N}/u.test(c)) || "•")
+    .toUpperCase();
+  // `hue` is one of eight coats, not a degree. A 360-stop wheel at one
+  // lightness produces some Bots at 2.09:1 that no roster can show; eight
+  // named coats, each checked for both themes, is a set a test can walk in
+  // full. The field keeps its name because everything that reads it only
+  // asks "same as before?".
+  return { glyph, hue: h % COATS };
+}
+
+/// How many coats a Bot can wear. Matches `--coat-0` … `--coat-7` in
+/// `styles.css`, and `every_coat_a_bot_can_wear_is_legible` reads it from here.
+const COATS = 8;
+
+/// Displayed name to id, filled wherever the roster is drawn.
+///
+/// `open_bot` and `open_group` answer with a name, because that is what a
+/// person picked and what the header shows. The mark needs the id, so it is
+/// looked up here rather than added to the protocol: this is the one place
+/// both are already known, and the palette opens Bots from the same roster.
+///
+/// Falls back to the name when a lookup misses, so a mark is always drawn:
+/// wrong-coloured beats absent, and the only way to miss is a conversation
+/// opened before the roster arrived.
+const idOf = new Map();
+
+/// Build the element, so the roster and the header cannot disagree about how
+/// a Bot looks.
+function markEl(id, name) {
+  const { glyph, hue } = markOf(id, name);
+  const el = document.createElement("span");
+  el.className = "mark bot-mark";
+  el.setAttribute("aria-hidden", "true");
+  el.style.setProperty("--mark-hue", String(hue));
+  // The colour itself, from the coat token, set here rather than matched
+  // by an attribute selector in CSS, which is easy to get subtly wrong.
+  el.style.setProperty("--coat", `var(--coat-${hue})`);
+  el.textContent = glyph;
+  return el;
+}
+
+/// Put a Bot's coat on a container, so a row or the whole thread can wear the
+/// same colour its mark does. One place, because the roster row, the header
+/// and the log all have to agree or the coat means nothing.
+function wearCoat(el, id, name) {
+  el.style.setProperty("--coat", `var(--coat-${markOf(id, name).hue})`);
+}
+
+/// The three states anything awaited can be in, and the one rule about them.
+///
+/// **`empty` may only be shown after an answer has arrived.** A list that
+/// paints its "nothing scheduled" line while the read is still in flight is
+/// saying something it does not know, and it is saying it in exactly the words
+/// it would use if it did know. Every one of these calls shells out to an
+/// `botroster` subprocess, so the gap is not theoretical: a person with three
+/// routines and a slow machine read "Nothing scheduled" and believed it.
+///
+/// `failed` is the fourth, and it is the one this window had no way to say at
+/// all. A read that threw left the list blank and the empty line hidden — no
+/// rows, no explanation, nothing to distinguish it from a home with nothing in
+/// it. That is the same lie with a different cause.
+///
+/// The state line is its own element rather than the empty paragraph reworded.
+/// The empty copy is authored prose that carries markup, and a helper that
+/// overwrites and restores it would have to reconstruct that markup.
+function listState(list, stateEl, emptyEl, state, detail) {
+  // Announced through the list itself. A visible "Reading…" line is for the
+  // eye; `aria-busy` is the same fact in the form a screen reader acts on, and
+  // it belongs on the thing that is busy.
+  list.setAttribute("aria-busy", String(state === "pending"));
+  stateEl.className = (state === "failed" ? "error" : "hint") + " list-state";
+  stateEl.textContent = state === "pending" ? "Reading…" : detail || "";
+  show(stateEl, state === "pending" || state === "failed");
+  // Never at the same time as the state line: they are two answers to one
+  // question and at most one of them is true.
+  //
+  // Optional, because two of the lists here decide it themselves. Groups have
+  // no "none yet" line and want none — a home with no groups is the ordinary
+  // case and the section header is simply absent — and the roster's line
+  // depends on whether hidden Bots are being shown, which is a rule this
+  // helper has no business knowing.
+  if (emptyEl) show(emptyEl, state === "empty");
+}
+
+/// Read one list and draw it, saying so throughout, and saying so if it fails.
+///
+/// Each list gets its own call, which is the point. `refreshWiring` used to
+/// await `connectors` and then `routines` inside a single `try`, so a failing
+/// connector read meant routines were never fetched — and since the empty
+/// state only ran on the drawing path, both sections rendered as nothing at
+/// all. A broken connector made a person's routines disappear, silently, and
+/// `refreshMentionable` already argued the rule in a comment three hundred
+/// lines away: "a home with a broken connector should still offer skills,
+/// rather than one failing list leaving the composer with nothing".
+///
+/// `what` names the list in its own failure, because "could not be read" over
+/// a blank panel does not say which panel.
+async function fillList({ list, state, empty, what, read, draw }) {
+  listState(list, state, empty, "pending");
+  let rows;
+  try {
+    rows = await read();
+  } catch (err) {
+    // Whatever was drawn last stays drawn. The instinct is to clear it —
+    // stale rows are a claim about now, and the read that would have confirmed
+    // them is the one that failed — but the roster already settled this
+    // argument and settled it the other way: "never an empty list on failure:
+    // that is indistinguishable from having no Bots, and the person would go
+    // looking for their work, not the error". An empty list plus an error says
+    // less than the last known list plus the same error, and the failure was
+    // never the silence's cause. On a first read there is nothing there to
+    // keep, which is the case that made clearing look free.
+    listState(list, state, empty, "failed", `${what} could not be read — ${err}`);
+    return false;
+  }
+  draw(rows);
+  listState(list, state, empty, rows.length ? "filled" : "empty");
+  return true;
+}
+
+// ------------------------------------------------------------------- roster
+
+/// One roster row, made once.
+///
+/// Split out from the patch below because the two have different jobs and
+/// only this one may attach a listener: a row that is patched keeps the
+/// handler it was born with, and a row that is rebuilt every turn would
+/// accumulate them.
+function newBotRow(bot) {
+  const li = document.createElement("li");
+  // The key the reconcile matches on. `openBot` takes a name, and the click
+  // handler below closes over one, so the row is identified by the same thing
+  // it acts on.
+  li.dataset.bot = bot.name;
+
+  const btn = document.createElement("button");
+  btn.className = "bot";
+  btn.appendChild(markEl(bot.id, bot.name));
+
+  const name = document.createElement("span");
+  name.className = "bot-name";
+  btn.appendChild(name);
+
+  // The job, or how much conversation there is to come back to. One line
+  // either way: a sidebar that reflows as Bots gain history is a sidebar
+  // whose entries move under the cursor.
+  const sub = document.createElement("span");
+  sub.className = "bot-sub";
+  btn.appendChild(sub);
+
+  btn.addEventListener("click", () => openBot(bot.name));
+  li.appendChild(btn);
+  return li;
+}
+
+/// Bring an existing row up to date, touching only what changed.
+function patchBotRow(li, bot) {
+  const btn = li.firstElementChild;
+  btn.className = "bot" + (bot.name === openName ? " open" : "");
+  btn.title = bot.description || bot.name;
+  wearCoat(btn, bot.id, bot.name);
+
+  // What `@` has to insert: the id, not the name shown here. `Group::owner_for`
+  // matches a mention against `BotId::as_str()`, and `botroster_bots::mentions`
+  // stops at the first character outside `[a-z0-9_-]`, so `@Talent Scout`
+  // reaches it as `talent` and resolves to nobody. See `mentionEntries`.
+  //
+  // Doubles as the check for whether the mark is still the right one: the mark
+  // is drawn from the id, so they go stale together or not at all.
+  if (btn.dataset.mention !== bot.id) {
+    btn.dataset.mention = bot.id;
+    btn.replaceChild(markEl(bot.id, bot.name), btn.firstElementChild);
+  }
+
+  btn.querySelector(".bot-name").textContent = bot.name;
+  btn.querySelector(".bot-sub").textContent =
+    bot.title || (bot.messages ? bot.messages + " messages" : "no messages yet");
+
+  const tag = btn.querySelector(".bot-hidden");
+  if (bot.hidden && !tag) {
+    const mark = document.createElement("span");
+    mark.className = "bot-hidden";
+    mark.textContent = "hidden";
+    btn.appendChild(mark);
+  } else if (!bot.hidden && tag) {
+    tag.remove();
+  }
+}
+
+/// Draw the roster into the list that is already there. Nothing here mutates
+/// state; it renders what it is given, so a failed refresh cannot half-update
+/// the list.
+///
+/// This was `botsList.innerHTML = ""` and a rebuild, which is the obvious way
+/// to render a list and the wrong way to render one that redraws at the end of
+/// every turn: destroying the focused element sends focus to `<body>`, so
+/// anybody moving through the roster from the keyboard was returned to the top
+/// of the document every time any Bot finished speaking.
+///
+/// The review that raised this (F-DC9) also said the redraw threw away the
+/// sidebar's scroll position. Measured, it did not. The wipe and the rebuild
+/// are one synchronous block, no layout runs between them, and the scroll
+/// offset is never clamped — 300px before, 300px after. Force a layout in
+/// between and it does go to zero, which is presumably where the claim came
+/// from, but nothing on this path forces one. Only the focus loss was real.
+///
+/// Restoring focus around the rebuild would have hidden that symptom and left
+/// the cause, along with a flicker on every turn and a growing list of things
+/// to remember to put back.
+///
+/// Keyed by name, because that is what `openBot` opens and what a row's click
+/// handler closes over. A renamed Bot is therefore a removal and an addition,
+/// which is the truth: it is not the row that was there.
+function renderRoster(bots) {
+  for (const bot of bots) idOf.set(bot.name, bot.id);
+
+  const had = new Map();
+  for (const li of botsList.children) had.set(li.dataset.bot, li);
+
+  let at = 0;
+  for (const bot of bots) {
+    const li = had.get(bot.name) || newBotRow(bot);
+    had.delete(bot.name);
+    patchBotRow(li, bot);
+    // Moved only when it is actually out of place. Re-inserting a node that is
+    // already where it belongs is not free — it is a move as far as the DOM is
+    // concerned, and a move can take focus off it.
+    if (botsList.children[at] !== li) {
+      botsList.insertBefore(li, botsList.children[at] || null);
+    }
+    at += 1;
+  }
+  for (const li of had.values()) li.remove();
+
+  show(rosterEmpty, bots.length === 0 && !showHidden);
+
+  // The empty conversation pane has to say something true. With an empty
+  // roster "pick one on the left" points at nothing, so the copy and the
+  // button both change with the count rather than being written once for the
+  // populated case and left to go wrong in the case a new install actually
+  // starts in.
+  const none = bots.length === 0;
+  $("no-bot-copy").textContent = none
+    ? "There are none yet."
+    : "Pick one on the left, or make another.";
+  $("no-bot-new").textContent = none ? "Make your first Bot" : "New Bot";
+}
+
+/// Groups, under the Bots. Clicking one opens it as a session like a Bot's:
+/// the thread comes back with it and the composer stays live, because the
+/// agent resolves which member answers from the `@mention` in each message.
+async function refreshGroups() {
+  const list = $("groups");
+  await fillList({
+    list,
+    state: $("groups-state"),
+    empty: null,
+    what: "Groups",
+    read: () => invoke("groups"),
+    draw: (all) => drawGroups(list, all),
+  });
+}
+
+function drawGroups(list, all) {
+  list.replaceChildren();
+  for (const group of all) idOf.set(group.name, group.id);
+  for (const group of all) {
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.className = "bot" + (group.name === openName ? " open" : "");
+    // A group gets a mark too, and not only for consistency with the Bots
+    // directly above it. `.bot` is a two-column grid whose first column is the
+    // mark; a row built without one puts the name in that column and the
+    // members' names beside it on the same line (`LaunchTalent Scout, Ledger`)
+    // because the subtitle then lands in row 1 instead of row 2. The mark
+    // keeps the shape the grid was written for.
+    btn.appendChild(markEl(group.id, group.name));
+    wearCoat(btn, group.id, group.name);
+    const name = document.createElement("span");
+    name.className = "bot-name";
+    name.textContent = group.name;
+    const sub = document.createElement("span");
+    sub.className = "bot-sub";
+    // Names, not ids. A group stores ids and a rename keeps them, so
+    // joining the raw list would put `talent-scout` under a sidebar entry
+    // reading "Recruiting": the same window saying two things about one Bot.
+    sub.textContent = group.members.map((m) => m.name).join(", ");
+    btn.appendChild(name);
+    btn.appendChild(sub);
+    // The id here too, though for a different reason than a Bot's. No
+    // resolver reads a group mention out of a prompt (`resolve_group` is
+    // reached from ACP's `_meta` and from command arguments, never from
+    // message text), so this is a name for the model rather than an address.
+    // The id is still the better one to insert: `botroster_bots::mentions` is the
+    // only mention tokenizer here and it stops at a space, so a group called
+    // "Website Launch" would arrive as `website`. A slug survives whatever
+    // reads it later, and reads as the name anyway.
+    btn.dataset.mention = group.id;
+    btn.addEventListener("click", () => openGroup(group.name));
+    li.appendChild(btn);
+    list.appendChild(li);
+  }
+  show($("groups-head"), all.length > 0);
+}
+
+/// Put the window back to having no conversation open.
+///
+/// Used when opening one fails. Without it the failure would leave the header
+/// naming the previous Bot over an empty transcript, with the composer still
+/// live and `session` null, so Send would do nothing at all, silently, which
+/// is the worst of the three states available. Either show a conversation or
+/// show none; never show the frame of one that is not there.
+function closeConversation() {
+  session = null;
+  openName = null;
+  // Nothing to edit with no conversation open; a live button over an empty
+  // header is an affirmative state that is not true.
+  show($("edit-bot"), false);
+  botName.textContent = "";
+  botTitle.textContent = "";
+  botMark.replaceChildren();
+  log.style.removeProperty("--coat");
+  // Attachments belong to the message being written, not to the window.
+  // Without this, picking a file, changing your mind and opening a different
+  // Bot sends it to that one instead: the same "one conversation eating
+  // another's" the inbox exists to prevent, on a shorter path. The copy stays
+  // in the workspace; only the intent to mention it is dropped.
+  attached.length = 0;
+  renderAttached();
+  log.innerHTML = "";
+  openStep = null;
+  show(log, false);
+  show(composer, false);
+  show(noBot, true);
+}
+
+async function openGroup(name) {
+  if (busy) return;
+  await refuseAsks();
+  closeConversation();
+  setStatus("opening…", "busy");
+  try {
+    // A group session, like a Bot's: the thread comes back with it, and which
+    // member answers is decided per message by who is @mentioned.
+    const opened = await invoke("open_group", { name });
+    session = opened.session;
+    openName = opened.name;
+    botName.textContent = opened.name;
+    botMark.replaceChildren(markEl(idOf.get(opened.name) || opened.name, opened.name));
+    replayHistory(opened.history);
+    show(noBot, false);
+    show(log, true);
+    show(composer, true);
+    setStatus("connected", "connected");
+    await refreshRoster();
+    input.focus();
+  } catch (err) {
+    closeConversation();
+    reportProblem(err, "could not open that group");
+    refreshRoster();
+  }
+}
+
+/// The Bots, and then the Groups under them, each read on its own.
+///
+/// `roster-error` is the state line rather than a second element beside it:
+/// the roster already had somewhere to put a failure, and it says the thing
+/// `listState` would have said. What it did not have was anything to say while
+/// the read was in flight — and this read spawns a subprocess.
+///
+/// `renderRoster` keeps the decision about its own empty line, because that
+/// one depends on whether hidden Bots are being shown.
+///
+/// Groups are not awaited into this path. A slow or broken `groups` read must
+/// not hold up the Bots, which is the list somebody is actually looking for.
+async function refreshRoster() {
+  await fillList({
+    list: botsList,
+    state: rosterError,
+    empty: null,
+    what: "Your Bots",
+    read: () => invoke("roster", { hidden: showHidden }),
+    // Never an empty list on failure: that is indistinguishable from having
+    // no Bots, and the person would go looking for their work, not the error.
+    draw: (bots) => renderRoster(bots),
+  });
+  refreshGroups();
+}
+
+async function openBot(name) {
+  if (busy) return;
+  // Awaited, like `openGroup` does: the refusals are on their way out before
+  // this window stops being the one that could answer them.
+  await refuseAsks();
+  closeConversation();
+  setStatus("opening…", "busy");
+  try {
+    const opened = await invoke("open_bot", { name });
+    session = opened.session;
+    openName = opened.name;
+    botName.textContent = opened.name;
+    botMark.replaceChildren(markEl(idOf.get(opened.name) || opened.name, opened.name));
+    wearCoat(log, idOf.get(opened.name) || opened.name, opened.name);
+    // What the Bot already remembers. This arrives in the reply rather than as
+    // events, so there is no window in which the page is filtering chunks
+    // against a session id it has not been told yet.
+    replayHistory(opened.history);
+    show(noBot, false);
+    show(log, true);
+    show(composer, true);
+    // Bots only. A group has a name and members, not a title and a
+    // description, so the form would be three boxes that go nowhere.
+    show($("edit-bot"), true);
+    setStatus("connected", "connected");
+    await refreshRoster();
+    input.focus();
+  } catch (err) {
+    // Nothing opened, so nothing is shown. The roster is redrawn too, or the
+    // sidebar would keep its accent edge on a conversation that is not there.
+    closeConversation();
+    reportProblem(err, "could not open that Bot");
+    refreshRoster();
+  }
+}
+
+// ------------------------------------------------------------------ approvals
+
+/// Send a decision, and only take the question down once it has landed.
+///
+/// If the dialog closed first and invoked second, with a failure reported as
+/// a status pill in the corner, a decision that never reached the Bot (the
+/// request had already settled, by timeout or by the turn ending) would look
+/// exactly like one that had: the question vanishes, the person believes
+/// they allowed it, and nothing happened. The question stays until the
+/// answer is known to have arrived, and when it has not, this says so where
+/// the question was rather than beside it.
+async function answerAsk(id, optionId) {
+  try {
+    await invoke("answer_permission", { id, optionId });
+  } catch (err) {
+    const ask = asks.find((a) => a.id === id);
+    if (ask) {
+      ask.dead = String(err);
+      renderDialog();
+      return;
+    }
+    reportProblem(err, "your answer did not reach the Bot");
+    return;
+  }
+  removeAsk(id);
+  renderDialog();
+}
+
+function removeAsk(id) {
+  const at = asks.findIndex((ask) => ask.id === id);
+  if (at >= 0) asks.splice(at, 1);
+  renderWaiting();
+}
+
+/// Hand over a credential, and only take the question down once it has landed.
+///
+/// Same rule as `answerAsk` and for a sharper reason: somebody has just typed
+/// a secret, and a box that closes on a failure tells them it was stored when
+/// it was not. Separate from `answerAsk` because these are different acts
+/// (an approval is a choice among offered options, this is a value) and the
+/// shell refuses to attach a value to a request that did not ask for one.
+///
+/// The value is read from the input at the moment of sending and never put
+/// anywhere else. Not into `asks`, not into a variable that outlives this
+/// call. The input is cleared on both paths, including the failure path, so a
+/// credential is not left sitting in the DOM behind a dismissed error.
+async function supplySecret(id) {
+  const value = secretValueInput.value;
+  try {
+    await invoke("supply_secret", { id, value });
+  } catch (err) {
+    secretValueInput.value = "";
+    const ask = asks.find((a) => a.id === id);
+    if (ask) {
+      // "nothing was entered" is not a settled request: the shell keeps it
+      // parked so an accidental Enter does not strand the turn. Anything
+      // else means it will never be answered.
+      if (String(err).includes("nothing was entered")) {
+        dialogError.textContent = "Enter the credential, or choose Not this time.";
+        show(dialogError, true);
+        secretValueInput.focus();
+        return;
+      }
+      ask.dead = String(err);
+      renderDialog();
+      return;
+    }
+    reportProblem(err, "the credential did not reach the Bot");
+    return;
+  }
+  secretValueInput.value = "";
+  removeAsk(id);
+  renderDialog();
+}
+
+/// Whether this window answers approvals itself instead of asking.
+///
+/// The CLI has had `--approve auto` since the beginning — "approve everything
+/// without asking, for runs where the operator has explicitly accepted the
+/// risk". This is that, with a face, and it is the same bargain: it changes who
+/// answers, never what is asked.
+///
+/// **It does not move the gate.** The hub still evaluates policy on every call
+/// and still refuses anything a `deny` rule covers; a client has never been
+/// able to approve past one. What this removes is the person, not the control
+/// plane.
+///
+/// In memory only, off whenever the window opens, and cleared on disconnect.
+/// APPROVAL-INVARIANTS.md forbids a choice that spans sessions, and a flag that
+/// survived a restart would be exactly that.
+let bypass = false;
+
+/// Where the choice is kept between sessions.
+///
+/// The webview's own storage, in this app's data directory — a window
+/// preference, kept where window preferences belong, and not in `config.toml`,
+/// which is the runtime's file and describes the runtime rather than this
+/// client.
+const BYPASS_KEY = "botroster.bypass";
+
+function setBypass(on) {
+  bypass = on;
+  const btn = $("bypass");
+  btn.classList.toggle("bypassing", on);
+  btn.setAttribute("aria-pressed", String(on));
+  $("bypass-label").textContent = on ? "Approving everything" : "Asking first";
+  btn.title = on
+    ? "Approving every request without asking. Click to start asking again."
+    : "Approve requests without asking, and keep doing so until turned off";
+  // Remembered. Storage can throw (a locked-down webview, a full disk); the
+  // choice still applies to this window when it does, it just will not survive
+  // the next launch. Failing to remember is not a reason to fail to obey.
+  try {
+    localStorage.setItem(BYPASS_KEY, on ? "1" : "0");
+  } catch {
+    /* not remembered; still in force for this window */
+  }
+}
+
+/// Put the toggle back the way it was left, at load.
+///
+/// It is applied through `setBypass`, so the button is amber and reads
+/// "Approving everything" from the first frame. That is the whole condition on
+/// persisting this: it may be on before anybody clicks, but it may never be on
+/// without saying so.
+function restoreBypass() {
+  let stored = null;
+  try {
+    stored = localStorage.getItem(BYPASS_KEY);
+  } catch {
+    stored = null;
+  }
+  setBypass(stored === "1");
+}
+
+/// Answer an ask without a person, and leave a record that says so.
+///
+/// The narrowest grant, always. `renderDialog` documents that the shell orders
+/// options narrowest-first and marks refusals with `danger`, so the first
+/// non-refusing option is the smallest one on offer. Taking any later grant
+/// would turn a client-side convenience into a hub-side session grant that
+/// outlives the toggle — the one way this could actually weaken the gate.
+///
+/// Returns false when there is nothing safe to pick, in which case the dialog
+/// is shown and a person answers after all.
+function autoApprove(ask) {
+  const grant = ask.options.find((o) => !o.danger);
+  if (!grant) return false;
+  noteAutoApproval(ask, grant);
+  answerAsk(ask.id, grant.id);
+  return true;
+}
+
+/// The record of a call nobody was asked about.
+///
+/// Bypass removes the choice, not the account of it. The invariants require the
+/// full argument list to be readable before a choice is reachable; with no
+/// choice to reach, the arguments still have to land somewhere a person can
+/// find them afterwards. Marked distinctly, because "approved" and "approved by
+/// you" are different facts.
+function noteAutoApproval(ask, grant) {
+  const el = document.createElement("div");
+  el.className = "msg auto-approved";
+  const head = document.createElement("span");
+  head.className = "auto-head";
+  head.textContent = "Approved without asking";
+  el.appendChild(head);
+  const what = document.createElement("span");
+  what.className = "auto-tool";
+  what.textContent = String(ask.tool || "").split(": ")[0];
+  el.appendChild(what);
+  for (const f of ask.fields || []) {
+    const row = document.createElement("span");
+    row.className = "auto-field";
+    row.textContent = `${f.name}  ${f.value}`;
+    el.appendChild(row);
+  }
+  const how = document.createElement("span");
+  how.className = "auto-grant";
+  how.textContent = grant.name;
+  el.appendChild(how);
+  log.appendChild(el);
+  followLog();
+}
+
+function enqueueAsk(ask) {
+  // An ask for a conversation this window is no longer showing has nobody to
+  // answer it. Refuse it now rather than leaving it parked: fail closed, and
+  // do it at the speed of a click instead of a timeout.
+  if (ask.session !== session) {
+    invoke("answer_permission", { id: ask.id, optionId: "" }).catch(() => {});
+    return;
+  }
+  // Answered here rather than by a person, when the operator has said so.
+  // A credential request is never auto-answered: it wants a value, and a
+  // bypass has none to give, so it still stops and asks.
+  if (bypass && !ask.secret && autoApprove(ask)) return;
+  asks.push(ask);
+  renderWaiting();
+  renderDialog();
+}
+
+function renderDialog() {
+  const ask = asks[0];
+  if (!ask) {
+    show(dialog, false);
+    return;
+  }
+  // A credential request is a different question from an approval (it wants
+  // a value, not a choice), so it gets a different heading, an input, and a
+  // different pair of buttons. Everything below still runs: the name and the
+  // reason are rendered as ordinary fields, because they are exactly what a
+  // person needs in order to answer.
+  const secret = ask.secret || null;
+  dialogHeading.textContent = secret ? "A credential is needed" : "Approval needed";
+  secretValueInput.value = "";
+  show(dialogSecret, Boolean(secret));
+  if (secret) {
+    secretLabel.textContent = secret.name;
+    secretWhy.textContent = secret.why;
+    secretValueInput.setAttribute("aria-label", `value for ${secret.name}`);
+  }
+
+  // Say the credential's name once. Left alone, the generic approval
+  // rendering shows it three times over: the tool line (`credential needed:
+  // demo-token`), the argument table (`name  demo-token`), and the input's
+  // label (`demo-token`). A person reading the same identifier three times is
+  // a person being given no help at all. The label above the box is the one
+  // that survives, because it is the one attached to the thing they are
+  // about to type into.
+  show(dialogTool, !secret);
+  show(dialogFields, !secret);
+
+  // The ACP title arrives as `fs.write: writes a file into the workspace`,
+  // a name and a sentence in one string. Split at the first `: ` so the name
+  // can be set as data and the sentence as prose; monospacing a sentence
+  // makes a reason look like a payload, which is the opposite of its job.
+  // A title with no `: ` is shown whole, as data.
+  dialogTool.replaceChildren();
+  const sep = ask.tool.indexOf(": ");
+  const toolName = document.createElement("code");
+  toolName.textContent = sep > 0 ? ask.tool.slice(0, sep) : ask.tool;
+  dialogTool.appendChild(toolName);
+  if (sep > 0) {
+    dialogTool.appendChild(document.createTextNode(" " + ask.tool.slice(sep + 2)));
+  }
+  // Named fields, not a JSON blob. The docs ask a person to review the target,
+  // the scope and the values, and a pretty-printed object buries the target in
+  // the payload: for an `fs.write`, the filename sits above however many
+  // lines of file contents.
+  dialogFields.innerHTML = "";
+  for (const field of ask.fields) {
+    const dt = document.createElement("dt");
+    dt.textContent = field.name;
+    const dd = document.createElement("dd");
+    dd.textContent = field.value;
+    // Long values get their own scrollable block. Scrollable, not truncated:
+    // this is the surface that decides whether the thing runs, so nothing in
+    // it is allowed to be out of reach.
+    if (field.long) dd.className = "long";
+    dialogFields.appendChild(dt);
+    dialogFields.appendChild(dd);
+  }
+  dialogQueue.textContent = asks.length > 1 ? asks.length - 1 + " more waiting" : "";
+
+  dialogOptions.innerHTML = "";
+  // The decision did not arrive and cannot be retried: the request settled
+  // without it. The only control left is one that acknowledges that, so the
+  // buttons are replaced rather than left there implying another click would
+  // work.
+  if (ask.dead) {
+    dialogError.textContent = ask.dead;
+    show(dialogError, true);
+    const ok = document.createElement("button");
+    ok.textContent = "Dismiss";
+    ok.addEventListener("click", () => {
+      removeAsk(ask.id);
+      renderDialog();
+    });
+    dialogOptions.appendChild(ok);
+    show(dialog, true);
+    return;
+  }
+  show(dialogError, false);
+  if (secret) {
+    // Two buttons, because there are two answers: hand it over, or do not.
+    // The agent's other options are not offered: "allow always" has no
+    // meaning for a credential, and showing it would invite a click that
+    // supplies nothing.
+    const store = document.createElement("button");
+    store.className = "primary";
+    store.textContent = "Store and continue";
+    store.addEventListener("click", () => supplySecret(ask.id));
+    const not = document.createElement("button");
+    not.className = "danger";
+    not.textContent = "Not this time";
+    not.addEventListener("click", () => answerAsk(ask.id, ""));
+    dialogOptions.appendChild(store);
+    dialogOptions.appendChild(not);
+    show(dialog, true);
+    // Focus after the dialog is shown, or the input is not focusable yet.
+    secretValueInput.focus();
+    return;
+  }
+  for (const option of ask.options) {
+    const btn = document.createElement("button");
+    // Allow and deny must not look the same in a security dialog. The shell
+    // decides this, not the page. `kind` is ACP's vocabulary and
+    // `PermissionOptionKind` is `#[non_exhaustive]`: a prefix match here would
+    // dress an unclassifiable option in the accent styling reserved for the
+    // permitted choice. `refuses` answers it in Rust and fails closed.
+    // One accent button per dialog. The shell orders options narrowest first
+    // and `danger` marks the refusals, so the first non-refusing option is the
+    // smallest grant and gets the accent; any further grant (allow for the
+    // session) is the larger commitment and reads quieter. Positional on
+    // purpose: a kind-string match would have to know every kind ACP may add.
+    const isFirstGrant = !option.danger && !dialogOptions.querySelector(".primary");
+    btn.className = option.danger ? "danger" : isFirstGrant ? "primary" : "quiet";
+    btn.textContent = option.name;
+    btn.addEventListener("click", () => answerAsk(ask.id, option.id));
+    dialogOptions.appendChild(btn);
+  }
+  // Only if the agent offered no way to decline. It normally does, and adding
+  // one anyway gives a person two buttons that both mean no: one a refusal
+  // the hub records, the other a `Cancelled` meaning "nobody was asked".
+  if (!ask.options.some((o) => o.danger)) {
+    const refuse = document.createElement("button");
+    refuse.className = "danger";
+    refuse.textContent = "Refuse";
+    refuse.addEventListener("click", () => answerAsk(ask.id, ""));
+    dialogOptions.appendChild(refuse);
+  }
+  show(dialog, true);
+}
+
+/// Take down dialogs something else has already answered: `cancel` refuses
+/// what it was waiting on, `disconnect` refuses everything. Only for those:
+/// dropping an unanswered ask leaves it parked at the other end until it
+/// times out, with the turn stalled behind it.
+function forgetAsks(ids) {
+  if (ids) {
+    for (const id of ids) removeAsk(id);
+  } else {
+    asks.length = 0;
+    renderWaiting();
+  }
+  renderDialog();
+}
+
+/// Refuse everything queued, because this window is about to stop being the
+/// one that could answer it. All at once: refusals have no order between
+/// them, and the case the queue exists for is several tool calls together.
+function refuseAsks() {
+  const queued = asks.splice(0, asks.length);
+  renderWaiting();
+  renderDialog();
+  return Promise.all(
+    queued.map((ask) =>
+      invoke("answer_permission", { id: ask.id, optionId: "" }).catch(() => {}),
+    ),
+  );
+}
+
+// -------------------------------------------------------------- connection
+
+/// What a failed connect means, in the person's vocabulary.
+///
+/// J2 has more than one way to fail and they need different answers: a runtime
+/// that is not there cannot be fixed the way a runtime with no model can, and
+/// telling somebody the wrong one sends them to retry the wrong thing. The
+/// runtime states its own fault precisely, so this maps that to what it means
+/// and what is safe, and leaves the runtime's words in the expander as
+/// evidence.
+///
+/// Ordered: the key case has to be tested before the model case, because the
+/// runtime words it as "no usable model: $KEY is not set" and the model rule
+/// would otherwise swallow it.
+const CONNECT_FAULTS = [
+  {
+    match: /is not set/i,
+    what: "The runtime has a model configured, but not the key it needs.",
+    safe: "Nothing started. No Bot ran, and nothing on this computer was touched.",
+    demo: true,
+  },
+  {
+    match: /no usable model|no model configured/i,
+    what: "The runtime started, but it has no model to use.",
+    safe: "Nothing started. No Bot ran, and nothing on this computer was touched.",
+    demo: true,
+  },
+  {
+    match: /is not on your PATH|no botroster binary at/i,
+    what: "The botroster runtime is not where this window looked for it.",
+    // No demo offer here: the demo runs *in* the runtime, so with no runtime
+    // there is nothing to run it. Offering it would be a button that fails
+    // the same way.
+    safe: "Nothing started.",
+    demo: false,
+  },
+];
+
+/// The runtime's first meaningful line, which is where it states the fault.
+function whyFrom(raw) {
+  const lines = String(raw)
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  // Skip the window's own framing line; the runtime's own words come after it.
+  const said = lines.find((l) => /^Error:/i.test(l)) || lines[lines.length - 1] || "";
+  return said.replace(/^Error:\s*/i, "");
+}
+
+function clearConnectError() {
+  show(connectError, false);
+  show($("connect-demo"), false);
+  emphasise(connectBtn, true);
+  emphasise($("connect-demo"), false);
+}
+
+/// Which button is the primary one. There is exactly one per screen, and after
+/// a failed connect it is not Connect: pressing Connect again does the same
+/// thing and fails the same way. The action that resolves the state gets the
+/// emphasis, or the loudest control on the screen is the one that cannot work.
+function emphasise(btn, on) {
+  btn.classList.toggle("primary", on);
+}
+
+function showConnectError(err) {
+  const raw = String(err);
+  const fault = CONNECT_FAULTS.find((f) => f.match.test(raw));
+  $("connect-error-what").textContent = fault
+    ? fault.what
+    : "The runtime did not start.";
+  // Never the whole message as the message: the why is one line, and the rest
+  // is evidence that belongs behind the expander.
+  $("connect-error-why").textContent = whyFrom(raw);
+  $("connect-error-safe").textContent = fault
+    ? fault.safe
+    : "Nothing started.";
+  $("connect-error-raw").textContent = raw;
+  show(connectError, true);
+  // A fault the Model section can fix opens it, so the fields are in front of
+  // the person being told they are missing rather than folded away below the
+  // message that says so.
+  if (fault && fault.demo) $("model-setup").open = true;
+  const offerDemo = Boolean(fault && fault.demo);
+  show($("connect-demo"), offerDemo);
+  emphasise($("connect-demo"), offerDemo);
+  emphasise(connectBtn, !offerDemo);
+}
+
+/// What the Model section is asking for, or `null` when it asks for nothing.
+///
+/// Every field is optional and an empty one changes nothing, so somebody whose
+/// model is already configured and who only needs to supply a key does not have
+/// to retype the model to do it.
+function modelInput() {
+  const id = $("model-id").value.trim();
+  const apiKey = $("model-key").value;
+  const apiKeyEnv = $("model-key-env").value.trim();
+  const dialect = $("model-dialect").value;
+  const baseUrl = $("model-base").value.trim();
+  const remember = $("model-remember").checked;
+  if (!id && !apiKey.trim() && !dialect && !baseUrl) return null;
+  return { id, apiKey, apiKeyEnv, dialect, baseUrl, remember };
+}
+
+/// Connect, optionally in the scripted demo.
+///
+/// `demo` is passed explicitly rather than read from a global so the button
+/// that offers it and the button that does not cannot drift apart.
+async function connect(demo = false) {
+  const botroster = $("botroster-path").value.trim();
+  const home = $("home-path").value.trim();
+  const hub = $("hub-url").value.trim();
+  clearConnectError();
+  connectBtn.disabled = true;
+  try {
+    const found = await invoke("connect", {
+      botroster: botroster || "botroster",
+      // No tilde. If the field is somehow empty the shell resolves it, which
+      // is the same answer the field was filled with, and never a path with
+      // a `~` in it for botroster to take literally.
+      home: home || (await invoke("default_home")),
+      hub: hub || "http://127.0.0.1:9812",
+      demo,
+      model: modelInput(),
+    });
+    await enterWorkspace();
+    // The key has been handed to the runtime; nothing needs it in the DOM
+    // afterwards, and a password field that keeps its value keeps it for
+    // anything that can read the page.
+    $("model-key").value = "";
+    // "Connected" has to mean what a person reads into it. The agent is
+    // running either way; whether there is a computer behind it is a separate
+    // question, and answering it here is the difference between finding out
+    // now and finding out after writing a message.
+    if (found.computer) {
+      setStatus(`connected · ${found.tools} tools`, "connected");
+    } else {
+      setStatus("no computer", "error");
+      showComputerProblem(found.why);
+    }
+  } catch (err) {
+    showConnectError(err);
+  } finally {
+    connectBtn.disabled = false;
+  }
+}
+
+/// Say that the agent is up and the computer is not, with what to do.
+///
+/// A banner rather than the status pill alone: the pill is two words in a
+/// corner, and this is the reason nothing a person tries next will work.
+function showComputerProblem(why) {
+  const banner = $("no-computer");
+  $("no-computer-why").textContent = why || "the hub did not answer";
+  show(banner, true);
+}
+
+async function enterWorkspace() {
+  show(connectPanel, false);
+  show(workspace, true);
+  // Enter the no-conversation state by calling the function that defines
+  // it, rather than trusting the markup to have started there.
+  // `closeConversation` hides Edit and `openBot` shows it, so the invariant
+  // holds across every transition, and the state a person arrives in is not
+  // a transition: without this call the button would sit in the header on
+  // first connect, live, over a blank name, and clicking it would do nothing
+  // at all, on the one screen every new install starts on.
+  closeConversation();
+  setStatus("connected", "connected");
+  // A reconnect arrives here, so whatever the last runtime's death left on
+  // screen is cleared by the thing that makes it untrue again.
+  show($("runtime-gone"), false);
+  sendBtn.disabled = false;
+  watchRuntime();
+  await refreshRoster();
+  // What `@` and `/` can offer. Not awaited into the roster's path: a slow
+  // `skill ls` should not hold up the sidebar, and an empty menu for the first
+  // second is a smaller failure than a window that looks hung.
+  refreshMentionable();
+}
+
+/// How often the window checks that the runtime is still there.
+///
+/// The same three seconds the computer panel polls at, and for the same
+/// reason: fast enough that nobody writes a paragraph into a dead window,
+/// slow enough to be free.
+const RUNTIME_POLL_MS = 3000;
+
+/// While the workspace is up, notice if the runtime stops.
+///
+/// `botroster acp` is a child process, and this window keeps its whole side of
+/// the connection whether or not anything is still on the other end of it. A
+/// dead runtime is indistinguishable from a working one from in here: the pill
+/// says connected, the composer takes a message, and the failure arrives only
+/// after somebody has written it. Polling is the only option — a process that
+/// died does not send anything to say so.
+///
+/// Started on entering the workspace and cleared on the way out, which is what
+/// keeps it honest: `runtime_alive` answers false both for "the engine died"
+/// and for "there is no engine", so a poll still ticking after a deliberate
+/// disconnect would report a person's own click back to them as a crash.
+let watchingRuntime = null;
+
+function watchRuntime() {
+  stopWatchingRuntime();
+  watchingRuntime = setInterval(async () => {
+    let alive;
+    try {
+      alive = await invoke("runtime_alive");
+    } catch {
+      // The call did not get through. That is this window's own IPC and says
+      // nothing about the runtime; telling somebody their session died over a
+      // dropped message is worse than waiting three seconds for the next tick.
+      // A returned `false` is different — the backend looked and answered.
+      return;
+    }
+    if (alive) return;
+    stopWatchingRuntime();
+    runtimeStopped();
+  }, RUNTIME_POLL_MS);
+}
+
+function stopWatchingRuntime() {
+  clearInterval(watchingRuntime);
+  watchingRuntime = null;
+}
+
+/// Has the runtime gone, asked once rather than waited for.
+///
+/// `false` when the answer cannot be got at all: an IPC failure says nothing
+/// about the runtime, and reporting a death on no evidence is the one mistake
+/// worse than reporting it late.
+async function runtimeIsGone() {
+  try {
+    return !(await invoke("runtime_alive"));
+  } catch {
+    return false;
+  }
+}
+
+/// Say the runtime is gone, and stop offering what cannot work.
+///
+/// The composer keeps its text and its focus. Only Send goes dead: whatever
+/// somebody was part-way through writing survives the reconnect, which it
+/// would not if the box itself were disabled. An action that is certain to
+/// fail is not offered; the words a person already typed are not taken away.
+function runtimeStopped() {
+  setStatus("the runtime stopped", "error");
+  sendBtn.disabled = true;
+  show($("runtime-gone"), true);
+}
+
+async function disconnect() {
+  // Before the call, not after. The next tick would otherwise land on a
+  // window that has just had its engine taken away on purpose and put a
+  // crash banner on screen for it.
+  stopWatchingRuntime();
+  try {
+    await invoke("disconnect");
+  } catch (err) {
+    reportProblem(err, "could not disconnect cleanly");
+    return;
+  }
+  closeConversation();
+  closeComputer();
+  forgetAsks();
+  show(workspace, false);
+  show(connectPanel, true);
+}
+
+// ------------------------------------------------------------------- turns
+
+async function sendPrompt(text) {
+  const joining = busy;
+  busy = true;
+  show(cancelBtn, true);
+  setStatus(joining ? "redirecting…" : "thinking…", "busy");
+  // Echoed here only when it starts the turn. A message that joins one is
+  // queued until the next step boundary and the agent announces it then, as a
+  // `Redirected` event; echoing it here as well would put it in the
+  // transcript twice, once where it had not happened yet. Showing something
+  // as delivered before it is delivered is the kind of lie a transcript
+  // exists to prevent.
+  if (!joining) appendChunk({ kind: "user", text });
+  // Not when joining. A turn that is already running already has one of these,
+  // and reopening it would restart a counter that is measuring something real.
+  if (!joining) openWaiting("waiting for the model");
+  try {
+    // The reply is not in here: every word arrived as a `chunk` event while
+    // the turn was running. What comes back is only how it ended.
+    // Taken before the call and cleared after it: if `prompt` throws, the
+    // chips are still there and the message can be sent again without
+    // re-picking every file. The copies are already in the workspace either
+    // way; re-attaching the same file would make a second one.
+    const sending = attached.map((a) => a.path);
+    const turn = await invoke("prompt", { session, text, attached: sending });
+    attached.length = 0;
+    renderAttached();
+    setStatus(turn.note || "connected", turn.note ? "" : "connected");
+  } catch (err) {
+    // Includes the case where a message that joined a turn arrived after the
+    // Bot had stopped reading: the agent says so rather than pretending it
+    // landed, and the text goes back in the box so it can be sent again
+    // without being retyped.
+    // Ask why before saying what. A turn that fails because the runtime died
+    // reaches here as whatever the transport happened to say — "botroster acp is
+    // gone" is the literal string — which names a component a person does not
+    // have and no action they can take. Asking outright is one IPC call on a
+    // path that has already failed, it needs no pattern-matching on error
+    // text, and it turns the worst message in the window into the one that
+    // says what happened and how to come back from it. The poll would find
+    // this within three seconds anyway; that is three seconds of a person
+    // reading a protocol error and drawing their own conclusions.
+    if (await runtimeIsGone()) {
+      stopWatchingRuntime();
+      runtimeStopped();
+    } else {
+      reportProblem(err, "the run stopped");
+    }
+    if (joining && !input.value.trim()) input.value = text;
+  } finally {
+    // Whatever ended the turn, a step still open at this point is never going
+    // to be completed by a result that is no longer coming.
+    abandonOpenStep();
+    closeWaiting();
+    busy = false;
+    show(cancelBtn, false);
+    refreshRoster();
+  }
+}
+
+// ------------------------------------------------------------------- wiring
+
+$("no-computer-dismiss").addEventListener("click", () => show($("no-computer"), false));
+$("problem-dismiss").addEventListener("click", () => show($("problem"), false));
+// The one action that resolves it. `disconnect` is the path back to the
+// connect panel, and the panel is where reconnecting happens; calling it
+// rather than duplicating what it does keeps one definition of leaving a
+// workspace, including the parts that are easy to forget (the computer, the
+// approvals still parked, the conversation).
+$("runtime-reconnect").addEventListener("click", disconnect);
+
+listen("chunk", (event) => {
+  if (event.payload.session === session) appendChunk(event.payload);
+});
+listen("permission-request", (event) => enqueueAsk(event.payload));
+// The turn ended, so nothing is waiting on these any more. Taking them down
+// is not the same as answering them: they were refused on the way out, and a
+// dialog that outlives the turn it belongs to is a question about a call that
+// will never be made.
+listen("permission-withdrawn", (event) => forgetAsks(event.payload || []));
+
+connectBtn.addEventListener("click", () => connect(false));
+// Value before configuration: the demo needs no key and no model, so the one
+// action offered on a J2 failure is the one that shows a Bot doing real work
+// on real tools. Wrapped for the same reason as above — a MouseEvent is truthy.
+$("connect-demo").addEventListener("click", () => connect(true));
+/// The facts about a provider nobody should have to look up before they can
+/// send one message: which wire dialect it speaks, where its API lives, and
+/// what its key variable is conventionally called. Getting any of the three
+/// wrong produces a failure that reads like the product is broken, and the
+/// only way to get them right was to already know them.
+///
+/// The model id is filled too, and it is the one entry here that is a
+/// suggestion rather than a fact. Having chosen a provider you almost always
+/// want its current flagship; it stays editable, and being wrong about it
+/// fails with an error that names the model, which is the good failure.
+///
+/// `keyEnv: ""` is not "unknown" — it is "this one takes no key", which is the
+/// normal case for a model served on localhost. It reaches `config.toml` as an
+/// empty `api_key_env`, the way the runtime is told an endpoint wants no
+/// credential. See `build` in `crates/botroster-cli/src/config.rs`.
+const PRESETS = {
+  // Only the one that cannot be shipped. A downloaded build already carries a
+  // model, so a list of providers to pick between was a decision put in front
+  // of somebody who did not need to make one - and the two other entries here
+  // were an account you have to go and open before either is usable.
+  //
+  // Ollama stays because it is the one arrangement the shipped model cannot
+  // offer: the work never leaves this machine. `custom` is every other
+  // provider, entered by hand, which is what the fields were always for.
+  ollama: {
+    id: "qwen3:1.7b",
+    dialect: "openai",
+    baseUrl: "http://localhost:11434/v1",
+    keyEnv: "",
+  },
+};
+
+// The hint tells somebody which variable to set for the key to survive a
+// restart, so it has to name the one they typed rather than the default.
+function syncKeyEnvEcho() {
+  $("model-key-env-echo").textContent =
+    $("model-key-env").value.trim() || "XAI_API_KEY";
+}
+
+/// Show that a provider wants no credential, instead of leaving an enabled box
+/// that does nothing.
+///
+/// A key field that still accepts typing next to an endpoint that ignores keys
+/// is an invitation to paste a real one somewhere it was never needed, and then
+/// to believe it mattered. Disabling it says the opposite thing, and says it
+/// before anybody types.
+function setKeyless(on) {
+  const key = $("model-key");
+  key.disabled = on;
+  if (on) key.value = "";
+  key.placeholder = on
+    ? "not needed — this provider takes no key"
+    : "kept for this window only, never written to a file";
+  // Closed with the key box, and cleared. Offering to remember a credential
+  // that is not being collected is an offer to store nothing, and a tick left
+  // sitting there says the opposite of what is happening.
+  const remember = $("model-remember");
+  remember.disabled = on;
+  if (on) remember.checked = false;
+  show($("model-hint-key"), !on);
+  show($("model-hint-keyless"), on);
+}
+
+$("model-preset").addEventListener("change", () => {
+  const choice = $("model-preset").value;
+
+  // Empty means the model the build ships with, and choosing it has to clear
+  // the fields: the runtime falls back to the built-in only when nothing is
+  // configured, so leaving a half-typed model id behind would silently keep
+  // overriding the thing the person just asked for.
+  if (choice === "") {
+    for (const id of ["model-id", "model-dialect", "model-base", "model-key-env"]) {
+      $(id).value = "";
+    }
+    setKeyless(false);
+    syncKeyEnvEcho();
+    return;
+  }
+
+  const preset = PRESETS[choice];
+  // "custom" is not a provider with blank settings; it is the absence of a
+  // choice. Clearing the fields on the way back to it would throw away what
+  // somebody had just finished typing.
+  if (!preset) return;
+  $("model-id").value = preset.id;
+  $("model-dialect").value = preset.dialect;
+  $("model-base").value = preset.baseUrl;
+  $("model-key-env").value = preset.keyEnv;
+  setKeyless(preset.keyEnv === "");
+  syncKeyEnvEcho();
+});
+
+$("model-key-env").addEventListener("input", () => {
+  // Typing a variable name by hand is a statement that a key is wanted, so it
+  // takes the field back out of the keyless state the preset put it in.
+  setKeyless($("model-key-env").value.trim() === "" && $("model-preset").value === "ollama");
+  syncKeyEnvEcho();
+});
+$("disconnect").addEventListener("click", disconnect);
+$("pick-home").addEventListener("click", async () => {
+  const folder = await invoke("pick_folder");
+  if (folder) setPath($("home-path"), folder);
+});
+
+// Deliberately not "model-key": a tooltip is a hover away from anybody
+// standing behind you, and putting a secret in one would undo the reason the
+// field is a password box. It is the one connect field whose value is not
+// meant to be readable, and `no_dialog_field_is_narrower_than_the_placeholder_in_it`
+// exempts password inputs for that reason.
+for (const id of [
+  "botroster-path",
+  "home-path",
+  "hub-url",
+  "model-id",
+  "model-key-env",
+  "model-base",
+]) {
+  // Typed as well as picked: a tooltip that only tracked the picker would go
+  // stale the moment somebody edited the field, which is worse than none.
+  // The hub URL is here too: it has no picker, but it is a value a person is
+  // asked to confirm before connecting, and the argument for showing it whole
+  // does not depend on how it got there.
+  $(id).addEventListener("input", (e) => {
+    e.target.title = e.target.value;
+  });
+}
+
+$("pick-botroster").addEventListener("click", async () => {
+  const file = await invoke("pick_binary");
+  if (file) setPath($("botroster-path"), file);
+});
+
+/// Set a path field, and keep the whole value reachable.
+///
+/// A field you cannot read is a field you cannot check. The panel is 560px
+/// wide and a real Windows path does not fit, so the end of the value, the
+/// part that says which binary, is the part cut off. The approval card
+/// already holds the rule: every argument shown whole, wrapped rather than
+/// truncated, because hiding part of the input defeats the purpose.
+/// Confirming a path before connecting is the same act.
+///
+/// The tooltip is the standard affordance for it and is read by assistive
+/// tech, so the value stays available without the panel growing to fit the
+/// longest path anybody might have.
+function setPath(el, value) {
+  el.value = value;
+  el.title = value;
+}
+
+toggleHidden.addEventListener("click", () => {
+  showHidden = !showHidden;
+  toggleHidden.textContent = showHidden ? "Hide hidden chats" : "Show hidden chats";
+  refreshRoster();
+});
+
+$("new-bot").addEventListener("click", () => {
+  newName.value = "";
+  nameError.textContent = "";
+  show(nameDialog, true);
+  newName.focus();
+});
+// The empty pane's button is the same action, not a second implementation of
+// it: one handler, so the two cannot drift into asking for different things.
+$("no-bot-new").addEventListener("click", () => $("new-bot").click());
+$("name-cancel").addEventListener("click", () => show(nameDialog, false));
+$("name-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = newName.value.trim();
+  if (!name) {
+    nameError.textContent = "A Bot needs a name.";
+    return;
+  }
+  show(nameDialog, false);
+  // Opening a Bot that does not exist creates it, so "new" and "open" are one
+  // act, which is what a sidebar makes them anyway.
+  await openBot(name);
+});
+
+// ------------------------------------------------------------- edit a Bot
+
+const editDialog = $("edit-dialog");
+const editName = $("edit-name");
+const editTitle = $("edit-title");
+const editDescription = $("edit-description");
+const editError = $("edit-error");
+
+/// What the fields held when the dialog opened, so only what changed is sent.
+///
+/// The command treats an absent field as unchanged, and this is what makes
+/// that useful: a form that posted all three would write back whatever
+/// was on screen when it loaded, so opening the dialog and saving would
+/// silently overwrite a description edited somewhere else in the meantime.
+let editWas = null;
+
+/// Fill the dialog from the roster rather than from the header.
+///
+/// The header shows the name and the title; the description is not on screen
+/// anywhere, and a form that opened with an empty box for it would look like
+/// the Bot has none, then save the emptiness.
+async function openEditBot() {
+  if (!openName) return;
+  editError.textContent = "";
+  let bot = null;
+  try {
+    const all = await invoke("roster", { hidden: true });
+    bot = all.find((b) => b.name === openName) || null;
+  } catch (err) {
+    editError.textContent = String(err);
+  }
+  if (!bot) {
+    // Better than a form full of guesses. Groups land here too: they have a
+    // roster entry of their own kind and none of these fields.
+    editError.textContent =
+      "This conversation has no editable profile — only Bots do.";
+    editWas = null;
+    show(editDialog, true);
+    return;
+  }
+  editWas = {
+    hidden: Boolean(bot.hidden),
+    id: bot.id,
+    name: bot.name,
+    title: bot.title || "",
+    description: bot.description || "",
+    // What deleting it would destroy. Routines and groups are keyed by id,
+    // which is why the id is kept here and not just the name.
+    messages: bot.messages || 0,
+  };
+  $("dup-name").value = "";
+  $("dup-error").textContent = "";
+  // Never opens already-armed: a confirm left showing from last time is a
+  // Delete button one click from a Bot nobody meant to touch.
+  show($("del-confirm"), false);
+  show($("del-ask"), true);
+  $("del-error").textContent = "";
+  $("hide-error").textContent = "";
+  await describeHiding();
+  editName.value = editWas.name;
+  editTitle.value = editWas.title;
+  editDescription.value = editWas.description;
+  show(editDialog, true);
+  editName.focus();
+}
+
+/// Say what hiding this Bot would and would not do.
+///
+/// Hiding is not pausing. `botroster bot hide` says so and lists what still
+/// runs, because SPEC §8 calls it a genuine footgun: the Bot leaves the
+/// sidebar and goes on working, and spending, out of sight. A window that
+/// offered the same button without the same sentence would be the same act
+/// with the safeguard removed.
+async function describeHiding() {
+  const btn = $("hide-bot");
+  btn.textContent = editWas.hidden ? "Show in sidebar" : "Hide from sidebar";
+  if (editWas.hidden) {
+    $("hide-what").textContent = "This Bot is hidden. Its work never stopped.";
+    return;
+  }
+  let live = [];
+  try {
+    live = (await invoke("routines")).filter(
+      (r) => r.bot === editWas.id && r.enabled,
+    );
+  } catch {
+    // A count that cannot be read is left out rather than reported as none.
+  }
+  $("hide-what").textContent = live.length
+    ? `Keeps its conversation, and keeps running: ${live
+        .map((r) => `${r.id} (${r.trigger})`)
+        .join(", ")}. Hiding does not pause anything.`
+    : "Keeps its conversation. Hiding does not pause anything it is given later.";
+}
+
+$("hide-bot").addEventListener("click", async () => {
+  if (!editWas) return;
+  try {
+    await invoke("bot_hide", { bot: editWas.id, hidden: !editWas.hidden });
+  } catch (err) {
+    $("hide-error").textContent = String(err);
+    return;
+  }
+  const nowHidden = !editWas.hidden;
+  editWas.hidden = nowHidden;
+  show(editDialog, false);
+  // A Bot hidden while open would leave the conversation on screen and out of
+  // the list: the window disagreeing with itself. Showing one does not have
+  // that problem, so only hiding closes it.
+  if (nowHidden && !showHidden) closeConversation();
+  await refreshRoster();
+});
+
+$("edit-bot").addEventListener("click", openEditBot);
+$("edit-cancel").addEventListener("click", () => show(editDialog, false));
+$("edit-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!editWas) return show(editDialog, false);
+  const name = editName.value.trim();
+  if (!name) {
+    editError.textContent = "A Bot needs a name.";
+    return;
+  }
+  // Only what moved. Sending an unchanged field is harmless with one window
+  // and becomes an overwrite the moment two are open on one home.
+  const change = { bot: openName };
+  if (name !== editWas.name) change.rename = name;
+  if (editTitle.value !== editWas.title) change.title = editTitle.value;
+  if (editDescription.value !== editWas.description) {
+    change.description = editDescription.value;
+  }
+  if (!change.rename && change.title === undefined && change.description === undefined) {
+    // Nothing to do, and saying so beats a round trip that reports success
+    // for having done nothing.
+    return show(editDialog, false);
+  }
+  try {
+    await invoke("bot_describe", change);
+  } catch (err) {
+    editError.textContent = String(err);
+    return;
+  }
+  show(editDialog, false);
+  // The window addresses Bots by name, so a rename has to reach the header
+  // and the sidebar before anything else is clicked.
+  if (change.rename) {
+    openName = change.rename;
+    botName.textContent = change.rename;
+  }
+  if (change.title !== undefined) botTitle.textContent = change.title;
+  await refreshRoster();
+});
+
+$("dup-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const dupError = $("dup-error");
+  dupError.textContent = "";
+  const newName = $("dup-name").value.trim();
+  if (!newName) {
+    dupError.textContent = "The copy needs a name of its own.";
+    return;
+  }
+  if (!openName) return;
+  try {
+    await invoke("bot_duplicate", { bot: openName, newName });
+  } catch (err) {
+    // Stays open on failure: "a bot named X already exists" is answerable by
+    // typing a different name, and closing the dialog would make somebody
+    // reopen it to read the reason.
+    dupError.textContent = String(err);
+    return;
+  }
+  $("dup-name").value = "";
+  show(editDialog, false);
+  // Opened, not merely listed. Duplicating is how you start work as the copy,
+  // and leaving it in the sidebar for somebody to find is a step nobody wants.
+  await openBot(newName);
+});
+
+/// Name what deleting this Bot would take, in the words a person would use.
+///
+/// Not "are you sure?". That asks somebody to confirm a decision without
+/// telling them anything they did not already know. The surprise here is
+/// never the Bot; it is the routine that ran every morning, or that the
+/// group it coordinates is about to lose its coordinator.
+async function deletionCost() {
+  const parts = [];
+  if (editWas.messages) {
+    parts.push(
+      `${editWas.messages} message${editWas.messages === 1 ? "" : "s"}`,
+    );
+  }
+  try {
+    const routines = await invoke("routines");
+    const mine = routines.filter((r) => r.bot === editWas.id);
+    if (mine.length) {
+      parts.push(
+        `${mine.length} routine${mine.length === 1 ? "" : "s"} that will not run again`,
+      );
+    }
+  } catch {
+    // A count that cannot be read is left out rather than reported as zero.
+    // "0 routines" is a claim; silence is not.
+  }
+  let inGroups = [];
+  try {
+    const groups = await invoke("groups");
+    inGroups = groups
+      .filter((g) => g.members.some((m) => m.id === editWas.id))
+      .map((g) => g.name);
+  } catch {}
+
+  let what = `Delete ${editWas.name}?`;
+  if (parts.length) what += ` This destroys ${parts.join(" and ")}.`;
+  if (inGroups.length) {
+    what += ` It is in ${inGroups.join(", ")} and will be taken out.`;
+  }
+  return what + " This cannot be undone.";
+}
+
+$("del-start").addEventListener("click", async () => {
+  if (!editWas) return;
+  $("del-what").textContent = "Working out what that would remove…";
+  show($("del-ask"), false);
+  show($("del-confirm"), true);
+  $("del-what").textContent = await deletionCost();
+});
+
+$("del-cancel").addEventListener("click", () => {
+  show($("del-confirm"), false);
+  show($("del-ask"), true);
+});
+
+$("del-go").addEventListener("click", async () => {
+  if (!editWas) return;
+  try {
+    await invoke("bot_delete", { bot: editWas.id });
+  } catch (err) {
+    $("del-error").textContent = String(err);
+    return;
+  }
+  show(editDialog, false);
+  // The conversation on screen belongs to a Bot that no longer exists. Left
+  // open it is a header, a transcript and a live composer over nothing, the
+  // exact state `closeConversation` exists for.
+  closeConversation();
+  await refreshRoster();
+});
+
+const rulesDialog = $("rules-dialog");
+const rulesList = $("rules-list");
+const rulesEmpty = $("rules-empty");
+const ruleAction = $("rule-action");
+const ruleTool = $("rule-tool");
+const ruleReason = $("rule-reason");
+const ruleError = $("rule-error");
+
+/// Run one settings action and show only what this attempt produced.
+///
+/// The error line is shared by every control in this panel, so it has to be
+/// cleared on success. Otherwise a refused removal goes on being displayed
+/// after a later removal works, and an error that outlives the failure it
+/// describes is indistinguishable from a live one. Somebody reads it and
+/// believes the panel is broken, or worse, believes the rule they just
+/// removed is still there.
+///
+/// One place, so the three controls here cannot each remember separately.
+async function settingsAction(run) {
+  ruleError.textContent = "";
+  try {
+    await run();
+    return true;
+  } catch (err) {
+    ruleError.textContent = String(err);
+    return false;
+  }
+}
+
+/// What each action does, in the words a person decides with rather than the
+/// enum's. "require_approval" is the wire's name for it, not a label.
+const ACTIONS = {
+  allow: "runs without asking",
+  require_approval: "asks first",
+  deny: "refused outright",
+};
+
+async function refreshRules() {
+  await fillList({
+    list: rulesList,
+    state: $("rules-state"),
+    empty: rulesEmpty,
+    what: "The rules",
+    read: () => invoke("policy_list"),
+    draw: (rules) => {
+      rulesList.replaceChildren();
+      rules.forEach((rule, i) => {
+        const dt = document.createElement("dt");
+        dt.textContent = rule.tool + (rule.when ? ` when ${rule.when.key}=${rule.when.glob}` : "");
+        const dd = document.createElement("dd");
+        const what = document.createElement("span");
+        what.className = rule.action === "allow" ? "rule-allow" : "rule-stop";
+        what.textContent = ACTIONS[rule.action] || rule.action;
+        dd.appendChild(what);
+        if (rule.reason) {
+          const why = document.createElement("span");
+          why.className = "rule-why";
+          why.textContent = " — " + rule.reason;
+          dd.appendChild(why);
+        }
+        const remove = document.createElement("button");
+        remove.className = "danger forget";
+        remove.textContent = "Remove";
+        // By position, which is what the binary addresses. Recomputed on every
+        // render, so removing one cannot shift the target of another.
+        remove.addEventListener("click", async () => {
+          await settingsAction(() => invoke("policy_remove", { number: i + 1 }));
+          refreshRules();
+        });
+        dd.appendChild(remove);
+        rulesList.appendChild(dt);
+        rulesList.appendChild(dd);
+      });
+    },
+  });
+}
+
+/// The cron a named cadence and a time compose to.
+///
+/// `0 9 * * MON-FRI` is a fine thing for the store to keep and a poor thing to
+/// ask somebody for. The select carries the day pattern with a placeholder
+/// hour, and the time field replaces the first two fields — so the vocabulary
+/// a person sees is "every weekday at 09:00" and what is stored is still cron,
+/// which `routine ls` explains back in those same words.
+///
+/// Hourly ignores the time, because a routine that runs every hour has no one
+/// hour to run at. The field is hidden rather than ignored silently.
+function cronFrom(pattern, at) {
+  const rest = pattern.split(" ").slice(2).join(" ");
+  if (pattern.startsWith("0 * ")) return pattern;
+  const [h, m] = (at || "09:00").split(":");
+  return `${Number(m)} ${Number(h)} ${rest}`;
+}
+
+/// Fill the routine form's Bot list from the roster, and keep the time field
+/// honest about whether it applies.
+function refreshRoutineForm() {
+  const sel = $("routine-bot");
+  const had = sel.value;
+  sel.replaceChildren();
+  for (const [name, id] of idOf) {
+    // Bots only. A group has members rather than one owner, and a routine
+    // always has exactly one.
+    if (!name || String(id).includes("group")) continue;
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  }
+  if (had) sel.value = had;
+  show($("routine-at"), !$("routine-when").value.startsWith("0 * "));
+}
+
+/// Rehearse a routine, and say what happened where it was asked for.
+///
+/// A real run against the real computer, which is the point: a rehearsal that
+/// simulated the work would answer a different question from the one somebody
+/// pressing this is asking. It takes as long as the routine takes, so the
+/// button says so rather than going quiet.
+///
+/// **The schedule does not move.** That is the promise `routine run` makes and
+/// the reason it exists, so it is repeated here where somebody can read it,
+/// rather than left to be inferred from nothing having visibly changed.
+///
+/// Anything the routine does that needs approval is refused, and the result
+/// says so. The hub asks whichever harness owns a session, and a rehearsal is
+/// a separate `botroster` process owning its own — so it cannot ask this window,
+/// and this window must not answer on a person's behalf.
+async function testRoutine(r, btn) {
+  const was = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Running…";
+  const say = (text, bad) => {
+    ruleError.textContent = text;
+    ruleError.classList.toggle("hint", !bad);
+  };
+  say(`running ${r.bot_name || r.bot} / ${r.id}…`, false);
+  try {
+    const out = await invoke("routine_run", { bot: r.bot, routine: r.id });
+    const when = out.next ? `; next ${out.next.replace("T", " ").slice(0, 16)}` : "";
+    say(
+      out.ok
+        ? `test run finished: ${out.summary} — the schedule is unchanged${when}`
+        : `test run failed: ${out.summary} — the schedule is unchanged${when}`,
+      !out.ok,
+    );
+  } catch (err) {
+    say(`could not test that routine — ${err}`, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = was;
+    // The history gained a row, and a paused routine is still paused.
+    refreshWiring();
+  }
+}
+
+/// The two lists in Settings that are read from the runtime, each on its own.
+///
+/// Independently, and that is the whole change. These two awaits used to sit
+/// in one `try` with each call in `draw`'s argument list, so a failing
+/// `connectors` read meant `routines` was never fetched at all — and because
+/// the empty state was only reached on the drawing path, both sections
+/// rendered as nothing: no rows, no empty line, no error. Somebody with a
+/// broken connector and three routines opened Settings, saw no routines and
+/// nothing saying why, and concluded they had none.
+///
+/// Concurrent as well as independent. They are two subprocess calls with
+/// nothing to say to each other, and running them in series only made the
+/// slower one wait for the other first.
+async function refreshWiring() {
+  /// `action` adds a control to the row; connectors have none, because
+  /// installing one is a browser sign-in rather than a button.
+  ///
+  /// No empty state here any more. What to show when a list has no rows is one
+  /// of four things this list could be saying, and `listState` is where that
+  /// decision lives now — `draw` only draws.
+  const draw = (rows, listEl, term, sub, action) => {
+    listEl.replaceChildren();
+    for (const row of rows) {
+      const dt = document.createElement("dt");
+      dt.textContent = term(row);
+      const dd = document.createElement("dd");
+      dd.textContent = sub(row);
+      if (action) dd.appendChild(action(row));
+      listEl.appendChild(dt);
+      listEl.appendChild(dd);
+    }
+  };
+
+  await Promise.all([
+    fillList({
+      list: $("connectors-list"),
+      state: $("connectors-state"),
+      empty: $("connectors-empty"),
+      what: "Connected apps",
+      read: () => invoke("connectors"),
+      draw: (rows) =>
+        draw(
+          rows,
+          $("connectors-list"),
+          (c) => c.id,
+          // The credential names it needs, never a value. If it needs none, say
+          // so rather than leaving the line blank.
+          (c) => (c.secrets.length ? c.secrets.join(", ") : "no credential"),
+        ),
+    }),
+    fillList({
+      list: $("routines-list"),
+      state: $("routines-state"),
+      empty: $("routines-empty"),
+      what: "Runs on a schedule",
+      read: () => invoke("routines"),
+      draw: (rows) =>
+        draw(
+          rows,
+          $("routines-list"),
+          (r) => `${r.bot_name || r.bot} / ${r.id}`,
+          // Paused first, because that is the state somebody needs to notice; a
+          // paused routine looks identical to a working one otherwise.
+          (r) =>
+            (r.enabled ? "" : "paused — ") +
+            r.trigger +
+            (r.next ? `, next ${r.next.replace("T", " ").slice(0, 16)}` : ""),
+          // The docs' "pausable". A routine is the run nobody is watching, so
+          // this is the control that matters when one starts failing every night
+          // or costing more than it is worth. Pausing keeps the definition and
+          // the history, so it needs no confirmation: the same button undoes it,
+          // which is exactly what deleting a Bot cannot offer.
+          (r) => {
+            const controls = document.createElement("span");
+            controls.className = "row-actions";
+
+            // Rehearsal first, because it is what somebody does *before*
+            // deciding whether to arm a routine, and because it is the only
+            // control here that answers "does this actually work".
+            const test = document.createElement("button");
+            test.className = "forget";
+            test.textContent = "Test run";
+            test.addEventListener("click", () => testRoutine(r, test));
+            controls.appendChild(test);
+
+            // The docs' "pausable". A routine is the run nobody is watching, so
+            // this is the control that matters when one starts failing every
+            // night or costing more than it is worth. Pausing keeps the
+            // definition and the history, so it needs no confirmation: the same
+            // button undoes it, which is exactly what deleting a Bot cannot
+            // offer.
+            const btn = document.createElement("button");
+            btn.className = "forget" + (r.enabled ? "" : " primary");
+            btn.textContent = r.enabled ? "Pause" : "Resume";
+            btn.addEventListener("click", async () => {
+              await settingsAction(() =>
+                invoke("routine_pause", {
+                  bot: r.bot,
+                  routine: r.id,
+                  paused: r.enabled,
+                }),
+              );
+              refreshWiring();
+            });
+            controls.appendChild(btn);
+            return controls;
+          },
+        ),
+    }),
+  ]);
+}
+
+$("routine-when").addEventListener("change", () =>
+  show($("routine-at"), !$("routine-when").value.startsWith("0 * ")),
+);
+
+$("routine-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const err = $("routine-error");
+  err.textContent = "";
+  const bot = $("routine-bot").value;
+  const name = $("routine-name").value.trim();
+  const task = $("routine-task").value.trim();
+  // Said here rather than left to the binary. The runtime refuses these too,
+  // but a round trip to a subprocess to be told a box is empty is a slow way
+  // to learn something the page already knows.
+  if (!bot || !name || !task) {
+    err.textContent = "a routine needs an owner, a name and something to do";
+    return;
+  }
+  try {
+    await invoke("routine_new", {
+      bot,
+      name,
+      cron: cronFrom($("routine-when").value, $("routine-at").value),
+      instructions: task,
+      // The machine's own zone, so "every weekday at 09:00" means nine in the
+      // morning where the person is. Sending UTC would make a routine written
+      // at breakfast fire in the middle of the night for most of the world.
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+    });
+  } catch (e2) {
+    err.textContent = String(e2);
+    return;
+  }
+  $("routine-name").value = "";
+  $("routine-task").value = "";
+  refreshWiring();
+});
+
+$("rules-btn").addEventListener("click", () => {
+  ruleError.textContent = "";
+  ruleTool.value = "";
+  ruleReason.value = "";
+  show(rulesDialog, true);
+  $("routine-error").textContent = "";
+  refreshRoutineForm();
+  refreshRules();
+  refreshWiring();
+});
+$("rules-close").addEventListener("click", () => show(rulesDialog, false));
+$("rule-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  ruleError.textContent = "";
+  const reason = ruleReason.value.trim();
+  try {
+    await invoke("policy_add", {
+      rule: {
+        action: ruleAction.value,
+        tool: ruleTool.value.trim(),
+        when: null,
+        // Only sent when there is one: the binary requires a reason for
+        // anything that stops a call, and an empty string is not one.
+        reason: reason || null,
+      },
+    });
+  } catch (err) {
+    ruleError.textContent = String(err);
+    return;
+  }
+  ruleTool.value = "";
+  ruleReason.value = "";
+  refreshRules();
+});
+
+const secretsDialog = $("secrets-dialog");
+const secretsList = $("secrets-list");
+const secretsEmpty = $("secrets-empty");
+const secretName = $("secret-name");
+const secretValue = $("secret-value");
+const secretError = $("secret-error");
+
+async function refreshSecrets() {
+  let held;
+  try {
+    held = await invoke("secret_list");
+  } catch (err) {
+    secretError.textContent = String(err);
+    return;
+  }
+  secretsList.innerHTML = "";
+  for (const entry of held) {
+    const dt = document.createElement("dt");
+    dt.textContent = entry.name;
+    const dd = document.createElement("dd");
+    // The fingerprint, because there is nothing else to show and there is
+    // no way to get the value back by design.
+    dd.textContent = entry.fingerprint;
+    const forget = document.createElement("button");
+    forget.className = "danger forget";
+    forget.textContent = "Forget";
+    forget.addEventListener("click", async () => {
+      try {
+        await invoke("secret_remove", { name: entry.name });
+      } catch (err) {
+        secretError.textContent = String(err);
+      }
+      refreshSecrets();
+    });
+    dd.appendChild(forget);
+    secretsList.appendChild(dt);
+    secretsList.appendChild(dd);
+  }
+  show(secretsEmpty, held.length === 0);
+}
+
+$("credentials").addEventListener("click", () => {
+  secretError.textContent = "";
+  secretName.value = "";
+  secretValue.value = "";
+  show(secretsDialog, true);
+  refreshSecrets();
+});
+$("secrets-close").addEventListener("click", () => {
+  // Clear the field on the way out. A password box left populated behind a
+  // closed dialog is one that reappears on the next open.
+  secretValue.value = "";
+  show(secretsDialog, false);
+});
+$("secret-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  secretError.textContent = "";
+  try {
+    await invoke("secret_set", {
+      name: secretName.value,
+      value: secretValue.value,
+    });
+  } catch (err) {
+    // Whatever went wrong, the value is not put back on screen or into the
+    // message; the shell's error never carries it either.
+    secretError.textContent = String(err);
+    return;
+  } finally {
+    secretValue.value = "";
+  }
+  secretName.value = "";
+  refreshSecrets();
+});
+
+/// Show the computer, and start one if there is none.
+///
+/// The header button and the palette entry both land here, and both mean the
+/// same thing when a person presses them: *show me the computer*. It used to
+/// be a toggle over a hidden panel, which made a second press mean "hide it"
+/// and a first press mean "start a subprocess" — one control, two unrelated
+/// consequences, and no way to look at the rail without owning the decision.
+async function revealComputer() {
+  setRail(true);
+  if (!computerFrame.getAttribute("src")) await startComputer();
+}
+
+/// Start the viewer and point the rail at it.
+async function startComputer() {
+  computerError.textContent = "";
+  $("computer-start").disabled = true;
+  try {
+    // The address carries a one-time key. It is assigned once, here, rather
+    // than kept anywhere the page could leak it into a link or a log.
+    computerFrame.src = await invoke("open_computer");
+    showComputer(true);
+    watchComputer();
+  } catch (err) {
+    computerError.textContent = String(err);
+    computerFrame.removeAttribute("src");
+    showComputer(false);
+  } finally {
+    $("computer-start").disabled = false;
+  }
+}
+
+/// Which of the two things the rail is showing: a computer, or the offer of
+/// one. Never both, and never neither.
+function showComputer(running) {
+  show(computerFrame, running);
+  show($("computer-live"), running);
+  show($("computer-idle"), !running);
+  show($("rail-expand"), running);
+  // A lightbox over a computer that has just been stopped is a full-screen
+  // view of nothing at all.
+  if (!running) setExpanded(false);
+}
+
+/// Expand the computer over this window, or put it back.
+///
+/// A lightbox, never a second window: BOTROSTER is one application, and a
+/// browser window that has escaped its app is a thing a person then has to
+/// manage — find, raise, close — on top of the work they opened it for.
+///
+/// The rail does not move anywhere in the tree to do this. Reparenting an
+/// iframe is a fresh navigation, so lifting it into an overlay element would
+/// restart the viewer and drop whatever the Bot was in the middle of. It is
+/// two CSS rules for that reason and no other.
+///
+/// The app behind is dimmed, so it is also made unreachable. A dimmed panel
+/// that still takes Tab is worse than one that does not dim: it looks
+/// unavailable and answers anyway. An approval outranks all of this without
+/// any code here — `applyModality` inerts every child of `#app` except the
+/// dialog, and the rail is inside one of them.
+function setExpanded(on) {
+  if (on) setRail(true);
+  rail.classList.toggle("expanded", on);
+  const btn = $("rail-expand");
+  btn.textContent = on ? "Shrink" : "Expand";
+  btn.setAttribute("aria-expanded", String(on));
+  for (const pane of workspace.children) {
+    pane.toggleAttribute("inert", on && pane !== rail);
+  }
+  if (!btn.classList.contains("hidden")) btn.focus();
+}
+
+/// Collapse or expand the rail. Layout only.
+///
+/// **It must not stop the viewer.** Tidying a pane out of the way is not a
+/// reason to kill a process somebody is using, and the backend already draws
+/// this distinction — `disconnect` stops a computer this window started and
+/// deliberately leaves one it did not. The rail keeps its iframe mounted for
+/// the same reason: unmounting and remounting an iframe is a fresh
+/// navigation, so a rail that came and went would restart the viewer every
+/// time it was collapsed.
+function setRail(open) {
+  // Collapsing an expanded rail: shrink first, or the overlay stays fixed over
+  // a window whose rail is notionally 40px wide, with nothing on screen that
+  // would put it back.
+  if (!open) setExpanded(false);
+  rail.classList.toggle("collapsed", !open);
+  const btn = $("rail-toggle");
+  btn.setAttribute("aria-expanded", String(open));
+  btn.textContent = open ? "Collapse" : "Show";
+}
+
+/// While a computer is running, notice if it stops being served.
+///
+/// An iframe onto a dead process keeps showing what it last painted, which
+/// looks exactly like a computer sitting idle. Polling is the only option
+/// here: the frame is another process's window and there is no event to
+/// listen for.
+///
+/// It used to say "close this and open it again", which was accurate when the
+/// panel was something you closed. In a rail that is always here, closing is
+/// not a gesture any more, so the recovery is the one the rail already
+/// offers: the idle state, with the button that starts another. Moving a
+/// check into a pane that never closes is exactly how a check quietly stops
+/// having a way to re-arm.
+let watchingComputer = null;
+
+function watchComputer() {
+  clearInterval(watchingComputer);
+  watchingComputer = setInterval(async () => {
+    let alive;
+    try {
+      alive = await invoke("computer_alive");
+    } catch {
+      alive = false;
+    }
+    if (alive) return;
+    clearInterval(watchingComputer);
+    watchingComputer = null;
+    // Blanked first: a still picture of a computer that is gone is worse than
+    // an empty panel, because only one of them is accurate.
+    computerFrame.removeAttribute("src");
+    showComputer(false);
+    $("computer-idle-why").textContent =
+      "The computer stopped being served. Starting another gives the Bots here somewhere to act again.";
+  }, 3000);
+}
+
+/// Stop the viewer. The rail stays; the computer does not.
+async function closeComputer() {
+  // Blank the frame before stopping the viewer, so the panel never shows a
+  // frozen last frame of a computer that is no longer being watched.
+  clearInterval(watchingComputer);
+  watchingComputer = null;
+  computerFrame.removeAttribute("src");
+  computerError.textContent = "";
+  showComputer(false);
+  try {
+    await invoke("close_computer");
+  } catch (err) {
+    reportProblem(err, "could not close the computer");
+  }
+}
+
+$("computer-start").addEventListener("click", startComputer);
+$("close-computer").addEventListener("click", closeComputer);
+$("rail-toggle").addEventListener("click", () =>
+  setRail(rail.classList.contains("collapsed")),
+);
+$("rail-expand").addEventListener("click", () =>
+  setExpanded(!rail.classList.contains("expanded")),
+);
+
+// ------------------------------------------------------------- palette
+
+const palette = $("palette");
+const paletteInput = $("palette-input");
+const paletteResults = $("palette-results");
+const paletteEmpty = $("palette-empty");
+
+/// The palette's empty state. A constant because the failure path below
+/// replaces it and every render has to put it back.
+const NOTHING_MATCHES = "Nothing matches.";
+let paletteItems = [];
+let paletteAt = 0;
+
+/// Everything reachable by name. Bots and groups come from the roster the
+/// sidebar already has, so the palette can never offer a teammate the sidebar
+/// does not: one list, one source.
+function paletteEntries(query) {
+  const actions = [
+    { label: "Settings", run: () => $("rules-btn").click() },
+    { label: "Credentials", run: () => $("credentials").click() },
+    { label: "Agent Computer", run: revealComputer },
+    { label: "New Bot", run: () => $("new-bot").click() },
+    { label: "Show hidden chats", run: () => $("toggle-hidden").click() },
+    { label: "Disconnect", run: () => $("disconnect").click() },
+  ];
+  const bots = [...document.querySelectorAll("#bots .bot")].map((el) => ({
+    label: el.querySelector(".bot-name").textContent,
+    kind: "Bot",
+    run: () => el.click(),
+  }));
+  const groups = [...document.querySelectorAll("#groups .bot")].map((el) => ({
+    label: el.querySelector(".bot-name").textContent,
+    kind: "Group",
+    run: () => el.click(),
+  }));
+  const q = query.trim().toLowerCase();
+  // Teammates before actions: switching between them is what this is for.
+  return [...bots, ...groups, ...actions]
+    .filter((e) => !q || e.label.toLowerCase().includes(q))
+    .slice(0, 12);
+}
+
+function renderPalette() {
+  paletteResults.innerHTML = "";
+  paletteItems.forEach((entry, i) => {
+    const li = document.createElement("li");
+    li.className = "palette-item" + (i === paletteAt ? " at" : "");
+    const label = document.createElement("span");
+    label.textContent = entry.label;
+    li.appendChild(label);
+    if (entry.kind) {
+      const kind = document.createElement("span");
+      kind.className = "palette-kind";
+      kind.textContent = entry.kind;
+      li.appendChild(kind);
+    }
+    li.addEventListener("click", () => choosePalette(i));
+    paletteResults.appendChild(li);
+  });
+  // Reset every render: a failed search leaves its own sentence here, and the
+  // next keystroke has to clear it or one broken search would go on claiming
+  // the store is unreadable for the rest of the session.
+  paletteEmpty.textContent = NOTHING_MATCHES;
+  show(paletteEmpty, paletteItems.length === 0);
+}
+
+function openPalette() {
+  paletteInput.value = "";
+  paletteAt = 0;
+  paletteItems = paletteEntries("");
+  renderPalette();
+  show(palette, true);
+  paletteInput.focus();
+}
+
+function closePalette() {
+  show(palette, false);
+}
+
+function choosePalette(i) {
+  const entry = paletteItems[i];
+  if (!entry) return;
+  // Closed before the action runs: several of these open a dialog of their
+  // own, and a palette still on top of one is a palette in the way.
+  closePalette();
+  entry.run();
+}
+
+// --------------------------------------------------- mentions and skills
+//
+// The docs' two composer affordances: `@` names a teammate, a routine or a
+// connected app, and `/` names a saved skill. Both exist because the names are
+// the interface: a person who has to remember what they called something
+// types it wrong, and a Bot that was never mentioned simply does not answer.
+
+const mentions = $("mentions");
+const mentionsList = $("mentions-list");
+const mentionsNote = $("mentions-note");
+
+/// What `/` can offer, and what it cannot. Read at connect: skills are files
+/// somebody edits while the window is open, so this is refreshed rather than
+/// read once; see `refreshMentionable`.
+let skillCatalog = { skills: [], problems: [] };
+/// Routines and connected apps, for `@`. Bots and groups are not cached:
+/// they come from the sidebar's own DOM, so this menu can never offer a
+/// teammate the sidebar does not show.
+let wiring = { routines: [], connectors: [] };
+
+let mentionItems = [];
+let mentionAt = 0;
+/// Where the trigger character sits in the box, while a menu is open.
+let mentionFrom = null;
+
+/// When the lists were last read, so clicking into the box does not spawn
+/// three processes every time. Each of these is a `botroster` subprocess, and
+/// focusing a text field is something a person does constantly.
+let mentionableAt = 0;
+const MENTIONABLE_STALE_MS = 3000;
+
+async function refreshMentionable(force = true) {
+  const now = Date.now();
+  if (!force && now - mentionableAt < MENTIONABLE_STALE_MS) return;
+  mentionableAt = now;
+  // Independently: a home with a broken connector should still offer skills,
+  // rather than one failing list leaving the composer with nothing. Rebuilt
+  // field by field rather than assigned. The composer reads these on every
+  // keystroke, so an answer of an unexpected shape has to leave it usable; a
+  // menu that offers nothing is a smaller failure than a box that throws on
+  // the next character typed.
+  try {
+    const got = await invoke("skills");
+    skillCatalog = {
+      skills: Array.isArray(got?.skills) ? got.skills : [],
+      problems: Array.isArray(got?.problems) ? got.problems : [],
+    };
+  } catch {
+    skillCatalog = { skills: [], problems: [] };
+  }
+  for (const [key, cmd] of [
+    ["routines", "routines"],
+    ["connectors", "connectors"],
+  ]) {
+    try {
+      const got = await invoke(cmd);
+      wiring[key] = Array.isArray(got) ? got : [];
+    } catch {
+      wiring[key] = [];
+    }
+  }
+}
+
+/// The token being typed at the caret, if it is a mention.
+///
+/// A trigger only counts at the start of a word: `3/4` and `a@b` are not
+/// somebody reaching for this menu, and popping one open in the middle of a
+/// sentence is worse than not having it. Returns `null` otherwise.
+function triggerAt(text, caret) {
+  const upto = text.slice(0, caret);
+  const start = Math.max(upto.lastIndexOf(" "), upto.lastIndexOf("\n")) + 1;
+  const token = upto.slice(start);
+  if (token.length === 0) return null;
+  const char = token[0];
+  if (char !== "@" && char !== "/") return null;
+  const query = token.slice(1);
+  // A space ends it: once the name is chosen the menu has no more to say.
+  if (query.includes(" ")) return null;
+  return { char, start, query };
+}
+
+/// What a trigger offers, filtered by what has been typed after it.
+///
+/// Each entry carries two strings, and they are not always the same one:
+/// `label` is what a person reads, `insert` is what goes in the box. A Bot
+/// shows as "Talent Scout" and inserts as `@talent-scout`, because
+/// `Group::owner_for` matches an `@mention` against the Bot's id and
+/// `botroster_bots::mentions` stops at the first character outside `[a-z0-9_-]`.
+/// Inserting the display name would put `@Talent Scout` in the message, which
+/// reaches the resolver as `talent` and names nobody: a menu that looks like
+/// it addressed a teammate and did not.
+function mentionEntries(char, query) {
+  const q = query.trim().toLowerCase();
+  let all;
+  if (char === "/") {
+    // Skill names are already slugs: `skill new` lowercases and hyphenates.
+    all = skillCatalog.skills.map((s) => ({
+      label: s.name,
+      insert: s.name,
+      what: s.description,
+      kind: "Skill",
+    }));
+  } else {
+    const fromSidebar = (sel, kind) =>
+      [...document.querySelectorAll(sel)].map((el) => ({
+        label: el.querySelector(".bot-name").textContent,
+        insert: el.dataset.mention,
+        what: "",
+        kind,
+      }));
+    all = [
+      ...fromSidebar("#bots .bot", "Bot"),
+      ...fromSidebar("#groups .bot", "Group"),
+      ...wiring.routines.map((r) => ({
+        label: r.id,
+        insert: r.id,
+        what: r.trigger,
+        kind: "Routine",
+      })),
+      ...wiring.connectors.map((c) => ({
+        label: c.id,
+        insert: c.id,
+        what: c.url,
+        kind: "App",
+      })),
+    ];
+  }
+  // Matched on both, so typing what is on screen finds it and typing the id
+  // does too; the two differ for exactly the Bots this menu exists to name.
+  return all
+    .filter((e) => e.insert)
+    .filter(
+      (e) =>
+        !q ||
+        e.label.toLowerCase().includes(q) ||
+        e.insert.toLowerCase().includes(q),
+    )
+    .slice(0, 8);
+}
+
+function renderMentions() {
+  mentionsList.innerHTML = "";
+  mentionItems.forEach((entry, i) => {
+    const li = document.createElement("li");
+    li.className = "mentions-item" + (i === mentionAt ? " at" : "");
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-selected", String(i === mentionAt));
+    const name = document.createElement("span");
+    name.textContent = entry.label;
+    li.appendChild(name);
+    if (entry.what) {
+      const what = document.createElement("span");
+      what.className = "mentions-what";
+      what.textContent = entry.what;
+      li.appendChild(what);
+    }
+    const kind = document.createElement("span");
+    kind.className = "mentions-kind";
+    kind.textContent = entry.kind;
+    li.appendChild(kind);
+    // `mousedown`, not `click`: the textarea loses focus first otherwise, and
+    // the menu closes out from under the pointer.
+    li.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      chooseMention(i);
+    });
+    mentionsList.appendChild(li);
+  });
+}
+
+function closeMentions() {
+  mentionFrom = null;
+  mentionItems = [];
+  show(mentions, false);
+}
+
+/// Put the chosen name in the box, replacing what was typed to find it.
+function chooseMention(i) {
+  const entry = mentionItems[i];
+  if (!entry || mentionFrom === null) return;
+  const text = input.value;
+  const caret = input.selectionStart;
+  const char = text[mentionFrom];
+  const before = text.slice(0, mentionFrom);
+  const after = text.slice(caret);
+  const inserted = `${char}${entry.insert} `;
+  input.value = before + inserted + after;
+  const at = before.length + inserted.length;
+  input.setSelectionRange(at, at);
+  closeMentions();
+  input.focus();
+}
+
+/// Open, update or close the menu for whatever is at the caret.
+function updateMentions() {
+  const found = triggerAt(input.value, input.selectionStart);
+  if (!found) return closeMentions();
+  mentionItems = mentionEntries(found.char, found.query);
+  // A `/` with nothing behind it still has something to say when skills failed
+  // to load, so the menu opens on the note alone. Silence there would read as
+  // "no skills", which is a different and untrue statement.
+  const note = found.char === "/" ? skillProblemNote() : "";
+  if (mentionItems.length === 0 && !note) return closeMentions();
+  mentionFrom = found.start;
+  mentionAt = 0;
+  renderMentions();
+  mentionsNote.textContent = note;
+  show(mentionsNote, Boolean(note));
+  show(mentions, true);
+}
+
+/// What is on disk and being ignored.
+///
+/// A skill that stopped parsing is invisible everywhere else: the file is
+/// there, `skill new` said it was created, and the Bot has quietly not been
+/// following it. The menu is where somebody looks for it, so the menu is where
+/// it has to be said.
+function skillProblemNote() {
+  const n = skillCatalog.problems.length;
+  if (n === 0) return "";
+  const which = n === 1 ? "1 skill" : `${n} skills`;
+  return `${which} could not be loaded, so no Bot can use ${
+    n === 1 ? "it" : "them"
+  } — run \`botroster skill ls\` to see why.`;
+}
+
+/// How long typing has to stop before the message search goes out.
+///
+/// `search` shells out to `botroster search`, which reads every conversation in
+/// the home (on the order of half a second over 50 Bots and 100k messages, in
+/// release). Searching on every keystroke would make typing `renewal` seven
+/// processes and seven scans of the same home to answer one question, with
+/// only the last one's results ever shown.
+///
+/// Short enough to feel immediate (names still filter on the keystroke,
+/// because those are already in the page) and long enough that a word typed
+/// at any normal speed costs one scan instead of one per letter.
+const SEARCH_SETTLE_MS = 150;
+let searchTimer = null;
+
+paletteInput.addEventListener("input", () => {
+  const q = paletteInput.value;
+  paletteItems = paletteEntries(q);
+  paletteAt = 0;
+  renderPalette();
+  // Messages come from the binary, so they arrive after the names do. They are
+  // appended rather than replacing, and only if the box still says what it
+  // said when the search left; otherwise a slow answer to an old query lands
+  // on top of a new one. Kept alongside the debounce rather than replaced by
+  // it: waiting for a pause makes the race rarer, and a slow scan can still be
+  // overtaken by a fast one.
+  if (searchTimer) clearTimeout(searchTimer);
+  if (!q.trim()) return;
+  searchTimer = setTimeout(() => searchMessages(q), SEARCH_SETTLE_MS);
+});
+
+function searchMessages(q) {
+  invoke("search", { query: q })
+    .then((hits) => {
+      if (paletteInput.value !== q) return;
+      for (const hit of hits.slice(0, 8)) {
+        paletteItems.push({
+          label: hit.text,
+          kind: hit.kind === "group" ? "In group" : "Said",
+          run: () =>
+            hit.kind === "group" ? openGroup(hit.name) : openBot(hit.name),
+        });
+      }
+      renderPalette();
+    })
+    .catch((err) => {
+      // "Nothing matches" is an answer, and a failed search has not given
+      // one. Names are matched in the page and are already on screen; only
+      // the message hits come from the binary, so a search that fails leaves
+      // the empty state saying the conversation does not exist. Somebody then
+      // stops looking for something that is there.
+      if (paletteInput.value !== q) return;
+      paletteEmpty.textContent = `Could not search conversations — ${err}`;
+      show(paletteEmpty, true);
+    });
+}
+
+paletteInput.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const step = e.key === "ArrowDown" ? 1 : -1;
+    // Wraps, so holding one arrow cannot strand the selection at an end.
+    paletteAt = (paletteAt + step + paletteItems.length) % (paletteItems.length || 1);
+    renderPalette();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    choosePalette(paletteAt);
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  // The docs' Cmd/Ctrl+N. Only with a workspace on screen: before connecting
+  // there is nowhere to put a Bot, and the browser's own New Window is a
+  // better thing for the key to do than an error.
+  if (
+    (e.ctrlKey || e.metaKey) &&
+    e.key.toLowerCase() === "n" &&
+    !workspace.classList.contains("hidden")
+  ) {
+    e.preventDefault();
+    $("new-bot").click();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    if (palette.classList.contains("hidden")) openPalette();
+    else closePalette();
+    return;
+  }
+  // Escape closes whatever is on top, except an approval, which is a
+  // question that has to be answered rather than dismissed. Escaping it
+  // would leave the Bot waiting with nothing on screen to say so.
+  if (e.key === "Escape") {
+    if (!palette.classList.contains("hidden")) return closePalette();
+    if (!nameDialog.classList.contains("hidden")) return show(nameDialog, false);
+    if (!editDialog.classList.contains("hidden")) return show(editDialog, false);
+    if (!secretsDialog.classList.contains("hidden")) return show(secretsDialog, false);
+    if (!rulesDialog.classList.contains("hidden")) return show(rulesDialog, false);
+    // Last, because everything above is drawn over the workspace and the
+    // workspace is inert while any of them is open: Escape has to close what
+    // is actually on top first.
+    if (rail.classList.contains("expanded")) return setExpanded(false);
+  }
+});
+
+composer.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const text = input.value.trim();
+  // `busy` does not block: a message sent while the Bot is working joins
+  // the turn rather than starting a second one, which is what the docs mean by
+  // redirecting work in progress.
+  if (!text || !session) return;
+  input.value = "";
+  sendPrompt(text);
+});
+
+// Enter sends, Shift+Enter breaks the line. A chat box where Enter inserts a
+// newline is a chat box people send half-written messages from, hunting for
+// the button.
+input.addEventListener("keydown", (e) => {
+  // While the menu is up it owns the keys that move and choose. Enter must not
+  // reach the form: a person picking a name from a list has not finished
+  // writing, and sending the half-typed message is unrecoverable.
+  if (!mentions.classList.contains("hidden") && mentionItems.length > 0) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      mentionAt = (mentionAt + step + mentionItems.length) % mentionItems.length;
+      return renderMentions();
+    }
+    if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      return chooseMention(mentionAt);
+    }
+    if (e.key === "Escape") {
+      // Stopped here so the document-level handler does not also read it and
+      // close a dialog underneath.
+      e.preventDefault();
+      e.stopPropagation();
+      return closeMentions();
+    }
+  }
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    composer.requestSubmit();
+  }
+});
+
+// Typing, and moving the caret with a click or an arrow: a menu that only
+// tracked keystrokes would stay open over a word the caret has left.
+input.addEventListener("input", updateMentions);
+input.addEventListener("click", updateMentions);
+input.addEventListener("keyup", (e) => {
+  if (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End") {
+    updateMentions();
+  }
+});
+input.addEventListener("blur", closeMentions);
+// A skill is content, not code: somebody writes one while the window is open
+// and expects the next message to be able to name it. `botrosterd` reloads them
+// per task for the same reason. Clicking into the box is the moment before
+// they type `/`, which makes it the cheapest place to be current. Throttled,
+// because a click is not a rare event and each refresh is three subprocesses.
+input.addEventListener("focus", () => refreshMentionable(false));
+
+cancelBtn.addEventListener("click", async () => {
+  try {
+    forgetAsks(await invoke("cancel", { session }));
+  } catch (err) {
+    reportProblem(err, "search failed");
+  }
+});
+
+// Where the runtime is. An installed BOTROSTER ships it beside itself, and that
+// build is the one this client was tested against; running from source falls
+// back to the bare name and PATH. Only fills the field, never overwrites what
+// somebody typed.
+invoke("default_botroster")
+  .then((path) => {
+    const field = $("botroster-path");
+    if (path && !field.value.trim()) setPath(field, path);
+  })
+  .catch(() => {});
+
+// The same for where the Bots go. Filled with a real path rather than left to
+// a fallback: a default of the literal string `~/.botroster` would not be
+// expanded on the way to a subprocess, so botroster would make a folder called
+// `~` beside wherever the app was launched and put every Bot in it.
+invoke("default_home")
+  .then((path) => {
+    const field = $("home-path");
+    if (path && !field.value.trim()) setPath(field, path);
+  })
+  .catch(() => {});
+
+// A reload must not offer to connect an engine that is already running: the
+// page is transient, the shell's state is not.
+restoreBypass();
+invoke("connected")
+  .then((on) => {
+    if (on) return enterWorkspace();
+    show(connectPanel, true);
+    show(workspace, false);
+  })
+  .catch(() => {});

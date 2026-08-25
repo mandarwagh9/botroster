@@ -46,7 +46,7 @@ decides. `UNDESIGNED` — the state is reachable and nothing renders for it. `�
 | Composer | DESIGNED (hidden with no session) | — | DESIGNED (a message joining a turn is not echoed until it lands, `main.js:1341`) | DESIGNED (text restored, `main.js:1360`) | **UNDESIGNED** (stays live over a dead runtime) | — | DEFAULT (`rows="2"`, no growth) | DESIGNED (Stop appears; joining a turn is a real state) |
 | Approval dialog | — | — | DESIGNED (queue count, `main.js:1040`) | DESIGNED (`ask.dead`, `main.js:1047`) | DESIGNED (`refuseAsks`) | DESIGNED (invariant 5; `refuses()` decided in Rust, `an_unrecognised_option_kind_is_still_styled_as_a_refusal`) | DESIGNED (`.long` scrolls rather than truncating, `main.js:1036`) | DESIGNED |
 | Credential prompt | — | — | DESIGNED ("nothing was entered" is parked, not settled, `main.js:835`) | DESIGNED (`main.js:841`) | DESIGNED | DESIGNED (declining sends no value) | — | — |
-| Agent Computer | DESIGNED (hub viewer paints it) | **UNDESIGNED** (empty panel while `openbot watch` spawns, `main.js:2063-2067` → `viewer.rs:72-130`) | DESIGNED (3s poll blanks a frozen frame, `main.js:2083-2101`) | DESIGNED (`computerError`) | DESIGNED (same poll) | **UNDESIGNED** — the takeover lock is hub-enforced with no window-side surface | DEFAULT (iframe) | **UNDESIGNED** (no takeover state) |
+| Agent Computer | DESIGNED (hub viewer paints it) | **UNDESIGNED** (empty panel while `botroster watch` spawns, `main.js:2063-2067` → `viewer.rs:72-130`) | DESIGNED (3s poll blanks a frozen frame, `main.js:2083-2101`) | DESIGNED (`computerError`) | DESIGNED (same poll) | **UNDESIGNED** — the takeover lock is hub-enforced with no window-side surface | DEFAULT (iframe) | **UNDESIGNED** (no takeover state) |
 | Command palette | DESIGNED (`Nothing matches.`) | **UNDESIGNED** (message hits land ~150-500ms after the names, `main.js:2444-2461`) | **UNDESIGNED** (names then hits appended silently, `main.js:2467-2475`) | DESIGNED (`main.js:2484`) | — | — | **UNDESIGNED** (`.slice(0,12)`/`.slice(0,8)`, no "N more") | — |
 | Settings | DESIGNED ×3 (`index.html:388,408,415`) | **UNDESIGNED** (three lists paint blank then fill, `main.js:1957-1959`) | **UNDESIGNED** (one try block: a failed `connectors` read skips `routines` entirely, `main.js:1905-1950`) | DESIGNED-ish (shared line cleared per attempt, `main.js:1831`) | **UNDESIGNED** | — | DEFAULT | **UNDESIGNED** (erroring routine — B07) |
 | Credentials store | DESIGNED (`index.html:440`) | **UNDESIGNED** | — | DEFAULT (raw string, `main.js:1998`) | — | — | DEFAULT | — |
@@ -64,7 +64,7 @@ silently (F-DC5, roster and Settings rows).
 ## Findings
 
 ### F-DC1 — the pinned design system in DIRECTION.md was never implemented, and no backlog row says so
-`P0` · `reach: all users` · `crates/openbot-app/ui/styles.css:29-108`
+`P0` · `reach: all users` · `crates/botroster-app/ui/styles.css:29-108`
 
 **What is true now.** `LOOP.md:12-19` records launch decision #1: *"Full re-skin, as written.
 DIRECTION.md's eight pinned colours and three typefaces replace the shipped token layer. The cost was
@@ -76,7 +76,7 @@ changed by the loop."* None of it exists in the stylesheet. Not partially — at
 | `--base --raised --line --text --muted --waiting --live --refused` (pinned) | none of these tokens exist; `--bg --panel --raise --ink --danger --ok --warn` instead (`:33-60`) |
 | accent is a **neutral fill**, and "purple-to-blue anything" is in **Banned** | `--accent: light-dark(#6f45e0, #7c4ff0)` — purple (`:49`) |
 | "**there are no pills**"; `--r-1 3px --r-2 6px --r-3 10px --r-0 0` | `--r-pill: 999px` (`:67`), used 6× including every `button` (`:152`); the file's own header states the opposite rule at `:20` |
-| Geist Sans / Commit Mono / Martian Mono, "vendored as WOFF2 under `crates/openbot-app/ui/fonts/`" | `ui-sans-serif, system-ui…` (`:75-76`); **`ui/fonts/` does not exist** |
+| Geist Sans / Commit Mono / Martian Mono, "vendored as WOFF2 under `crates/botroster-app/ui/fonts/`" | `ui-sans-serif, system-ui…` (`:75-76`); **`ui/fonts/` does not exist** |
 | eight low-chroma coats, none within 20° of a status hue | `#946cf6` purple, `#ec5358` red (~11° from `--refused` `#E5674E`), `#eb4699` magenta, `#3c82f6` blue (`:92-107`) |
 | `--shadow: 0 16px 40px` | `0 20px 50px` (`:63`) |
 
@@ -103,7 +103,7 @@ no build step, no framework — this is CSS custom properties and four font file
 backlog row first**, so the next reader of `BACKLOG.md` can see the project's largest design debt
 without reading `LOOP.md`.
 
-**How to prove it.** `crates/openbot-app/tests/page.rs` already reads the stylesheet from disk for
+**How to prove it.** `crates/botroster-app/tests/page.rs` already reads the stylesheet from disk for
 `every_coat_a_bot_can_wear_is_legible` and `no_text_in_any_surface_falls_below_the_contrast_it_needs`.
 Add `the_shipped_tokens_are_the_pinned_tokens`: parse the fenced `Pinned` block out of
 `.claude/ux-loop/DIRECTION.md`, resolve each name against `getComputedStyle(document.documentElement)`
@@ -115,7 +115,7 @@ exceeds `--r-3`.
 ---
 
 ### F-DC2 — the window teaches that each Bot has its own computer; the spec orders it to say the opposite, loudly
-`P1` · `reach: all users` · `crates/openbot-app/ui/index.html:258`
+`P1` · `reach: all users` · `crates/botroster-app/ui/index.html:258`
 
 **What is true now.** The empty-conversation card, the first sentence a new install reads about what
 a Bot is, says: *"Each Bot has one job, its own memory, **and a computer it works on**."* The
@@ -129,7 +129,7 @@ surface:
 
 > **The unavoidable caveat, stated loudly in the UI:** browser sessions and shell credentials on the
 > shared computer *are* accessible to every Bot on that account. Separate Bots are **not** a security
-> boundary. Upstream says this; `openbot` must say it louder, because users will assume otherwise.
+> boundary. Upstream says this; `botroster` must say it louder, because users will assume otherwise.
 
 Grepping `index.html` and `main.js` for that caveat returns nothing. The UI does not merely omit it —
 the one sentence it spends on the subject teaches the misconception the spec names.
@@ -150,7 +150,7 @@ and is the moment somebody is looking at the shared thing: "Every Bot uses this 
 here is a login for all of them." No new colour, no new component. Not a dismissible banner — a fact
 about what the product *is* does not have a dismissed state.
 
-**How to prove it.** `crates/openbot-app/tests/defaults.rs` already asserts properties of shipped
+**How to prove it.** `crates/botroster-app/tests/defaults.rs` already asserts properties of shipped
 markup by reading `index.html`. Add `the_window_says_the_computer_is_shared`: assert the empty-state
 card and the computer pane header each contain a sentence naming the computer as shared, and that
 `index.html` contains no sentence matching `/a computer it works on|its own computer/`. It fails on
@@ -159,9 +159,9 @@ the second clause today; revert the copy and it notices.
 ---
 
 ### F-DC3 — every tool step's duration is measured, the CLI prints it, and the wire to the window throws it away
-`P1` · `reach: all users` · `crates/openbot-cli/src/acp/serve.rs:469-490`
+`P1` · `reach: all users` · `crates/botroster-cli/src/acp/serve.rs:469-490`
 
-**What is true now.** `crates/openbot-agent/src/agent.rs:730-732` times every tool call:
+**What is true now.** `crates/botroster-agent/src/agent.rs:730-732` times every tool call:
 
 ```rust
 let started = Instant::now();
@@ -170,11 +170,11 @@ let elapsed_ms = started.elapsed().as_millis() as u64;
 ```
 
 It reaches `AgentEvent::ToolCallFinished { elapsed_ms, .. }` (`agent.rs:135, 792`). The terminal
-renders it in a dimmed time column (`crates/openbot-cli/src/render.rs:33-42`) and the HTML export
-renders it (`crates/openbot-cli/src/html.rs:79`). The ACP adapter destructures the event as
+renders it in a dimmed time column (`crates/botroster-cli/src/render.rs:33-42`) and the HTML export
+renders it (`crates/botroster-cli/src/html.rs:79`). The ACP adapter destructures the event as
 `ToolCallFinished { call_id, ok, output, .. }` and the `..` drops it (`serve.rs:469-474`);
 `ToolCallUpdateFields` is built with `status` and `raw_output` only. `Chunk`
-(`crates/openbot-app/src/lib.rs:233-234`) has no duration field, and `render()` at `lib.rs:1599-1608`
+(`crates/botroster-app/src/lib.rs:233-234`) has no duration field, and `render()` at `lib.rs:1599-1608`
 also discards `update.tool_call_id`, so the page has no per-call handle to hang one on.
 
 The consequence: **no time is displayed anywhere in the window.** Not a step duration, not a message
@@ -190,7 +190,7 @@ between a GUI and its CLI and is the clearest single place the client reads as a
 finished tool.
 
 **The durable fix.** Carry it on ACP's own extension point, which this repo already uses and tests:
-`crates/openbot-cli/src/acp/mod.rs:268` documents "the key OPENBOT claims inside ACP's `_meta`", and
+`crates/botroster-cli/src/acp/mod.rs:268` documents "the key BOTROSTER claims inside ACP's `_meta`", and
 `ToolCallUpdate` has `meta: Option<Meta>`
 (`agent-client-protocol-schema-1.6.0/src/v1/tool_call.rs:234`). `ToolCallUpdateFields` has no
 duration field and `raw_output` belongs to the tool, so `_meta` is the correct carrier rather than a
@@ -210,17 +210,17 @@ assert the row renders it. Restore the `..` and both fail.
 ---
 
 ### F-DC4 — the waiting state has no design: a model call is a silent void with one 12px word in the far corner
-`P1` · `reach: all users` · `crates/openbot-app/ui/main.js:1334`
+`P1` · `reach: all users` · `crates/botroster-app/ui/main.js:1334`
 
 **What is true now.** `sendPrompt` sets `setStatus("thinking…", "busy")` and that is the entire design
 of the state. The model call does not stream and should not:
-`crates/openbot-agent/src/providers/http.rs:440` sends `"stream": false` deliberately, and MEMORY run
+`crates/botroster-agent/src/providers/http.rs:440` sends `"stream": false` deliberately, and MEMORY run
 3 records why — a gateway that defaulted the other way surfaced as `Malformed`, and "one field
 removes the whole class". `serve.rs:491` also drops `AgentEvent::Thinking` entirely, so the window is
 told nothing between the last tool result and the answer. In that interval the window shows: the
 person's own message, a pulsing 6px dot, and the word "thinking…" in a 12px pill in the top-right
 corner — roughly 900px from the 640px measure where the eye actually is
-(`docs/openbot-approval.png` shows the pill at that distance, mid-run). No elapsed time, no phase, no
+(`docs/botroster-approval.png` shows the pill at that distance, mid-run). No elapsed time, no phase, no
 indication whether this is a two-second call or a two-minute one.
 
 **Why it matters.** This is the majority of the wall-clock time a person spends with a working Bot,
@@ -249,7 +249,7 @@ first assertion.
 ---
 
 ### F-DC5 — no asynchronous surface has a loading state, and a half-failed read is indistinguishable from an empty one
-`P1` · `reach: all users` · `crates/openbot-app/ui/main.js:1905-1950, 1585-1626, 623-629`
+`P1` · `reach: all users` · `crates/botroster-app/ui/main.js:1905-1950, 1585-1626, 623-629`
 
 **What is true now.** Eight of eleven surfaces go straight from blank to populated, and two of them
 fail silently on the way.
@@ -270,7 +270,7 @@ fail silently on the way.
 - **Edit** awaits `invoke("roster", {hidden:true})` *before* showing the dialog (`main.js:1585-1626`).
   Click it and nothing happens at all — no dialog, no pressed state — until a subprocess answers.
 - **Agent Computer** shows the panel, then awaits `open_computer` (`main.js:2063-2067`), which spawns
-  an `openbot watch` subprocess and waits for it to announce a port (`viewer.rs:72-130`). The panel is
+  an `botroster watch` subprocess and waits for it to announce a port (`viewer.rs:72-130`). The panel is
   an empty black rectangle for the duration.
 
 The exception: `$("del-start")` writes "Working out what that would remove…" before awaiting
@@ -280,7 +280,7 @@ The exception: `$("del-start")` writes "Working out what that would remove…" b
 list leaving the composer with nothing"* — so the argument for splitting the try exists, in a sibling
 function, applied there and not here.
 
-**Why it matters.** Every one of these calls shells out to an `openbot` subprocess; the code says so
+**Why it matters.** Every one of these calls shells out to an `botroster` subprocess; the code says so
 at `main.js:2233-2236` and budgets a 3-second throttle around it. These are not sub-100ms calls. The
 user-visible result is a window that appears to ignore clicks — and, in Settings and the roster,
 something worse than latency: a person with three routines and a broken connector sees a Settings
@@ -311,7 +311,7 @@ a delay, assert `#routines-empty` is not laid out immediately and `#routines-lis
 ---
 
 ### F-DC6 — the status pill is the app's only "what is happening now" channel and it is never announced
-`P1` · `reach: all users` · `crates/openbot-app/ui/index.html:209`
+`P1` · `reach: all users` · `crates/botroster-app/ui/index.html:209`
 
 **What is true now.** `<span id="status" class="status">connected</span>` — no `role`, no
 `aria-live`. `setStatus` (`main.js:79-82`) writes to it from a dozen call sites: "opening…",
@@ -348,7 +348,7 @@ would catch the next such element.
 ---
 
 ### F-DC7 — the log scrolls to the bottom on every chunk, so you cannot read while a Bot is working
-`P1` · `reach: most users` · `crates/openbot-app/ui/main.js:338, 407, 960`
+`P1` · `reach: most users` · `crates/botroster-app/ui/main.js:338, 407, 960`
 
 **What is true now.** Three unconditional statements, one at each append path:
 
@@ -386,12 +386,12 @@ another chunk, assert it followed. It fails on the first assertion today.
 ---
 
 ### F-DC8 — nothing tells the window the runtime died; "connected" is an unverified claim that never expires
-`P1` · `reach: most users` · `crates/openbot-app/src/lib.rs:1293, 1330, 1386`
+`P1` · `reach: most users` · `crates/botroster-app/src/lib.rs:1293, 1330, 1386`
 
 **What is true now.** The shell emits exactly three events — `permission-withdrawn`,
 `permission-request`, `chunk` — and none is a liveness signal. `Engine` holds a `JoinHandle` and
-aborts it on `Drop` (`crates/openbot-desktop/src/engine.rs:903-905`), but nothing watches it. If
-`openbot acp` is killed, crashes, or loses the hub between turns, the window keeps showing the roster
+aborts it on `Drop` (`crates/botroster-desktop/src/engine.rs:903-905`), but nothing watches it. If
+`botroster acp` is killed, crashes, or loses the hub between turns, the window keeps showing the roster
 it last fetched, the pill keeps reading "connected", the composer stays live and Send stays primary.
 The truth only surfaces when somebody sends a message and `prompt` throws, which becomes
 `reportProblem(err, "the run stopped")` (`main.js:1359`) — a message about a run that never started.
@@ -418,8 +418,8 @@ calls: short WHAT in the pill, the record behind the `#problem` disclosure, comp
 queued ask refused (`refuseAsks()` already does exactly this). Do not silently return to the connect
 panel — the person's transcript is on screen and should stay there.
 
-**How to prove it.** In `crates/openbot-desktop/tests/engine_live.rs`, which already drives a real
-`openbot acp`: kill the child and assert the engine reports it rather than hanging. In `page.rs`,
+**How to prove it.** In `crates/botroster-desktop/tests/engine_live.rs`, which already drives a real
+`botroster acp`: kill the child and assert the engine reports it rather than hanging. In `page.rs`,
 `a_dead_runtime_does_not_keep_saying_connected`: fire the new event through the stub's `__fire`, then
 assert the pill no longer reads `connected`, the composer is not laid out, and the problem banner is.
 All three fail today because the event does not exist.
@@ -427,7 +427,7 @@ All three fail today because the event does not exist.
 ---
 
 ### F-DC9 — the roster is destroyed and rebuilt at the end of every turn, taking focus and scroll with it
-`P1` · `reach: most users` · `crates/openbot-app/ui/main.js:565`
+`P1` · `reach: most users` · `crates/botroster-app/ui/main.js:565`
 
 **What is true now.** `renderRoster` opens with `botsList.innerHTML = ""` and rebuilds every row from
 scratch; `refreshGroups` does the same to `#groups` (`:631`). `refreshRoster()` is called from
@@ -463,7 +463,7 @@ fail today.
 ---
 
 ### F-DC10 — the command palette is invisible to assistive tech, and neither menu wires `aria-activedescendant`
-`P1` · `reach: some users` · `crates/openbot-app/ui/index.html:361-364`, `main.js:2161-2183`
+`P1` · `reach: some users` · `crates/botroster-app/ui/index.html:361-364`, `main.js:2161-2183`
 
 **What is true now.** The palette is Ctrl/Cmd+K, described in the markup as the answer to "the most
 frequent thing a person does here" (`index.html:355-357`). Its results are a bare `<ul>` of bare
@@ -500,7 +500,7 @@ the focused control's `aria-activedescendant` names the element carrying `.at` a
 ---
 
 ### F-DC11 — a blank hub field connects to a different scheme and a different port than the two tests that pin the default
-`P1` · `reach: some users` · `crates/openbot-app/ui/main.js:1259`
+`P1` · `reach: some users` · `crates/botroster-app/ui/main.js:1259`
 
 **What is true now.**
 
@@ -509,7 +509,7 @@ hub: hub || "http://127.0.0.1:9812",
 ```
 
 The shipped field value is `ws://127.0.0.1:8443/v1/tools` (`index.html:43`), and two tests exist to
-keep it honest: `defaults.rs:78 the_connect_panel_defaults_to_the_hub_openbot_actually_starts` pins it
+keep it honest: `defaults.rs:78 the_connect_panel_defaults_to_the_hub_botroster_actually_starts` pins it
 against the binary's own default, and `defaults.rs:91 the_shipped_hub_default_is_a_websocket_url` pins
 the scheme because — in its own words — "a `--hub` that is not a WebSocket URL fails before it reaches
 the network". Both read the *markup*. Neither sees the fallback, which differs in scheme (`http` vs
@@ -546,7 +546,7 @@ contains no hub literal that `the_shipped_hub_default_is_a_websocket_url` would 
 ---
 
 ### F-DC12 — `main.js` has no navigable structure at 2,632 lines, and has already had to work around its own ordering
-`P1` · `reach: some users` · `crates/openbot-app/ui/main.js:104-110`
+`P1` · `reach: some users` · `crates/botroster-app/ui/main.js:104-110`
 
 *(Reach is contributors rather than end users; filed because the brief asked directly whether vanilla
 is still the right call at this size and whether the code is structured so a contributor can find
@@ -598,18 +598,18 @@ existing suite to be the assertion.
 ---
 
 ### F-DC13 — `docs/` ships pre-rename screenshots showing a third visual system, the old product name, and a developer's home path
-`P2` · `reach: most users` · `docs/openbot-connect.png`, `docs/openbot-computer.png`
+`P2` · `reach: most users` · `docs/botroster-connect.png`, `docs/botroster-computer.png`
 
-**What is true now.** Six screenshots sit in `docs/`. Two (`openbot-thread.png`,
-`openbot-approval.png`, both 2026-08-20) show the current build. Four (2026-08-17) predate the rename
+**What is true now.** Six screenshots sit in `docs/`. Two (`botroster-thread.png`,
+`botroster-approval.png`, both 2026-08-20) show the current build. Four (2026-08-17) predate the rename
 and show a different product:
 
-- `docs/openbot-connect.png` labels its fields **"roost binary"** and **"agent home"**, its lede reads
+- `docs/botroster-connect.png` labels its fields **"roost binary"** and **"agent home"**, its lede reads
   "Your Bots live in a **roost** you run yourself… the defaults match `roost up`", the paths read
   `C:\Users\Mandar\Desktop\grokbot-recon\roost\target\debug\roost.exe` and `C:\Users\Mandar\.roost`,
   and the frame is a navy-and-orange palette that exists nowhere in the current stylesheet. It also
   predates B18, so it shows a connect panel with no Model section.
-- `docs/openbot-computer.png` shows a viewer chrome reading **"roost · computer"** and an `fs.write` of
+- `docs/botroster-computer.png` shows a viewer chrome reading **"roost · computer"** and an `fs.write` of
   `roost-demo.md`, again in navy and orange.
 
 So the folder contains three mutually exclusive visual systems, and the four stale frames carry the
@@ -631,16 +631,16 @@ layer — and which runs against a fixture, so no real home path appears. Add a 
 that greps `docs/` and the tree for the old name, so the rename is finished rather than mostly
 finished. Regenerate *after* F-DC1's re-skin, not before, or they go stale on the next commit.
 
-**How to prove it.** `crates/openbot-cli/tests/readme.rs` already parses `README.md` and fails the build
+**How to prove it.** `crates/botroster-cli/tests/readme.rs` already parses `README.md` and fails the build
 on stale content, which is the precedent. Add `no_shipped_image_predates_the_rename`: assert every file
 in `docs/` referenced by `README.md` exists, and that no file in `docs/` is older than the most recent
-change to `crates/openbot-app/ui/styles.css`. A text-level companion — grep the tree for the old name
+change to `crates/botroster-app/ui/styles.css`. A text-level companion — grep the tree for the old name
 outside `PROVENANCE.md` — catches the name independently of the images.
 
 ---
 
 ### F-DC14 — a working Bot pulses forever, a Stop failure says "search failed", and a search hit never says who said it
-`P2` · `reach: most users` · `crates/openbot-app/ui/styles.css:834-836`, `main.js:2597`, `main.js:2468-2473`
+`P2` · `reach: most users` · `crates/botroster-app/ui/styles.css:834-836`, `main.js:2597`, `main.js:2468-2473`
 
 Three small, separate, cheap defects, folded because each alone is under the materiality bar.
 
@@ -694,7 +694,7 @@ assert each message hit renders the Bot's name.
   content inserted while `display:none` and then revealed differs between NVDA, JAWS and VoiceOver. It
   needs a real screen reader, which I do not have. If it does announce, it is a P0 for those users; I
   have not filed it because I could not confirm it.
-- **Light theme beyond one frame.** `docs/openbot-thread-light.png` is equal in quality to its dark twin
+- **Light theme beyond one frame.** `docs/botroster-thread-light.png` is equal in quality to its dark twin
   on the surface it shows — rubric 16 passes on that evidence — but it is one of twelve scenarios and
   predates iteration 004 (its `connected` pill still wears the fill that iteration removed). The approval
   dialog, the connect panel with the Model section open, and the computer pane have no light frame I
@@ -703,10 +703,10 @@ assert each message hit renders the Bot's name.
   `#problem-what` and `#problem-raw` unconditionally (`main.js:94-99`), so two failures in quick
   succession should leave only the second — but I could not construct the timing to confirm the first is
   genuinely unreachable rather than merely replaced after being read.
-- **Real latency numbers.** F-DC5 argues from the fact that each of these calls spawns an `openbot`
+- **Real latency numbers.** F-DC5 argues from the fact that each of these calls spawns an `botroster`
   subprocess — which the code states at `main.js:2233-2236` and budgets a 3-second throttle around — not
   from measurement. How bad the blank interval actually is on a warm machine is unknown to me.
-- **`crates/openbot-desktop`'s Rust surface below the seam.** I read `engine.rs`, `viewer.rs` and the
+- **`crates/botroster-desktop`'s Rust surface below the seam.** I read `engine.rs`, `viewer.rs` and the
   command signatures for the state questions above, but `settings.rs`, `policy.rs`, `secrets.rs`,
   `skills.rs`, `roster.rs` and `attach.rs` were read for what they return to the window, not audited for
   correctness — that is the Runtime & Security and CLI departments' seam, and I did not want to duplicate

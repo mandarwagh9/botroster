@@ -5,12 +5,12 @@ it, a shot script, and a gate script.
 
 ## Fixture
 
-`crates/openbot-app/ui/` is three hand-written files with no bundler and no npm, served
+`crates/botroster-app/ui/` is three hand-written files with no bundler and no npm, served
 verbatim by Tauri. `main.js` reads `window.__TAURI__.core.invoke` at module scope, so the
 whole fixture is: define `window.__TAURI__` before `main.js` loads. Nothing in the shipped UI
 changes.
 
-- `crates/openbot-app/tests/fixture/tauri-stub.js` — the IPC double. **Shared**: `page.rs`
+- `crates/botroster-app/tests/fixture/tauri-stub.js` — the IPC double. **Shared**: `page.rs`
   pulls it in with `include_str!` and the node server reads the same file, so the Rust suite
   and the shot harness cannot drift apart. It records every `invoke` in `window.__calls`,
   answers from `window.__replies`, throws from `window.__throw`, and delivers events through
@@ -50,9 +50,9 @@ Exit non-zero on any failure; last line is `GATES total_failures=N bundle_bytes=
 
 | Gate | What it does |
 |---|---|
-| preflight | No `openbot*.exe` holding the build; a sidecar is staged |
-| rust | `cargo check` + `clippy -D warnings` on `openbot-app` and `openbot-desktop`, `cargo fmt --check` |
-| frontend | `node --check` on `main.js` and `scenarios.js`, then `cargo test -p openbot-app --test page` |
+| preflight | No `botroster*.exe` holding the build; a sidecar is staged |
+| rust | `cargo check` + `clippy -D warnings` on `botroster-app` and `botroster-desktop`, `cargo fmt --check` |
+| frontend | `node --check` on `main.js` and `scenarios.js`, then `cargo test -p botroster-app --test page` |
 | axe | every scenario, both themes, zero serious or critical |
 | contrast | computed from rendered pixels: 4.5:1 body, 3:1 large, both themes |
 | keyboard | every visible interactive element reachable by Tab |
@@ -64,7 +64,7 @@ Exit non-zero on any failure; last line is `GATES total_failures=N bundle_bytes=
 
 **"frontend typecheck and production build."** There is no TypeScript and no bundler in this
 repo, and adding one to satisfy a gate would be the tail wagging the dog. The honest
-equivalent is a syntax check plus `cargo test -p openbot-app --test page`, which drives the
+equivalent is a syntax check plus `cargo test -p botroster-app --test page`, which drives the
 shipped `main.js` in a real browser and is where its behaviour is actually pinned — about
 forty tests covering the approval queue, the refusal mapping, the credential form and the
 session filter. That suite runs every iteration despite costing the most, because the loop

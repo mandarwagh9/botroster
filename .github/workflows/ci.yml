@@ -14,7 +14,7 @@ env:
   # green badge over ~15 unexercised tests: including every assertion about
   # synthetic clicks and keystrokes. A skip that reads as a pass is worse than
   # a failure.
-  OPENBOT_REQUIRE_BROWSER: "1"
+  BOTROSTER_REQUIRE_BROWSER: "1"
 
 jobs:
   test:
@@ -30,7 +30,7 @@ jobs:
       # Linux only, deliberately. macOS and Windows can sandbox, so leaving it
       # off there means CI still exercises the shipped default on two of three
       # platforms rather than testing an arrangement no user has.
-      OPENBOT_BROWSER_NO_SANDBOX: ${{ matrix.os == 'ubuntu-latest' && '1' || '0' }}
+      BOTROSTER_BROWSER_NO_SANDBOX: ${{ matrix.os == 'ubuntu-latest' && '1' || '0' }}
     strategy:
       fail-fast: false
       matrix:
@@ -40,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # OPENBOT is a Tauri app, and its webview backend links against
+      # BOTROSTER is a Tauri app, and its webview backend links against
       # webkit2gtk on Linux: the guest crate is pure Rust, the window is
       # not. Without these, every job below fails at the first `tauri`
       # compile with pkg-config errors, so install them once per job.
@@ -74,7 +74,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # The desktop client bundles the runtime as a Tauri sidecar, and Tauri's
-      # build script requires that file to exist before openbot-app compiles.
+      # build script requires that file to exist before botroster-app compiles.
       # Stage it the same way the bundle job does, or a build of the workspace
       # fails at the build script on a fresh checkout.
       - name: stage the runtime as a sidecar
@@ -97,9 +97,9 @@ jobs:
       - name: point the guest at a browser
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then
-            echo "OPENBOT_BROWSER=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" >> "$GITHUB_ENV"
+            echo "BOTROSTER_BROWSER=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" >> "$GITHUB_ENV"
           else
-            echo "OPENBOT_BROWSER=${{ steps.chrome.outputs.chrome-path }}" >> "$GITHUB_ENV"
+            echo "BOTROSTER_BROWSER=${{ steps.chrome.outputs.chrome-path }}" >> "$GITHUB_ENV"
           fi
 
       - name: fmt
@@ -120,7 +120,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # The desktop client bundles the runtime as a Tauri sidecar, and Tauri's
-      # build script requires that file to exist before openbot-app compiles.
+      # build script requires that file to exist before botroster-app compiles.
       # Stage it the same way the bundle job does, or a build of the workspace
       # fails at the build script on a fresh checkout.
       - name: stage the runtime as a sidecar
@@ -159,7 +159,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.89
       - uses: Swatinem/rust-cache@v2
       # The desktop client bundles the runtime as a Tauri sidecar, and Tauri's
-      # build script requires that file to exist before openbot-app compiles.
+      # build script requires that file to exist before botroster-app compiles.
       # Stage it the same way the bundle job does, or a build of the workspace
       # fails at the build script on a fresh checkout.
       - name: stage the runtime as a sidecar
@@ -236,12 +236,12 @@ jobs:
       # and that the source stays publishable. Treat a build as the unit of
       # rotation.
       #
-      # A fork without the secret set builds a working OPENBOT with no shipped
+      # A fork without the secret set builds a working BOTROSTER with no shipped
       # model, which is the correct outcome rather than a failure: `option_env!`
       # yields `None` and the ordinary "configure a model" path applies.
       - name: stage the runtime as a sidecar
         env:
-          OPENBOT_BUILTIN_KEY: ${{ secrets.OPENBOT_BUILTIN_KEY }}
+          BOTROSTER_BUILTIN_KEY: ${{ secrets.BOTROSTER_BUILTIN_KEY }}
         run: sh scripts/sidecar.sh
 
       # The failure this exists to prevent is silent. A secret that is unset,
@@ -257,11 +257,11 @@ jobs:
       - name: the shipped credential is present
         shell: bash
         env:
-          OPENBOT_BUILTIN_KEY: ${{ secrets.OPENBOT_BUILTIN_KEY }}
+          BOTROSTER_BUILTIN_KEY: ${{ secrets.BOTROSTER_BUILTIN_KEY }}
         run: |
           set -eu
-          if [ -z "${OPENBOT_BUILTIN_KEY:-}" ]; then
-            echo "OPENBOT_BUILTIN_KEY is unset or empty."
+          if [ -z "${BOTROSTER_BUILTIN_KEY:-}" ]; then
+            echo "BOTROSTER_BUILTIN_KEY is unset or empty."
             echo
             echo "Installers built from this would carry no model, and would ask"
             echo "whoever downloads them to configure one - which is the thing a"
@@ -271,12 +271,12 @@ jobs:
             echo "Set it at Settings > Secrets and variables > Actions."
             exit 1
           fi
-          echo "a credential is present (${#OPENBOT_BUILTIN_KEY} characters)"
+          echo "a credential is present (${#BOTROSTER_BUILTIN_KEY} characters)"
 
       - name: bundle
-        working-directory: crates/openbot-app
+        working-directory: crates/botroster-app
         env:
-          OPENBOT_BUILTIN_KEY: ${{ secrets.OPENBOT_BUILTIN_KEY }}
+          BOTROSTER_BUILTIN_KEY: ${{ secrets.BOTROSTER_BUILTIN_KEY }}
         run: cargo tauri build
 
       # And it actually reached the binary. The step above proves the secret
@@ -289,12 +289,12 @@ jobs:
       - name: the credential reached the shipped runtime
         shell: bash
         env:
-          OPENBOT_BUILTIN_KEY: ${{ secrets.OPENBOT_BUILTIN_KEY }}
+          BOTROSTER_BUILTIN_KEY: ${{ secrets.BOTROSTER_BUILTIN_KEY }}
         run: |
           set -eu
           # This runner's own binary, by name, not "whichever file is first".
           #
-          # `crates/openbot-app/binaries/` is not empty at checkout: the Windows
+          # `crates/botroster-app/binaries/` is not empty at checkout: the Windows
           # sidecar is committed, so on Linux and macOS there are two files here
           # after staging and `find | head -1` returns an arbitrary one. It
           # returned the committed Windows binary - built on a laptop long
@@ -304,10 +304,10 @@ jobs:
           triple=$(rustc -vV | sed -n 's/^host: //p')
           ext=""
           case "$triple" in *windows*) ext=".exe" ;; esac
-          staged="crates/openbot-app/binaries/openbot-$triple$ext"
+          staged="crates/botroster-app/binaries/botroster-$triple$ext"
           test -f "$staged" || { echo "no sidecar was staged at $staged"; exit 1; }
           echo "checking $staged"
-          if grep -qa -- "$OPENBOT_BUILTIN_KEY" "$staged"; then
+          if grep -qa -- "$BOTROSTER_BUILTIN_KEY" "$staged"; then
             echo "the shipped runtime carries the credential"
           else
             echo "the staged runtime does NOT contain the credential."
@@ -318,7 +318,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: openbot-${{ matrix.os }}
+          name: botroster-${{ matrix.os }}
           path: |
             target/release/bundle/**/*.msi
             target/release/bundle/**/*.exe

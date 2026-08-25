@@ -7,10 +7,10 @@ Shots: `.claude/ux-loop/shots/000/` (48 files, gitignored).
 
 | Gate | Baseline |
 |---|---|
-| `cargo check` (openbot-app, openbot-desktop) | pass |
+| `cargo check` (botroster-app, botroster-desktop) | pass |
 | `cargo clippy -D warnings` | pass |
 | `cargo fmt --check` | pass |
-| `cargo test -p openbot-app --test page` | **57 passed** |
+| `cargo test -p botroster-app --test page` | **57 passed** |
 | axe serious | **4** |
 | axe critical | **2** |
 | contrast failures | **2** |

@@ -12,12 +12,12 @@ instead of random-walk. Append; never rewrite history.
 entire fixture — no transport rewrite, no change to `main.js`, no bundler. Any future harness
 work should reach for this seam first.
 
-**There was already a double, and it is now shared.** `crates/openbot-app/tests/page.rs` had
+**There was already a double, and it is now shared.** `crates/botroster-app/tests/page.rs` had
 a 32-line `window.__TAURI__` stub inline, plus a loopback static server and a splice
 assertion on the `<script src="main.js">` marker. Writing a second double for the JS harness
 would have been the exact failure `page.rs` warns about in its own comments — a hand-written
 fixture that cannot fail when the Rust shape changes. The stub is now
-`crates/openbot-app/tests/fixture/tauri-stub.js`; `page.rs` reads it with `include_str!` and
+`crates/botroster-app/tests/fixture/tauri-stub.js`; `page.rs` reads it with `include_str!` and
 the node server reads the same file. **Lesson: look for the existing double before writing
 one.**
 
@@ -31,7 +31,7 @@ few minutes to notice and would have produced 24 identical "light" screenshots.
 dark. It is disabled in `ux-audit.mjs`; contrast is computed from what actually rendered.
 
 **Module resolution.** The harness keeps `node_modules` under `.claude/ux-loop/` so
-`crates/openbot-app/ui/` stays npm-free and buildless, which is a documented property of this
+`crates/botroster-app/ui/` stays npm-free and buildless, which is a documented property of this
 repo. Node resolves upward from `scripts/` and never finds it, so both scripts use
 `createRequire` pointed at `.claude/ux-loop/package.json`. Do not "fix" this by adding a
 root `package.json`.
@@ -121,7 +121,7 @@ this one in about a minute. One misuse of a semantic token predicts others.
   + `clippy` + the 57-test page suite is the whole cost. Batch a patch, start the gate in the
   background, and do the next iteration's reading while it runs.
 - **This branch has another writer.** Commit `104dc9a` is not from this loop; it fixed
-  README's stale `./openbot-data` default and swept in the `page.rs`/stub extraction. Because
+  README's stale `./botroster-data` default and swept in the `page.rs`/stub extraction. Because
   of that, **do not use blanket `git checkout .` to revert** — it would discard somebody
   else's in-flight work. Revert the specific files the iteration touched.
 - **`sh scripts/ux-verify.sh | tail` hides the exit code** (you get `tail`'s). Redirect to a
@@ -139,7 +139,7 @@ and it is exactly why run 1 cleared four real defects and never noticed that a f
 cannot start at all.
 
 J1 and J2 had to be established by running the shipped binary
-(`%LOCALAPPDATA%\OPENBOT\openbot.exe acp --home …`), not by looking at pictures.
+(`%LOCALAPPDATA%\BOTROSTER\botroster.exe acp --home …`), not by looking at pictures.
 
 **Generalisable: a screenshot harness is only as honest as the state it opens in.** Before
 trusting a journey analysis, ask what the fixture asserts as already true. Whatever it
@@ -147,8 +147,8 @@ asserts, it cannot see.
 
 ### 011 — the window had the answer and threw it away · held
 
-`openbot acp` refuses to start with no model and says both the fault and the fix on stderr.
-`Engine::connect` reported `openbot acp ended before the handshake`.
+`botroster acp` refuses to start with no model and says both the fault and the fix on stderr.
+`Engine::connect` reported `botroster acp ended before the handshake`.
 
 Two routes were tried, and the first one failed for an instructive reason:
 
@@ -171,8 +171,8 @@ an assembled engine. The engine is now built only on the success arm.
 
 ### The preflight gate blocked on something harmless
 
-The check matched any process named `openbot*`, so it failed the whole run because the
-**installed** app in `%LOCALAPPDATA%\OPENBOT` was open — a different file on a path cargo
+The check matched any process named `botroster*`, so it failed the whole run because the
+**installed** app in `%LOCALAPPDATA%\BOTROSTER` was open — a different file on a path cargo
 never writes to. Only a binary running out of this checkout can hold this build, so it
 matches on path now.
 
@@ -270,9 +270,9 @@ previous run were probably still winding down. Re-run alone: clean, 68 passed.
 ### Credential persistence reused what was already there
 
 The window collected a key into the spawned agent's environment and nowhere else, so it was
-retyped at every launch. No new dependency was needed: `openbotd::secrets::SecretStore` is the
-0600 `secrets.json` connector tokens already use, `openbot secret set` reads the value from
-**stdin** (no `--value` flag, deliberately), and `openbot-cli` already depends on `openbotd` — so
+retyped at every launch. No new dependency was needed: `botrosterd::secrets::SecretStore` is the
+0600 `secrets.json` connector tokens already use, `botroster secret set` reads the value from
+**stdin** (no `--value` flag, deliberately), and `botroster-cli` already depends on `botrosterd` — so
 `isolation.rs` was unaffected. Environment first, store second, and that order is asserted:
 a stored key that silently overrode an exported one makes "why is it using the wrong key"
 unanswerable from the shell.
@@ -332,7 +332,7 @@ cannot lose is a race you are not testing.**
 
 ### Ask the system, do not read its error text
 
-A turn that failed over a dead runtime arrived as the literal string `openbot acp is gone`. Matching
+A turn that failed over a dead runtime arrived as the literal string `botroster acp is gone`. Matching
 on it would have worked, and would have broken silently at the next rewording — in the direction of
 showing the worse message. One extra IPC call on an already-failed path answers the question
 outright.
@@ -453,9 +453,9 @@ rather than keeping whichever conclusion is convenient.**
 
 ### The missing surface was not the missing thing
 
-`REDESIGN.md` §1.4 said OPENBOT's event model "already supports this shape … It has no surface", and
+`REDESIGN.md` §1.4 said BOTROSTER's event model "already supports this shape … It has no surface", and
 planned a trigger menu naming Slack, Linear, Sentry. Checking the delivery path before building it:
-events arrive only through `openbot event post <source>` — *"point a webhook at this, or use it by
+events arrive only through `botroster event post <source>` — *"point a webhook at this, or use it by
 hand"* — and `--source` is documented as **"anything you name"**. No listener, no endpoint, no
 integration behind any of those names.
 

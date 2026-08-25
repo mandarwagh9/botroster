@@ -1,0 +1,30 @@
+[package]
+name = "botroster-agent"
+version.workspace = true
+description = "BOTROSTER agent loop: drives a model against tools reached through the hub"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+botroster-proto = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+futures-util = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+botrosterd = { path = "../botrosterd" }
+botroster-guest = { path = "../botroster-guest" }
+tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true

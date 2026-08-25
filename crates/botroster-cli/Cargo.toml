@@ -1,0 +1,41 @@
+[package]
+name = "botroster-cli"
+version.workspace = true
+description = "BOTROSTER command-line client"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "botroster"
+path = "src/main.rs"
+
+[dependencies]
+botroster-agent = { workspace = true }
+chrono = { workspace = true }
+toml = { workspace = true }
+serde = { workspace = true }
+botroster-bots = { workspace = true }
+botroster-proto = { workspace = true }
+botroster-store = { workspace = true }
+botrosterd = { path = "../botrosterd" }
+botroster-guest = { path = "../botroster-guest" }
+tracing = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+futures-util = { workspace = true }
+tokio = { workspace = true }
+tracing-subscriber = { workspace = true }
+agent-client-protocol = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+botroster-guest = { path = "../botroster-guest" }
+
+[lints]
+workspace = true

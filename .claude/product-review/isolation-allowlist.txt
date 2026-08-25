@@ -17,20 +17,20 @@
 # --- Denials. These lines exist to say the property is ABSENT, which is the behaviour we want. ---
 a VM or a container. `fs.*` resolves against the workspace root	README.md states plainly that the guest is neither, then names what actually does the refusing. This is the sentence the gate exists to protect, not a violation of it.
 
-# --- Descriptions of the REFERENCE product, not of OPENBOT. -------------------------------------
-runs inside the sandboxed VM. What is **not** published	Describes xai-workspace-server inside Grok Bot's VM. Accurate about them, and the same sentence goes on to say the gap is what OPENBOT is.
+# --- Descriptions of the REFERENCE product, not of BOTROSTER. -------------------------------------
+runs inside the sandboxed VM. What is **not** published	Describes xai-workspace-server inside Grok Bot's VM. Accurate about them, and the same sentence goes on to say the gap is what BOTROSTER is.
 the `devbox` sandbox	Describes a published Grok Bot profile, and the line itself opens "Status: design decision, not observed fact".
 
 # --- The word naming something other than process containment. ----------------------------------
 permissions / sandbox formats: which are **Claude Code compatible**	Names a configuration file format. PROVENANCE.md 1 records formats as interfaces adopted for compatibility.
 Put a Bot's coat on a container	A DOM element in main.js. Nothing to do with process isolation.
 
-# --- Properties OPENBOT genuinely has, or states as unbuilt future work. -------------------------
-hypervisor-agnostic so a container today and a microVM later	Marked as the design of openbot-store, and CLAUDE.md's "What does not exist yet" says the hypervisor backend is absent. Reads as a plan, not a claim of today.
+# --- Properties BOTROSTER genuinely has, or states as unbuilt future work. -------------------------
+hypervisor-agnostic so a container today and a microVM later	Marked as the design of botroster-store, and CLAUDE.md's "What does not exist yet" says the hypervisor backend is absent. Reads as a plan, not a claim of today.
 **Firecracker / Cloud Hypervisor microVM** | ✅ **target.** Real isolation	A ranked table of candidate runtimes. "target" is the column that says this is not built.
-which is the boundary §11.2 and `openbot-guest/tests/isolation.rs`	Names the credential boundary and the test that enforces it. That boundary is real.
+which is the boundary §11.2 and `botroster-guest/tests/isolation.rs`	Names the credential boundary and the test that enforces it. That boundary is real.
 **Credential isolation under real conditions.**	The guest having no code path to the credential store is true today and enforced by isolation.rs. A different property from process containment, and the stronger one.
-`crates/openbot-guest/tests/isolation.rs` walks the workspace's own dependency	Cites the enforcing test. Enforcement, not a claim.
+`crates/botroster-guest/tests/isolation.rs` walks the workspace's own dependency	Cites the enforcing test. Enforcement, not a claim.
 
 # ================================================================================================
 # Rust source. Added when the scan was widened past prose, after the Guest & Tools review found
@@ -50,7 +50,7 @@ not a VM and not a container. So the premise was false	browser.rs explaining why
 # Every row below is about the browser sandboxing its own renderer. Nothing here is a claim about
 # the guest being contained; that is the distinction the file now turns on, so the rows are kept
 # narrow deliberately rather than exempting the file.
-no-sandbox	The Chrome flag itself, and the OPENBOT_BROWSER_NO_SANDBOX variable that now gates it.
+no-sandbox	The Chrome flag itself, and the BOTROSTER_BROWSER_NO_SANDBOX variable that now gates it.
 no_sandbox	The Rust identifiers for the same: parse_no_sandbox, no_sandbox_requested, the chrome_args parameter.
 NO_SANDBOX	The environment variable name in prose and in tests.
 Chrome's own sandbox	Names whose sandbox is meant. The whole point of the correction was that it is Chrome's and not ours.
@@ -64,6 +64,8 @@ turns_the_sandbox_off	Test name for the variable parsing.
 
 # --- The word naming something else entirely. ----------------------------------------------------
 point cron, systemd or a container scheduler at	Deployment tooling in a --help string. Nothing to do with confinement.
-will run the guest (a container or a microVM) once one exists	openbot-store describing a runtime that does not exist yet, in the future tense, and saying so in the same sentence.
+will run the guest (a container or a microVM) once one exists	botroster-store describing a runtime that does not exist yet, in the future tense, and saying so in the same sentence.
 a container scheduler at this rather than baking a daemon into the CLI	The `routine tick` doc comment, quoted in up.rs to record that the new timer is one of those schedulers rather than an overturning of that decision. Deployment tooling.
-`crates/openbot-guest/tests/isolation.rs` panics with "the guest can now	The `shell_env` doc comment in tools.rs quoting that test's own message, to explain which half of the claim the environment allow-list closes and which half it does not. The quote is the thing being corrected, not a claim.
+`crates/botroster-guest/tests/isolation.rs` panics with "the guest can now	The `shell_env` doc comment in tools.rs quoting that test's own message, to explain which half of the claim the environment allow-list closes and which half it does not. The quote is the thing being corrected, not a claim.
+**It is not isolation from a program running as this user.** Such a	`Hello::token` saying outright what the hub token does not defend, so nobody reads a shared secret as a boundary. The sentence the gate exists to protect, not a violation of it.
+isolation it does not have.	The same doc comment, citing CLAUDE.md's rule while denying the claim. A denial, quoting the rule that forbids the assertion.

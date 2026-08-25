@@ -195,7 +195,7 @@ async function approvalInvariants(ctx, origin) {
       const d = document.getElementById("dialog");
       return { text: d.innerText, buttons: [...d.querySelectorAll("button")].map((b) => b.textContent.trim()) };
     })()`);
-    for (const needle of ["cargo test --workspace", "openbot-workspace"]) {
+    for (const needle of ["cargo test --workspace", "botroster-workspace"]) {
       if (!shown.text.includes(needle)) bad.push(`the dialog does not show the argument ${JSON.stringify(needle)} before the choices`);
     }
 

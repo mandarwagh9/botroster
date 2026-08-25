@@ -23,7 +23,7 @@ scores 0.
 
 Note this is partly a data gap: `roster` returns `{id, name, title, description, hidden,
 messages}`. Presentation can render a status it is given, but something has to give it one.
-`crates/openbot-desktop` is writable presentation-layer; `openbotd` is not. Scope the fix to
+`crates/botroster-desktop` is writable presentation-layer; `botrosterd` is not. Scope the fix to
 what the window can already know (open session, pending approval count, routine paused) and
 file the rest.
 
@@ -105,7 +105,7 @@ unattended.
 
 LOOP.md section 3 says Escape and click-outside resolve to refuse. The shipped behaviour is
 that Escape does nothing to an approval, pinned by
-`crates/openbot-app/tests/page.rs::escape_closes_a_panel_but_never_an_approval`. Both fail
+`crates/botroster-app/tests/page.rs::escape_closes_a_panel_but_never_an_approval`. Both fail
 closed. Decided at launch: keep shipped, do not touch the test. **Operator decision** on
 which is actually wanted.
 
@@ -145,14 +145,14 @@ see the blindness note at the end, which is the most important line in this sect
 **Launch to a Bot producing visible work: unreachable on a fresh install.**
 
 Not a large number. Not a bad number. There is no path. Verified against the installed
-binary at `C:\Users\Mandar\AppData\Local\OPENBOT\openbot.exe`, not inferred:
+binary at `C:\Users\Mandar\AppData\Local\BOTROSTER\botroster.exe`, not inferred:
 
 ```
-$ openbot.exe acp --home "%USERPROFILE%\.openbot"
+$ botroster.exe acp --home "%USERPROFILE%\.botroster"
 Error: no usable model: no model configured.          exit 1
 ```
 
-`~/.openbot` has `bots/` and `volumes/` but no `config.toml`. With a config but no key it
+`~/.botroster` has `bots/` and `volumes/` but no `config.toml`. With a config but no key it
 still exits 1 (`$XAI_API_KEY is not set`). With both it exits 0 and the handshake path is
 clear. So J2 needs **two** things a fresh install does not have, and **neither is settable
 anywhere in the window**: `Settings` is `#rules-btn`, it lives inside `#workspace`, and
@@ -164,7 +164,7 @@ Counted honestly, the current path to first work is:
 | | Action | Where |
 |---|---|---|
 | 1 | find the runtime binary | file explorer |
-| 2 | `openbot config set --model … --api-key-env …` | **a terminal, outside the app** |
+| 2 | `botroster config set --model … --api-key-env …` | **a terminal, outside the app** |
 | 3 | `setx XAI_API_KEY …` | **a terminal, outside the app** |
 | 4 | restart the app so it inherits the variable | outside the app |
 | 5 | Connect | J2 |
@@ -188,7 +188,7 @@ number every J1–J5 change must not increase.
 
 - **Job:** orient, and get to a working state.
 - **Actions to complete:** 1 (Connect) — but see J2; it does not complete.
-- **Eye lands on:** the OPENBOT mark and wordmark, then three path fields. The fields are
+- **Eye lands on:** the BOTROSTER mark and wordmark, then three path fields. The fields are
   the visual weight of the screen.
 - **Will try and cannot:** set a model or a key; run the demo; find out what a Bot is
   before committing. Nothing on this frame mentions that a model is required.
@@ -202,7 +202,7 @@ number every J1–J5 change must not increase.
 - **Actions:** 1, and on a fresh install it fails.
 - **Eye lands on:** the error line under the fields.
 - **Will try and cannot:** understand the failure. The message is
-  `openbot acp ended before the handshake` — a protocol event standing in for a
+  `botroster acp ended before the handshake` — a protocol event standing in for a
   configuration fact the child process stated plainly on stderr and the window discarded.
 - **Says why if stuck:** **no, and it has the answer in hand.** `engine.rs:673` returns the
   generic string; the spawned task is `JoinHandle<Result<(), acp::Error>>` and the SDK
@@ -294,7 +294,7 @@ established by running the shipped binary, not by looking at pictures of the app
 ### B11 — J2 reported a protocol event instead of the configuration fact
 `done 3665cb8` · J2 · rubric 12
 
-`Engine::connect` discarded the child's stderr and said "openbot acp ended before the
+`Engine::connect` discarded the child's stderr and said "botroster acp ended before the
 handshake". WHAT and WHY now carried. See MEMORY for why awaiting the task's error does not
 work.
 

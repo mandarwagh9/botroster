@@ -1,7 +1,7 @@
 // Serves the shipped `ui/` with the IPC double spliced in, so the frontend runs
 // in a plain browser with no Rust process behind it.
 //
-// The splice is the same one `crates/openbot-app/tests/page.rs` performs, and
+// The splice is the same one `crates/botroster-app/tests/page.rs` performs, and
 // it reads the same `tauri-stub.js` off disk, so the Rust suite and this
 // harness cannot disagree about what the IPC boundary looks like. Two doubles
 // is that drift twice over.
@@ -17,8 +17,8 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(HERE, "..", "..", "..");
-const UI = join(ROOT, "crates", "openbot-app", "ui");
-const STUB = join(ROOT, "crates", "openbot-app", "tests", "fixture", "tauri-stub.js");
+const UI = join(ROOT, "crates", "botroster-app", "ui");
+const STUB = join(ROOT, "crates", "botroster-app", "tests", "fixture", "tauri-stub.js");
 
 // The marker `page.rs` also asserts on. If the script tag is ever renamed, both
 // harnesses must fail loudly rather than silently serving a page with no stub.

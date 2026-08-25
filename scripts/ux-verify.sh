@@ -6,9 +6,9 @@
 # translation is recorded here:
 #
 #   "frontend typecheck and production build" — there is no TypeScript and no
-#   bundler. `crates/openbot-app/ui/` is three hand-written files served
+#   bundler. `crates/botroster-app/ui/` is three hand-written files served
 #   verbatim by Tauri. The real equivalent is a syntax check on the shipped
-#   script plus `cargo test -p openbot-app --test page`, which drives that
+#   script plus `cargo test -p botroster-app --test page`, which drives that
 #   exact file in a real browser and is where the behaviour is actually pinned.
 #
 #   "bundle size" — the *compressed* byte size of ui/*.{html,js,css} plus any
@@ -40,8 +40,8 @@ step() { printf '\n== %s\n' "$*"; }
 # than five iterations later.
 #
 # Only a binary running *out of this checkout* can hold this build. The first
-# version of this check matched any process named `openbot*`, which blocked the
-# whole gate on the installed app in %LOCALAPPDATA%\OPENBOT — a different file
+# version of this check matched any process named `botroster*`, which blocked the
+# whole gate on the installed app in %LOCALAPPDATA%\BOTROSTER — a different file
 # on a different path that cargo never writes to. A gate that stops the run for
 # something harmless gets switched off, so it matches on the path now.
 step "preflight"
@@ -49,7 +49,7 @@ if command -v powershell >/dev/null 2>&1; then
   win_root=$(pwd -W 2>/dev/null | tr '/' '\\' || true)
   if [ -n "$win_root" ]; then
     held=$(powershell -NoProfile -Command \
-      "Get-Process -Name openbot,openbot-app -ErrorAction SilentlyContinue |
+      "Get-Process -Name botroster,botroster-app -ErrorAction SilentlyContinue |
        Where-Object { \$_.Path -and \$_.Path.StartsWith('$win_root', 'OrdinalIgnoreCase') } |
        ForEach-Object { \$_.Path }" 2>/dev/null | tr -d '\r' | grep . || true)
     if [ -n "$held" ]; then
@@ -59,20 +59,20 @@ if command -v powershell >/dev/null 2>&1; then
     fi
   fi
 fi
-if [ ! -e crates/openbot-app/binaries/openbot-x86_64-pc-windows-msvc.exe ] \
-   && [ -z "$(ls crates/openbot-app/binaries/ 2>/dev/null)" ]; then
+if [ ! -e crates/botroster-app/binaries/botroster-x86_64-pc-windows-msvc.exe ] \
+   && [ -z "$(ls crates/botroster-app/binaries/ 2>/dev/null)" ]; then
   note "FAIL preflight: no sidecar staged; run sh scripts/sidecar.sh"
   exit 1
 fi
 note "ok preflight"
 
 step "rust: check + clippy"
-if cargo check -p openbot-app -p openbot-desktop --tests >/dev/null 2>"$LOOP/.check.log"; then
+if cargo check -p botroster-app -p botroster-desktop --tests >/dev/null 2>"$LOOP/.check.log"; then
   note "ok cargo check"
 else
   note "FAIL cargo check"; tail -30 "$LOOP/.check.log"; fails=$((fails+1))
 fi
-if cargo clippy -p openbot-app -p openbot-desktop --all-targets -- -D warnings >/dev/null 2>"$LOOP/.clippy.log"; then
+if cargo clippy -p botroster-app -p botroster-desktop --all-targets -- -D warnings >/dev/null 2>"$LOOP/.clippy.log"; then
   note "ok clippy"
 else
   note "FAIL clippy"; tail -30 "$LOOP/.clippy.log"; fails=$((fails+1))
@@ -86,7 +86,7 @@ else
 fi
 
 step "frontend: syntax + the shipped-JS browser suite"
-if node --check crates/openbot-app/ui/main.js >/dev/null 2>&1; then
+if node --check crates/botroster-app/ui/main.js >/dev/null 2>&1; then
   note "ok main.js parses"
 else
   note "FAIL main.js does not parse"; fails=$((fails+1))
@@ -99,7 +99,7 @@ fi
 # The page suite is the only thing pinning main.js's approval queue, refusal
 # mapping and credential handling. The loop edits that file, so this runs every
 # iteration despite the cost.
-if cargo test -p openbot-app --test page >"$LOOP/.page.log" 2>&1; then
+if cargo test -p botroster-app --test page >"$LOOP/.page.log" 2>&1; then
   note "ok page suite ($(grep -oE '[0-9]+ passed' "$LOOP/.page.log" | tail -1))"
 else
   note "FAIL page suite"; grep -E "^(test |failures:|---- )" "$LOOP/.page.log" | tail -25; fails=$((fails+1))
@@ -116,10 +116,10 @@ step "bundle size"
 # `-9` pinned, so the number does not move because a different gzip shipped a
 # different default. The fonts are counted as they are: WOFF2 is already
 # compressed and gzipping it again would measure the compressor, not the font.
-bytes=$(cat crates/openbot-app/ui/index.html crates/openbot-app/ui/main.js crates/openbot-app/ui/styles.css 2>/dev/null | gzip -9 | wc -c)
+bytes=$(cat crates/botroster-app/ui/index.html crates/botroster-app/ui/main.js crates/botroster-app/ui/styles.css 2>/dev/null | gzip -9 | wc -c)
 fontbytes=0
-if [ -d crates/openbot-app/ui/fonts ]; then
-  fontbytes=$(find crates/openbot-app/ui/fonts -type f -exec cat {} + 2>/dev/null | wc -c)
+if [ -d crates/botroster-app/ui/fonts ]; then
+  fontbytes=$(find crates/botroster-app/ui/fonts -type f -exec cat {} + 2>/dev/null | wc -c)
 fi
 total=$((bytes + fontbytes))
 if [ -f "$LOOP/.baseline-gzip-bytes" ]; then

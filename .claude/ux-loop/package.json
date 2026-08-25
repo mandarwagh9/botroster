@@ -1,8 +1,8 @@
 {
-  "name": "openbot-ux-loop",
+  "name": "botroster-ux-loop",
   "private": true,
   "type": "module",
-  "description": "Screenshot and gate harness for the overnight UX loop. Deliberately outside crates/openbot-app/ui, which stays npm-free and has no build step.",
+  "description": "Screenshot and gate harness for the overnight UX loop. Deliberately outside crates/botroster-app/ui, which stays npm-free and has no build step.",
   "scripts": {
     "dev:fixture": "node fixture/serve.mjs",
     "shots": "node ../../scripts/ux-shots.mjs",

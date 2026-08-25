@@ -1,4 +1,4 @@
-# OPENBOT overnight UX loop
+# BOTROSTER overnight UX loop
 
 Phase 0 built the harness. Phase 1 is the unattended loop. `DIRECTION.md` and `RUBRIC.md`
 are separate files in this directory and are the authority; this file is the procedure.
@@ -19,7 +19,7 @@ judgement:
    neutral, because colour in this app means status and never emphasis.*
 2. **Escape stays inert on approvals.** Invariant #4 in section 3 below says Escape and
    click-outside resolve to refuse. The shipped behaviour is that Escape never closes an
-   approval at all, pinned by `crates/openbot-app/tests/page.rs`
+   approval at all, pinned by `crates/botroster-app/tests/page.rs`
    (`escape_closes_a_panel_but_never_an_approval`). Both fail closed. The loop **does not
    change this** and does not touch that test; the divergence is filed in BACKLOG.md as
    NEEDS REVIEW.
@@ -57,11 +57,11 @@ Hard rule:
 > Never copy visual identity. No logos, icons, wordmarks, illustrations, fonts, exact color
 > values, exact spacing scales, or animation curves lifted from the reference. No screen that
 > would be recognised as the reference with a different name on it. Extract the principle,
-> then solve it in OPENBOT's own language as defined in DIRECTION.md. If a proposed change
+> then solve it in BOTROSTER's own language as defined in DIRECTION.md. If a proposed change
 > can only be justified as "that is how they do it," reject it.
 
 You are not shipping a cheaper Grok Bot. A clone that looks worse is the weakest possible
-position. OPENBOT has a thesis Grok Bot cannot claim: **it is open, self-hosted, and the gate
+position. BOTROSTER has a thesis Grok Bot cannot claim: **it is open, self-hosted, and the gate
 is in the hub where the agent cannot reach it.** The UI should be the argument for that.
 
 ---
@@ -89,7 +89,7 @@ it. These run in `scripts/ux-verify.sh`:
 - Nothing auto-resolves on timeout. No countdown. No "remember my choice" that spans sessions.
 - The gate is not skippable by keyboard mashing: a single Enter on mount cannot approve.
 
-`crates/openbotd`, `crates/openbot-guest`, and `crates/openbot-proto` are **read-only**.
+`crates/botrosterd`, `crates/botroster-guest`, and `crates/botroster-proto` are **read-only**.
 Presentation only. If a UX improvement requires changing what gets gated, it goes in
 BACKLOG.md for the operator to decide, not into a commit.
 
@@ -105,10 +105,10 @@ protect.
 
 Runs until 06:30 or a stop condition. Branch `ux/overnight-2026-08-20`. Never commit to main.
 
-**WRITABLE:** `crates/openbot-app/**`, `crates/openbot-desktop/**` (presentation layer only),
+**WRITABLE:** `crates/botroster-app/**`, `crates/botroster-desktop/**` (presentation layer only),
 `scripts/ux-*`, `.claude/ux-loop/**`
-**READ-ONLY:** everything else. `crates/openbotd`, `crates/openbot-guest`,
-`crates/openbot-proto` are off limits without exception.
+**READ-ONLY:** everything else. `crates/botrosterd`, `crates/botroster-guest`,
+`crates/botroster-proto` are off limits without exception.
 
 Read before starting: `DIRECTION.md`, `RUBRIC.md`, `MEMORY.md`, `BACKLOG.md`, `BASELINE.md`,
 and the images in `reference/` (interaction lessons only, never visual identity).

@@ -1,4 +1,4 @@
-# OPENBOT design direction
+# BOTROSTER design direction
 
 ## Thesis
 This is a console, not a chat app. Chat is the input method. The product is a set of
@@ -172,7 +172,7 @@ No glassmorphism, no blur. Depth is one hairline and one shadow.
 - **Eyebrows, status labels, column headers:** Martian Mono, 10-11px, uppercase, wide
   tracking (`0.08em`). Used sparingly. It is what makes the console read as instrumentation.
 
-Vendored as WOFF2 under `crates/openbot-app/ui/fonts/`, with a PROVENANCE.md row each. They
+Vendored as WOFF2 under `crates/botroster-app/ui/fonts/`, with a PROVENANCE.md row each. They
 are not fetched at runtime — this is an offline desktop app and a webfont over the network
 would be a request the product should never make. DERIVED fallback stacks:
 

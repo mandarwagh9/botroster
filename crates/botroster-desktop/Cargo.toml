@@ -1,0 +1,27 @@
+[package]
+name = "botroster-desktop"
+version.workspace = true
+description = "BOTROSTER desktop engine: drives the runtime over ACP, owns sessions and approvals"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+agent-client-protocol = { workspace = true }
+# For the ACP `_meta` contract only: `SECRET_META` / `SECRET_PROVIDE` cross a
+# process boundary to `botroster acp`, so they have one definition, not two.
+botroster-proto = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+# The viewer writes its banner to a file rather than a pipe, because a piped
+# stdout is inherited by grandchildren and the reader then never sees EOF.
+tempfile = { workspace = true }
+
+[dev-dependencies]
+botroster-bots = { workspace = true }
+
+[lints]
+workspace = true

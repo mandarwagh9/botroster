@@ -1,0 +1,2015 @@
+/* BOTROSTER desktop client.
+ *
+ * Two surfaces: a roster and one conversation. Everything else (the connect
+ * panel, the approval dialog, the palette, the settings and credential
+ * panels) is transient and sits over them.
+ *
+ * The system, stated once so every rule below follows it rather than
+ * inventing its own:
+ *
+ *   Type      One sans family, one mono. Seven sizes (11 12 13 14 15 17 24)
+ *             and three weights (400 500 600). Body copy in the thread is 15px
+ *             on a 640px measure, because a conversation is read like a
+ *             document and not like a feed.
+ *   Surfaces  Pure grey, zero chroma, four steps (bg, panel, raise, line) in
+ *             both themes through light-dark(). The thread sits on bg; the
+ *             roster on a step darker so the canvas reads as the room.
+ *   Colour    Eight coats a Bot can wear, and one accent. The accent is a
+ *             fill, never a text colour. A Bot's coat appears exactly three
+ *             places: its mark, the open row, and a hairline on its turns.
+ *   Shape     Pills for controls, 12px for rows and chips, 16px for cards.
+ *   Motion    One duration (160ms) and one curve for everything that moves;
+ *             entrances translate 4px and fade; nothing loops. Honours
+ *             prefers-reduced-motion.
+ *
+ * Every text-on-surface pair clears WCAG AA in both themes and the shipped
+ * page is swept for it.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* ── DIRECTION.md is the authority for everything in this block. ──────────
+   *
+   * The names below are DIRECTION's. The shipped stylesheet grew its own
+   * vocabulary (--bg, --ink, --raise) before that document existed, so each of
+   * those is aliased onto the pinned token rather than renamed across two and a
+   * half thousand lines in one commit. The alias is not permanent: a rule gets
+   * the DIRECTION name when a later phase touches it, and this block shrinks.
+   * Renaming everything at once would have made a diff nobody could review and
+   * a bisect nobody could use.
+   */
+
+  /* Pinned. Not to be changed without editing DIRECTION.md in the same commit. */
+  --base: light-dark(#fbfcfd, #0e1116);
+  --raised: light-dark(#f2f5f8, #161b22);
+  --line: light-dark(#dfe5ec, #232b36);
+  --text: light-dark(#10151b, #d6dee8);
+  --muted: light-dark(#55616f, #8593a3);
+
+  /* Status. Three hues, and every one of them means exactly one thing.
+     Amber appears only where a person is blocking progress: if amber is on
+     screen and nothing needs you, that is a bug, not a decoration. */
+  --waiting: light-dark(#8a5100, #f2a649);
+  --live: light-dark(#0e6e66, #4fd1c5);
+  --refused: light-dark(#b23a22, #e5674e);
+
+  /* Status *fills* keep the bright dark-mode hue in both themes. A fill is not
+     read as text, and the amber dot has to stay recognisably amber on white. */
+  --waiting-fill: #f2a649;
+  --live-fill: #4fd1c5;
+  --refused-fill: #e5674e;
+
+  /* DERIVED — the accent is neutral, and this is the load-bearing decision.
+     Colour in this app means status. It never means emphasis. Every hue is
+     already spoken for, so a fourth one for "this is the primary button" would
+     put a colour on screen carrying no state. The accent is therefore the
+     highest-contrast neutral: a fill, never a text colour. */
+  --accent: light-dark(#10151b, #e8eef5);
+  --accent-ink: light-dark(#fbfcfd, #0e1116);
+  --accent-wash: light-dark(rgba(16, 21, 27, 0.08), rgba(232, 238, 245, 0.1));
+
+  /* DERIVED — remaining text tiers. --ghost does not clear AA and carries
+     placeholders and disabled text only; the contrast gate exempts exactly
+     those two cases. A gate failure pointing at --ghost anywhere else is fixed
+     by not using --ghost there, never by lightening the token. */
+  --faint: light-dark(#5f6b7c, #8794a4);
+  --ghost: light-dark(#98a3b1, #5a6675);
+
+  /* DERIVED — surface steps between the two pinned ones. The shipped layout
+     needs four surfaces and DIRECTION pins two, so these interpolate: each is
+     one perceptual step, same hue, no chroma introduced. */
+  --raise: light-dark(#e9eef3, #1c222b);
+  --sidebar: light-dark(#f2f5f8, #0b0e12);
+  --line-soft: light-dark(#e9eef0, #1a2028);
+
+  /* Aliases onto the pinned names. See the note at the top of this block. */
+  --bg: var(--base);
+  --panel: var(--raised);
+  --ink: var(--text);
+
+  /* The three status hues under the names the shipped rules already use. */
+  --danger: var(--refused);
+  --danger-line: light-dark(rgba(178, 58, 34, 0.45), rgba(229, 103, 78, 0.45));
+  --danger-wash: light-dark(rgba(178, 58, 34, 0.12), rgba(229, 103, 78, 0.12));
+  --ok: var(--live);
+  --ok-wash: light-dark(rgba(14, 110, 102, 0.12), rgba(79, 209, 197, 0.12));
+  --warn: var(--waiting);
+  --warn-wash: light-dark(rgba(138, 81, 0, 0.12), rgba(242, 166, 73, 0.12));
+
+  /* DERIVED — depth. No glassmorphism and no blur: depth is one hairline and
+     one shadow, because a console that fakes glass stops reading as an
+     instrument. */
+  --scrim: light-dark(rgba(16, 21, 27, 0.32), rgba(0, 0, 0, 0.6));
+  --shadow: light-dark(0 12px 32px rgba(16, 21, 27, 0.12), 0 16px 40px rgba(0, 0, 0, 0.55));
+  --shadow-soft: light-dark(0 6px 18px rgba(16, 21, 27, 0.08), 0 8px 24px rgba(0, 0, 0, 0.4));
+
+  /* DERIVED — shape. Rounded-everything is banned. A console reads as
+     instrumentation, so the scale is tight and there are no pills. --r-pill
+     keeps its name only because six rules still say it; it is 3px now, which
+     is the point. */
+  --r-0: 0;
+  --r-1: 3px;
+  --r-2: 6px;
+  --r-3: 10px;
+  --r-pill: var(--r-1);
+  --r-chip: var(--r-1);
+  --r-field: var(--r-1);
+  --r-row: var(--r-2);
+  --r-card: var(--r-3);
+  --radius: var(--r-3);
+
+  /* type */
+  --sans: "Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "Commit Mono", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --micro: "Martian Mono", "Geist Sans", ui-sans-serif, system-ui, sans-serif;
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-15: 15px;
+  --fs-17: 17px;
+  --fs-24: 24px;
+
+  /* motion */
+  --t: 160ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* DERIVED — the eight Bot coats. A coat is identity, not status, so it is
+     low-chroma and must never compete with amber, teal or vermilion. All eight
+     sit between 35 and 55 lightness, which is why one value serves both themes
+     where the old coats needed a pair, and none is within 20 degrees of hue of
+     a status colour.
+
+     A coat appears in exactly three places: the Bot's mark, its open roster
+     row, and a hairline on its turns. It is never a page or panel fill and
+     never a text colour. */
+  --coat-0: #6e8fa8;
+  --coat-1: #7c8b6b;
+  --coat-2: #9a7f8e;
+  --coat-3: #55897f;
+  --coat-4: #a08668;
+  --coat-5: #7a82a6;
+  --coat-6: #8e7a6e;
+  --coat-7: #6f947c;
+  /* Dark, not white. The coats are light enough that near-black on them clears
+     AA on all eight; near-white does not, on any of them. */
+  --coat-ink: #10151b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: var(--fs-14) / 1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+#app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.hidden {
+  display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ---------------------------------------------------------------- controls */
+
+button {
+  background: var(--raise);
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  color: var(--ink);
+  padding: 7px 14px;
+  font: inherit;
+  font-size: var(--fs-13);
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    background-color var(--t) var(--ease),
+    border-color var(--t) var(--ease),
+    color var(--t) var(--ease),
+    transform 80ms var(--ease);
+}
+
+button:hover {
+  background: var(--line);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+button.primary:hover {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+
+/* A grant larger than the one the dialog leads with: offered, not pushed. */
+button.quiet {
+  background: var(--raise);
+  color: var(--muted);
+}
+
+button.quiet:hover {
+  background: var(--line);
+  color: var(--ink);
+}
+
+/* Declining reads as a decision, not as the thing the dialog wants pressed. */
+button.danger {
+  background: transparent;
+  border-color: var(--danger-line);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+button.danger:hover {
+  border-color: var(--danger);
+  background: var(--danger-wash);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* A quiet, text-shaped control: roster footer, header actions, dialog links. */
+button.link {
+  background: none;
+  border: none;
+  color: var(--faint);
+  padding: 6px 8px;
+  border-radius: var(--r-chip);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  text-align: left;
+}
+
+button.link:hover {
+  color: var(--ink);
+  background: var(--raise);
+}
+
+input,
+textarea,
+select {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-field);
+  color: var(--ink);
+  padding: 9px 12px;
+  font: inherit;
+  font-size: var(--fs-14);
+  width: 100%;
+  transition: border-color var(--t) var(--ease);
+}
+
+/* The rule above is written for boxes you type into, and a checkbox is not one.
+   It was inheriting `width: 100%` and a text field's padding, which stretched a
+   13px control across its whole grid cell and drew a field-sized border round
+   it — so the thing that looks like an empty text input is the tick box. Caught
+   by `no_dialog_field_is_narrower_than_the_placeholder_in_it`, which measures
+   what each field can show. */
+input[type="checkbox"] {
+  width: auto;
+  flex: none;
+  padding: 0;
+  margin: 0;
+  border-radius: 3px;
+  accent-color: var(--ink);
+}
+
+input:hover,
+textarea:hover,
+select:hover {
+  border-color: var(--faint);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--ghost);
+}
+
+textarea {
+  resize: none;
+}
+
+.error {
+  color: var(--danger);
+  font-size: var(--fs-12);
+  margin: 8px 0 0;
+  min-height: 1em;
+}
+
+/* A failed connect is the most likely first experience this product has, so it
+   is laid out as four things rather than one string: what happened, the
+   runtime's own words for why, what state the machine is in, and the runtime's
+   raw output behind an expander where it reads as evidence instead of as the
+   message. */
+.connect-error {
+  margin: 8px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--danger-line);
+  background: var(--danger-wash);
+  border-radius: var(--r-row);
+}
+
+.ce-what {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+
+/* The runtime's own sentence, monospaced because it is quoted, not written. */
+.ce-why {
+  margin: 5px 0 0;
+  color: var(--danger);
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+}
+
+/* "Nothing started" is the line that stops somebody wondering whether half a
+   job ran. It is quiet because it is reassurance, not news. */
+.ce-safe {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-12);
+}
+
+#connect-error-details {
+  margin-top: 9px;
+}
+
+#connect-error-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: var(--fs-12);
+}
+
+#problem-details {
+  margin-top: 6px;
+}
+
+#problem-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: var(--fs-12);
+}
+
+#connect-error-raw,
+#problem-raw {
+  margin: 7px 0 0;
+  padding: 9px 10px;
+  max-height: 168px;
+  overflow: auto;
+  background: var(--raise);
+  border-radius: var(--r-chip);
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: var(--fs-12);
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+
+/* Said to a screen reader, drawn to nobody. Width and overflow hold the
+   "not drawn" half; clip-path is belt to that pair of braces. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------------------------------------------ icons */
+
+.icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ----------------------------------------------------------------- connect */
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  padding: 26px 28px 28px;
+  margin: auto;
+  width: min(680px, calc(100% - 32px));
+  box-shadow: var(--shadow-soft);
+  animation: rise var(--t) var(--ease) both;
+  /* With the Model section open and a failure showing, the panel is taller
+     than a 800px window. It has to scroll rather than run off the bottom
+     edge — the buttons are down there, and a person who cannot reach Connect
+     is stuck on the first screen. */
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
+.connect-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.connect-head h1 {
+  margin: 0;
+  font-size: var(--fs-13);
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.connect-lede {
+  margin: 0 0 20px;
+  font-size: var(--fs-14);
+  color: var(--muted);
+  line-height: 1.55;
+  max-width: 56ch;
+}
+
+.connect-lede code {
+  font-family: var(--mono);
+  font-size: var(--fs-13);
+  color: var(--ink);
+  background: var(--raise);
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
+.panel h2 {
+  margin: 0 0 18px;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: 96px 1fr auto;
+  gap: 12px 10px;
+  align-items: center;
+}
+
+.fields label {
+  color: var(--faint);
+  font-size: var(--fs-13);
+  text-align: right;
+}
+
+/* `select` as well as `input`: the rule matched only inputs, so a wide select
+   left column 3 free and the *next* field's label flowed up into it, landing
+   "base URL" beside the dialect box. */
+.fields input.wide,
+.fields select.wide {
+  grid-column: 2 / 4;
+}
+
+/* `.fields label` right-aligns every label so the column reads as a column,
+   which is exactly wrong for a label wrapping its own control: the box would
+   be pushed away from the words describing it, and the two would read as
+   unrelated. This one is a row, not a column entry. */
+.fields label.check {
+  grid-column: 2 / 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fields button {
+  padding: 8px 12px;
+  border-radius: var(--r-field);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+/* --------------------------------------------------------------- workspace */
+
+.workspace {
+  flex: 1;
+  display: grid;
+  /* Roster, conversation, computer. The third column is the product's whole
+     argument, so it holds a column of its own rather than a button.
+
+     Collapsing narrows the column; it never removes the rail from the tree.
+     An iframe that is unmounted and remounted is a fresh navigation, so a
+     rail that came and went would restart the viewer — and stop a computer
+     somebody is using — every time it was tidied out of the way. */
+  grid-template-columns: 248px 1fr 380px;
+  min-height: 0;
+}
+
+.workspace:has(#rail.collapsed) {
+  grid-template-columns: 248px 1fr 40px;
+}
+
+.roster {
+  background: var(--sidebar);
+  border-right: 1px solid var(--line-soft);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 10px 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.roster-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px 14px;
+}
+
+.roster-head h1 {
+  margin: 0;
+  font-size: var(--fs-13);
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+/* The product mark: a rounded square in the accent. A Bot's mark is a circle
+   in a coat; the two shapes tell the product from its teammates. */
+.mark {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  background: var(--accent);
+  border-radius: 7px;
+  font-weight: 700;
+  font-size: var(--fs-12);
+  color: var(--accent-ink);
+}
+
+/* The product mark, as distinct from a Bot's.
+
+   The artwork itself rather than a redrawing of it. A hand-authored SVG
+   would be smaller and would scale, but it would also be a second, subtly
+   different penguin: the one in the taskbar and the one in the window
+   would not match, and a brand mark that disagrees with itself is worse
+   than a heavier one. Encoded once here rather than inline at each of the
+   three places it appears, so the bytes are paid for once.
+
+   48px for a 24px box, so it stays sharp on a 2x display. Quantised to 48
+   colours, which is indistinguishable from the full-colour resize at 6x
+   zoom and about a third of the size.
+
+   Longhands, not the `background` shorthand: `.mark` sets a background
+   colour and the shorthand here would reset properties this rule has no
+   opinion about. The artwork brings its own ground, so the accent fill
+   underneath it is turned off rather than left to show at the edges. */
+.mark.product {
+  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAMAAABg3Am1AAAAkFBMVEX///79/f37/Pv6+vr5+fn2+Pf09fXx8vPu7/Lr7O/o6uzm5uvh5OfZ3ODPztmlnMFyZpZMQm1MQHI/QEg+P0g+P0dwPe5vPe1uPeY9Pkc9PkY8PUZwPO5vPO5vPO1wPOxvPOxvPOtuPO1vO+1vO+xuO+1uO+xuO+tuOuxpNOtKN4E6O0M1Nj8vMDkpKjIbGyUMRpJ7AAAEeElEQVR42lWViXKzOgyFDWFfDIxZhiX8FAiBMdD3f7t7JEh7qzaBOPp8tJmIcXw+n/SC9VU1juPr9aR3uqELPjx57YUvX4t4Pbuue5Zd+cdAd8++x6XCXdn1z7KqsPB6iVdHvl1ZkV//Q/R0W/VV3/cds1jAa4ICPnd9f62Aq9iTHXnx+exvg04/LmKdnvTN9OItbpSvU//Xqn5YFgKu7149b4vb7ge7jTYjG/sbqHDD2w2MAuQNfv0ncu6X13QBE9+zHsCF4RfZBxj7ma7LPBOwcBDDPyoNV2ognWn6yeA3neHKgaoyrNuvrVTVaeYIu+l/2Y8MlCU5wye5DDoE/fs3cFITovsRo5gFnBMZeab42MOTSflFewwcByIfefuBiEGU0jMN07TIHg/TMJjyZbltA/WWEmbfK4tB2Kbjuo5t2+RuAmADEydQocDuQaDqLgA8zwPg/CIswkxUbmtFZcLGAMf5FyDiRm4ZYoRAYOU8Iw2uwABgFr7/F0Em5s3g3y+3fzMMqWB36gSAm2DkjwxUhJEwAWCmwFDW4CL+Ip8CkAgRw0DIwKMREOF/dG6CkcdVMybQjok1FhEGQRB6FhphCAuM8ycZJsqtGqh/wwWEYWBFSZpmaSKtx53/JXVXzGaiG24g8v1EnWxHJg2IeO7VbmHbFNdDRBspzCSyiMiPs3NvGzJ9nolhO4YtoZgmsRCOxUSylQsfh3EUQazOoqnrpika3e5nGkdJdgumMRMPwym3YSGFeRBhdhZtocgAaQ2189BN27Z6P48EBApClVqWFcAiUuyvLisKFtl1qzUBWh8nE5bpltu8riv1odHsn8O7UEXTtOTbck5AjkOajm3ZkKgArO9F7Jri4VfBGGVDltckcmYmdcWItvl9AbrlcBC7ylXOBJTqmlHKQxo4LpZZbl/rgqCEbnj37+/vnXSuzXMQiK8giVR4aCKlTTGRQotY9A3kV70oNiwdRdsemUW9NyQD70GgIE19A3muPlarE0sKgPJpWh5euaJO7zeAuqjVfgGqRlGpajkDp6rbXYUujfEDRwk5rABQFAZ0rrTOMqX2I0d0P4BPgGtwYZcVZW1rxHJ8HyrXSlq2G8lUFx+gPjLHp5NiAljQOaEweFQT+sMk+K6NZ1q6K3UgaVUXZ2oGdLhMySEtIjkxNzUbAD+OozCyEsjlO6imOaQd0HG0YszfMq8iyI5WY1prlEirhIDAJYVruo7M9ekUe06EGqFQeCjuOw0PS+g2wzlIUn13AwKJTYfY952wAvBeRewlx35NXFPn7X4c+8495+E6U/YH4IblipgAgNgPmmWGam5eUeeYQfQi9YKQTn1wAxi+OI59SYf0g7AUJrUtMEe+H4ZRRIQH4Ov9tQgJIorwGDjY/YM1CE4nHrwjAlAIVhgmISUhgUwynEgMxnXWkIpKpRvdRkC8LP0NEBH7ER4VijyRNoqVxG5A2h/CldtAv0cMXEjkB5GU9DsnZeR7UXzZDTiSnrGokpS/CHfNR6Oij/cHiEKHZ2ld/wOo8tKGMzaPYgAAAABJRU5ErkJggg==");
+  background-size: cover;
+  background-position: center;
+  background-color: transparent;
+}
+
+/* A Bot's own mark: its coat, filled, with its initial. --coat is set by
+   markEl from the Bot's id, one of eight. Held by
+   every_coat_a_bot_can_wear_is_legible. */
+.bot-mark {
+  --coat: var(--coat-0);
+  background: var(--coat);
+  border: 0;
+  border-radius: 999px;
+  color: var(--coat-ink);
+  width: 24px;
+  height: 24px;
+  font-size: var(--fs-11);
+  flex: 0 0 auto;
+}
+
+.new-bot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  margin-bottom: 14px;
+  border-radius: var(--r-row);
+  background: var(--raise);
+  color: var(--muted);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  text-align: left;
+}
+
+.new-bot:hover {
+  color: var(--ink);
+  background: var(--line);
+}
+
+.new-bot span[aria-hidden] {
+  font-size: var(--fs-15);
+  line-height: 1;
+  /* Inherits, rather than a dimmer tier of its own: the glyph is half of the
+     affordance, and a lighter one measured 4.42 against the sidebar in the
+     light theme, under AA for text this size. */
+}
+
+.roster-section {
+  margin: 14px 10px 6px;
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.roster-empty {
+  margin: 4px 10px 12px;
+  font-size: var(--fs-13);
+  color: var(--faint);
+  line-height: 1.5;
+}
+
+.bots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.bots li {
+  margin: 0;
+}
+
+.bot {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  row-gap: 0;
+  align-items: center;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--r-row);
+  padding: 8px 10px;
+  font-weight: 400;
+  transition: background-color var(--t) var(--ease);
+}
+
+.bot .bot-mark {
+  grid-row: 1 / 3;
+  width: 22px;
+  height: 22px;
+}
+
+.bot > :not(.bot-mark) {
+  grid-column: 2;
+}
+
+.bot:hover {
+  background: var(--raise);
+}
+
+/* The open conversation wears its coat, faintly. Not the accent: that is for
+   the one control that commits, and a selection is not that. */
+.bot.open {
+  background: color-mix(in srgb, var(--coat, var(--faint)) 12%, transparent);
+}
+
+.bot-name {
+  font-size: var(--fs-13);
+  font-weight: 500;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.35;
+}
+
+.bot.open .bot-name,
+.bot:hover .bot-name {
+  color: var(--ink);
+}
+
+.bot-sub,
+.bot-hidden {
+  color: var(--faint);
+  font-size: var(--fs-12);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.35;
+}
+
+.roster-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+.roster-foot .link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--r-chip);
+}
+
+.roster-error {
+  margin: 8px 10px 0;
+}
+
+/* ------------------------------------------------------------ conversation */
+
+.conversation {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg);
+}
+
+.convo-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 24px;
+  height: 52px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.who {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.who #bot-mark {
+  display: flex;
+  align-self: center;
+}
+
+.who h2 {
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.bot-title {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.convo-head .link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  font-size: var(--fs-12);
+}
+
+
+/* The connection pill. Semantic ink on its wash; the dot carries the state. */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 8px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  background: var(--raise);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+/* Being connected is the least interesting fact on the screen, and it was
+   wearing a filled wash in the corner of every surface — competing for the eye
+   with whatever the Bot was actually doing. It keeps its dot, because "am I
+   connected" still has to be answerable at a glance, and gives up the fill. */
+.status.connected {
+  background: transparent;
+  color: var(--faint);
+}
+
+.status.connected::before {
+  background: var(--ok);
+}
+
+/* A Bot working is a live state, not a request for a person. This was amber,
+   which is the one colour reserved for "somebody is blocking progress", so a
+   Bot quietly getting on with its job raised the same signal as a Bot stuck
+   waiting on you — and it pulsed, which made it the loudest thing on the
+   screen. Now it reads as live, and amber is left to mean one thing. */
+.status.busy {
+  background: var(--ok-wash);
+  color: var(--ok);
+}
+
+.status.busy::before {
+  animation: pulse 1.2s var(--ease) infinite;
+}
+
+.status.error {
+  background: var(--danger-wash);
+  color: var(--danger);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.no-computer {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 16px 24px 0;
+  padding: 12px 14px;
+  border-radius: var(--r-row);
+  background: var(--warn-wash);
+  color: var(--ink);
+  font-size: var(--fs-13);
+  line-height: 1.5;
+}
+
+.no-computer code {
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+}
+
+.no-computer .why {
+  display: block;
+  color: var(--muted);
+}
+
+.no-computer button {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* The thread. A document, not a feed: one column, a reading measure, and the
+   Bot's words as ordinary body copy. */
+.log {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 32px 24px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+/* A short thread sits against the composer rather than stranded at the top
+   with a screen of nothing under it. `margin-top: auto` on the first line does
+   it without `justify-content: flex-end`, which in a scrolling flex column
+   makes the top of a long thread unreachable. When the thread is long enough
+   to overflow there is no free space, the auto margin resolves to zero, and
+   this has no effect at all. */
+.log > .msg:first-child {
+  /* Beats `.msg.user`'s own top margin, which is why this is not `> *`. */
+  margin-top: auto;
+}
+
+.no-bot {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 24px;
+}
+
+/* The first screen on an empty home: one idea and one thing to do. */
+.no-bot-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 380px;
+  text-align: center;
+  animation: rise var(--t) var(--ease) both;
+}
+
+.no-bot-card .mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  font-size: var(--fs-15);
+  margin-bottom: 6px;
+}
+
+.no-bot-card h2 {
+  margin: 0;
+  font-size: var(--fs-17);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.no-bot-card p {
+  margin: 0;
+  font-size: var(--fs-14);
+  color: var(--faint);
+  line-height: 1.55;
+}
+
+.msg {
+  width: min(640px, 100%);
+  font-size: var(--fs-15);
+  line-height: 1.65;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  animation: rise var(--t) var(--ease) both;
+}
+
+/* Entrances move more than they fade: a surface that starts fully transparent
+   reads as slow and is, for a few frames, not there. */
+@keyframes rise {
+  from { opacity: 0.6; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* The person's turn: a quiet block on a hairline in the Bot's coat. It is the
+   one place the coat touches the thread, and it says whose thread this is. */
+.msg.user {
+  margin: 20px 0 8px;
+  padding: 2px 0 2px 16px;
+  border-left: 2px solid color-mix(in srgb, var(--coat, var(--line)) 70%, transparent);
+  color: var(--muted);
+}
+
+/* The turn is running and nothing has come back yet. On the live hairline,
+   because teal already means "working" in this window and a state this common
+   must not introduce a fourth thing a colour can mean. */
+.msg.pending {
+  display: flex;
+  align-items: baseline;
+  margin: 8px 0;
+  padding: 2px 0 2px 16px;
+  border-left: 2px solid var(--live);
+  color: var(--faint);
+  font-size: var(--fs-13);
+}
+
+.msg.agent {
+  margin: 8px 0;
+}
+
+.msg.thought {
+  margin: 6px 0;
+  color: var(--faint);
+  font-size: var(--fs-14);
+  font-style: italic;
+}
+
+/* How many approvals are blocking a person, held in the chrome.
+ *
+ * Amber, because this is the one thing amber means in this product: a person is
+ * blocking progress. It is a fill rather than text so the hue stays recognisably
+ * amber on both themes, which is why the status fills keep their bright value
+ * in light mode while status *text* is re-picked.
+ *
+ * A button rather than a label: the only useful thing to do with the knowledge
+ * that something is waiting is to go and look at it. */
+.waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: var(--waiting-fill);
+  color: #10151b;
+  font-family: var(--micro);
+  font-size: var(--fs-11);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  animation: rise var(--t) var(--ease) both;
+}
+
+.waiting:hover {
+  filter: brightness(1.06);
+}
+
+.waiting:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* A tool step is one row: a mark that carries its state, a verb phrase, the
+   detail that arrives with the result, and how long it took. Quiet by design:
+   activity is context for the conversation, not the conversation.
+
+   The row opens. The raw call and its result used to live only on the element's
+   `title`, which is a tooltip: it cannot be selected, cannot be copied, and
+   vanishes the moment the pointer moves. That is the wrong home for the one
+   piece of text somebody debugging actually needs, so the record now expands
+   underneath the row and can be selected like any other text. */
+.msg.tool {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  align-self: flex-start;
+  margin: 4px 0 4px calc(50% - 320px);
+  max-width: min(640px, 100%);
+  animation: rise var(--t) var(--ease) both;
+}
+
+.step-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 10px 4px 8px;
+  border-radius: var(--r-1);
+  background: transparent;
+  border: 1px solid transparent;
+  font-family: var(--sans);
+  font-size: var(--fs-13);
+  color: var(--faint);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+  transition: background-color var(--t) var(--ease);
+}
+
+.step-head:hover {
+  background: var(--panel);
+}
+
+/* The focus ring is the row, not the text inside it: the whole row is the
+   control, and a ring around a verb would say otherwise. */
+.step-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* The raw record. Mono because it is a record and not prose, and selectable
+   because being able to paste it into an issue is the entire point. */
+.step-raw {
+  margin: 2px 0 2px 8px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--line);
+  background: var(--panel);
+  border-radius: var(--r-1);
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  line-height: 1.55;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.step-mark {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  position: relative;
+}
+
+/* Running: a thin ring, turning. */
+.step-mark[data-state="running"] {
+  border: 1.5px solid var(--line);
+  border-top-color: var(--faint);
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Done: a tick in the ok ink. */
+.step-mark[data-state="ok"] {
+  background: var(--ok-wash);
+}
+
+.step-mark[data-state="ok"]::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 2.5px;
+  width: 3.5px;
+  height: 6.5px;
+  border: solid var(--ok);
+  border-width: 0 1.8px 1.8px 0;
+  transform: rotate(45deg);
+}
+
+/* Failed: a cross in the danger ink. */
+/* Ran, and nobody knows how it ended. Deliberately neither the tick nor the
+   cross: a hollow ring on the warn wash, because this is the one step state
+   that wants a person to look at it. It does not spin — the spinner means
+   "still happening", which is the thing this is not. */
+.step-mark[data-state="unknown"] {
+  background: var(--warn-wash);
+  border: 1.5px dashed var(--warn);
+}
+
+.step-mark[data-state="failed"] {
+  background: var(--danger-wash);
+}
+
+.step-mark[data-state="failed"]::before,
+.step-mark[data-state="failed"]::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 3px;
+  width: 1.8px;
+  height: 8px;
+  background: var(--danger);
+  border-radius: 1px;
+}
+
+.step-mark[data-state="failed"]::before { transform: rotate(45deg); }
+.step-mark[data-state="failed"]::after { transform: rotate(-45deg); }
+
+.step-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.step-verb {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.step-object {
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.step-detail {
+  color: var(--faint);
+}
+
+/* How long the step took, held at the right edge of the row.
+ *
+ * A column, not another middle-dot clause: durations are the one value on this
+ * row a person scans down rather than reads across, and a ragged one cannot be
+ * scanned. Tabular figures so 8ms and 88ms occupy the same width and the column
+ * does not shimmer as a run proceeds. Mono, because it is a measurement. */
+.step-dur {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.step-detail::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--ghost);
+}
+
+.msg.tool.failed .step-detail {
+  color: var(--danger);
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+}
+
+/* The word that says a step is in flight — "running" — is the answer to "what
+   is the Bot doing right now", so it cannot be the least legible text on the
+   screen. It was `--ghost`, which the system reserves for placeholders and
+   disabled text and which does not clear AA: measured 2.95:1 dark and 2.79:1
+   light against the thread background. `--muted` clears it with headroom. */
+.step-state {
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  color: var(--muted);
+}
+
+.step-state:empty {
+  display: none;
+}
+
+/* The unknown-tool fallback keeps the name in mono. */
+.msg.tool .tool-name {
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* A progress or result line that arrived with no open step to join: shown
+   as a quiet mono line so nothing is lost. */
+.msg.progress,
+.msg.result {
+  display: inline-flex;
+  align-items: baseline;
+  align-self: flex-start;
+  margin: 0 0 4px calc(50% - 300px);
+  min-height: 22px;
+  max-width: min(600px, 100%);
+  padding: 2px 8px;
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.msg.result > span:not(.sr-only),
+.msg.progress > span:not(.sr-only) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Below a reading measure the tool rows hug the left edge like everything. */
+@media (max-width: 720px) {
+  .msg.tool,
+  .msg.progress,
+  .msg.result {
+    margin-left: 0;
+  }
+}
+
+/* ---------------------------------------------------------------- composer */
+
+/* The composer is the focal object on the screen: a raised card with the
+   field and its actions inside one surface. */
+.composer {
+  display: flex;
+  flex-direction: column;
+  align-self: center;
+  width: min(640px, calc(100% - 48px));
+  margin: 8px 0 24px;
+  padding: 10px 10px 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-soft);
+  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
+}
+
+.composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  box-shadow: var(--shadow-soft), 0 0 0 3px var(--accent-wash);
+}
+
+.composer textarea {
+  background: transparent;
+  border: 0;
+  padding: 6px 8px 4px;
+  font-size: var(--fs-15);
+  line-height: 1.5;
+  min-height: 44px;
+  max-height: 40vh;
+}
+
+.composer textarea:focus-visible {
+  outline: none;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.composer-actions .spacer {
+  flex: 1;
+}
+
+.composer-actions .link {
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.composer-actions .primary {
+  padding: 7px 14px;
+}
+
+.mentions {
+  position: relative;
+  padding: 0 0 8px;
+}
+
+.mentions-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-row);
+  box-shadow: var(--shadow-soft);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.mentions-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--r-chip);
+  font-size: var(--fs-13);
+  cursor: pointer;
+}
+
+.mentions-item.at,
+.mentions-item:hover {
+  background: var(--raise);
+}
+
+.mentions-what {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mentions-kind {
+  font-size: var(--fs-11);
+  color: var(--faint);
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--raise);
+}
+
+.mentions-note {
+  margin: 6px 4px 0;
+  font-size: var(--fs-12);
+  color: var(--faint);
+}
+
+.attached {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attached li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 10px;
+  border-radius: var(--r-pill);
+  background: var(--raise);
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+.attached button {
+  background: none;
+  border: 0;
+  color: var(--faint);
+  cursor: pointer;
+  font-size: var(--fs-14);
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.attached button:hover {
+  color: var(--ink);
+}
+
+/* --------------------------------------------------------- computer panel */
+
+.rail {
+  background: var(--sidebar);
+  border-left: 1px solid var(--line-soft);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Expanded: a lightbox over this window, not a second window.
+
+   `position: fixed` rather than moving the rail anywhere in the tree. An
+   iframe that is unmounted and remounted is a fresh navigation, so reparenting
+   it into an overlay would restart the viewer — the same reason collapsing
+   narrows a column instead of removing the rail. The whole of expanding is two
+   rules, for exactly that reason. */
+.rail.expanded {
+  position: fixed;
+  inset: 32px;
+  z-index: 40;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow);
+}
+
+.workspace:has(#rail.expanded)::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: color-mix(in srgb, #000 52%, transparent);
+}
+
+.rail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 12px 10px;
+}
+
+.rail-head h3 {
+  margin: 0;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rail-head .link {
+  margin-left: auto;
+}
+
+/* Collapsed: the heading and the body go, the control stays. A collapsed rail
+   that cannot be reopened is a rail that has been deleted. */
+.rail.collapsed .rail-head h3,
+.rail.collapsed .computer-panel {
+  display: none;
+}
+
+.rail.collapsed .rail-head {
+  padding: 14px 4px;
+}
+
+.computer-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  margin: 0 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--panel);
+}
+
+/* No computer running. The ordinary state of a fresh window, so it is quiet
+   type on the panel rather than anything that reads as a failure. */
+/* Centred in the panel rather than pinned to the top of it. The rail is as
+   tall as the window, so top-aligned copy left six hundred pixels of empty
+   box under three lines of text — which reads as something that failed to
+   load rather than as space held for a computer. */
+.computer-idle {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px 20px;
+  color: var(--muted);
+  font-size: var(--fs-13);
+  line-height: 1.55;
+}
+
+.computer-idle p {
+  margin: 0;
+}
+
+/* Two controls on one settings row. `dd` is the value column of a definition
+   list, so they sit at its end rather than needing a layout of their own. */
+.row-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.rail-foot {
+  padding: 10px 12px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.rail-foot .hint {
+  margin: 0 0 8px;
+}
+
+#computer-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: #000;
+}
+
+/* ----------------------------------------------------------------- dialogs */
+
+.dialog {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--scrim);
+  z-index: 10;
+  animation: fade var(--t) var(--ease) both;
+}
+
+@keyframes fade {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}
+
+/* An approval outranks a panel somebody opened themselves. */
+#dialog {
+  z-index: 20;
+}
+
+.dialog-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  padding: 22px 24px;
+  width: min(560px, calc(100% - 32px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  box-shadow: var(--shadow);
+  animation: rise var(--t) var(--ease) both;
+}
+
+.dialog-card h2 {
+  margin: 0 0 6px;
+  font-size: var(--fs-17);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.dialog-card h2.section {
+  margin: 22px 0 8px;
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.section.first {
+  margin-top: 0;
+}
+
+/* A sentence, set as one: the tool's name is data and gets code, the reason is
+   prose and gets prose. */
+.dialog-tool {
+  margin: 0 0 14px;
+  font-size: var(--fs-13);
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.dialog-tool code {
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+  color: var(--ink);
+  background: var(--raise);
+  padding: 1px 7px;
+  border-radius: 6px;
+}
+
+.dialog-fields {
+  margin: 14px 0 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 12px;
+  align-items: baseline;
+  font-size: var(--fs-13);
+}
+
+.dialog-fields dt {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.dialog-fields dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-13);
+  overflow-wrap: anywhere;
+}
+
+.dialog-fields dd.long {
+  grid-column: 1 / -1;
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: var(--r-chip);
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+  white-space: pre-wrap;
+  font-size: var(--fs-12);
+  line-height: 1.5;
+}
+
+.dialog-fields dt:has(+ dd.long) {
+  grid-column: 1 / -1;
+  text-align: left;
+}
+
+.dialog-fields .forget {
+  margin-left: 10px;
+  padding: 2px 9px;
+  font-size: var(--fs-11);
+}
+
+.dialog-secret {
+  margin: 4px 0 0;
+}
+
+.dialog-secret-why {
+  margin: 0 0 14px;
+  font-size: var(--fs-14);
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.dialog-secret label {
+  display: block;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  color: var(--faint);
+  margin-bottom: 6px;
+}
+
+.dialog-secret input {
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+}
+
+.dialog-secret-note {
+  margin: 8px 0 0;
+  font-size: var(--fs-12);
+  color: var(--faint);
+}
+
+.dialog-options {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.dialog-queue:not(:empty) {
+  margin: 12px 0 0;
+  font-size: var(--fs-12);
+  color: var(--faint);
+}
+
+.dialog-queue:empty {
+  display: none;
+}
+
+/* The palette sits high rather than centred: the eye is already at the top
+   of a list it is about to filter. */
+.palette-card {
+  align-self: start;
+  margin-top: 12vh;
+  padding: 10px;
+}
+
+.palette-card input {
+  border: 0;
+  background: transparent;
+  font-size: var(--fs-15);
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  border-radius: 0;
+}
+
+.palette-card input:focus-visible {
+  outline: none;
+}
+
+.palette-results {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--r-chip);
+  font-size: var(--fs-13);
+  cursor: pointer;
+}
+
+.palette-item.at,
+.palette-item:hover {
+  background: var(--raise);
+}
+
+.palette-kind {
+  margin-left: auto;
+  font-size: var(--fs-11);
+  color: var(--faint);
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--raise);
+}
+
+.palette-card .hint {
+  margin: 8px 10px 4px;
+}
+
+.dup-form,
+.secret-form {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.rule-form {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    "action tool   tool"
+    "reason reason add";
+  gap: 8px;
+}
+
+.rule-form select {
+  grid-area: action;
+  width: auto;
+}
+
+.rule-form #rule-tool {
+  grid-area: tool;
+}
+
+.rule-form #rule-reason {
+  grid-area: reason;
+}
+
+/* Six controls, where `.rule-form`'s grid has areas for four — and it is a
+   grid, so the first attempt at this (flex-wrap) did nothing at all and the
+   task field came out 163px wide against a placeholder needing 339. The
+   placeholder is the instruction, so the field gets the room rather than the
+   sentence getting shorter.
+
+   `.rule-form select` puts every select in the `action` area, which is right
+   for one select and wrong for two; each control names its own area here. */
+.routine-form {
+  /* Three rows, because six controls on two do not fit a dialog this wide.
+
+     One row was tried and the owner select — sized by its widest Bot name —
+     took the room `1fr` would have given the field beside it, so "What this
+     routine is called" shipped reading "What th". A floor on that column fixed
+     the field and pushed the time and the button off the right edge instead:
+     `1fr` is a share of what is left, and a floor is a demand, and neither is
+     the same as a layout that fits.
+
+     So each row carries what belongs together: who and what it is called, then
+     when, then what it does and the button that makes it. */
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    "bot  name name"
+    "when at   ."
+    "task task add";
+}
+
+/* Grid items are `auto` sized by default, which lets a long placeholder push
+   a column past the dialog rather than scrolling inside its own field. */
+.routine-form > * {
+  min-width: 0;
+}
+
+.routine-form select#routine-bot {
+  grid-area: bot;
+}
+
+.routine-form #routine-name {
+  grid-area: name;
+}
+
+.routine-form select#routine-when {
+  grid-area: when;
+  width: auto;
+}
+
+.routine-form #routine-at {
+  grid-area: at;
+  width: auto;
+}
+
+.routine-form #routine-task {
+  grid-area: task;
+}
+
+.routine-form button {
+  grid-area: add;
+}
+
+.rule-form button {
+  grid-area: add;
+}
+
+.rule-allow {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.rule-stop {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.rule-why {
+  color: var(--faint);
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.field > span {
+  font-size: var(--fs-12);
+  font-weight: 500;
+  color: var(--faint);
+}
+
+/* The Model disclosure. Quiet by default: most connects do not need it, and it
+   is only opened by hand or by a failure that it can fix. */
+#model-setup {
+  margin-top: 14px;
+}
+
+#model-setup > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: var(--fs-13);
+  margin-bottom: 12px;
+}
+
+#model-setup[open] > summary {
+  color: var(--ink);
+}
+
+.model-hint {
+  margin-top: 12px;
+}
+
+/* Bypass, while it is on. Amber, and consistent with the rule rather than an
+   exception to it: this is a state where a person's judgement is being skipped,
+   which is exactly what amber is reserved to mean. It should be impossible to
+   have this on and not know. */
+.link.bypassing {
+  color: var(--warn);
+  background: var(--warn-wash);
+  font-weight: 600;
+}
+
+.link.bypassing:hover {
+  color: var(--warn);
+  background: var(--warn-wash);
+  filter: brightness(1.06);
+}
+
+/* The record of a call nobody was asked about. It reads as a log entry rather
+   than as a message, because that is what it is: the arguments the approval
+   card would have shown, kept where they can be found afterwards. */
+.msg.auto-approved {
+  display: grid;
+  gap: 2px;
+  margin: 10px 0;
+  padding: 9px 12px;
+  border: 1px dashed var(--warn);
+  border-radius: var(--r-row);
+  background: var(--warn-wash);
+}
+
+.auto-head {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--warn);
+}
+
+.auto-tool {
+  font-family: var(--mono);
+  font-size: var(--fs-12);
+  color: var(--ink);
+}
+
+.auto-field {
+  font-family: var(--mono);
+  font-size: var(--fs-11);
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.auto-grant {
+  font-size: var(--fs-11);
+  color: var(--faint);
+}

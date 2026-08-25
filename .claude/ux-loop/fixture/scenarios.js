@@ -74,7 +74,7 @@ S.s01 = {
   what: "cold start, nothing configured, no model key",
   pre() {
     window.__replies.connected = false;
-    window.__replies.default_home = "C:\\Users\\you\\.openbot";
+    window.__replies.default_home = "C:\\Users\\you\\.botroster";
   },
   async post() {},
 };
@@ -82,18 +82,18 @@ S.s01 = {
 // ---------------------------------------------------------------- s02
 S.s02 = {
   what: "connect panel, runtime binary not found",
-  // The wording is `found()` in openbot-desktop/src/engine.rs verbatim. A
+  // The wording is `found()` in botroster-desktop/src/engine.rs verbatim. A
   // paraphrase here would have the loop designing against a sentence the
   // product never says — which is exactly how run 1 filed a defect against an
   // approval dialog that does not exist.
   pre() {
     window.__replies.connected = false;
-    window.__replies.default_home = "C:\\Users\\you\\.openbot";
+    window.__replies.default_home = "C:\\Users\\you\\.botroster";
     window.__throw = {
       connect:
-        "`openbot` is not on your PATH. OPENBOT drives the openbot runtime and " +
-        "does not include it: install it with `cargo install --path crates/openbot-cli`, " +
-        "or point the openbot binary field at the executable",
+        "`botroster` is not on your PATH. BOTROSTER drives the botroster runtime and " +
+        "does not include it: install it with `cargo install --path crates/botroster-cli`, " +
+        "or point the botroster binary field at the executable",
     };
   },
   async post() {
@@ -106,18 +106,18 @@ S.s02 = {
 S.s13 = {
   what: "connect fails because no model is configured — the real first run",
   // The state every fresh install actually starts in, and the one no scenario
-  // covered: `~/.openbot` exists with bots/ and volumes/ but no config.toml,
-  // so `openbot acp` refuses to start. Verified against the installed binary;
+  // covered: `~/.botroster` exists with bots/ and volumes/ but no config.toml,
+  // so `botroster acp` refuses to start. Verified against the installed binary;
   // this is its stderr, and the framing line the engine now puts in front of
   // it.
   pre() {
     window.__replies.connected = false;
-    window.__replies.default_home = "C:\\Users\\you\\.openbot";
+    window.__replies.default_home = "C:\\Users\\you\\.botroster";
     window.__throw = {
       connect:
-        "openbot acp did not start.\n" +
+        "botroster acp did not start.\n" +
         "Error: no usable model: no model configured.\n" +
-        "Set one once:  openbot config set --model grok-4-5\n" +
+        "Set one once:  botroster config set --model grok-4-5\n" +
         "Or per run:    --model grok-4-5\n" +
         "Or check a deployment without a key:  --demo",
     };
@@ -209,7 +209,7 @@ S.s06 = {
       "permission-request",
       ask("a1", "shell.exec: runs a command on the computer", [
         { name: "command", value: "cargo test --workspace", long: false },
-        { name: "cwd", value: "/home/you/.openbot/volumes/openbot-workspace", long: false },
+        { name: "cwd", value: "/home/you/.botroster/volumes/botroster-workspace", long: false },
         { name: "timeout", value: "600s", long: false },
       ])
     );
@@ -430,7 +430,7 @@ S.s14 = {
       "permission-request",
       ask("a1", "shell.exec: runs a command on the computer", [
         { name: "command", value: "cargo test --workspace", long: false },
-        { name: "cwd", value: "/home/you/.openbot/volumes/openbot-workspace", long: false },
+        { name: "cwd", value: "/home/you/.botroster/volumes/botroster-workspace", long: false },
       ])
     );
     await until(() => Boolean(document.querySelector(".msg.auto-approved")));

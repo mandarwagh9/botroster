@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-OPENBOT: persistent, named AI teammates sharing one durable computer. Rust workspace, nine crates,
+BOTROSTER: persistent, named AI teammates sharing one durable computer. Rust workspace, nine crates,
 a Tauri desktop client. Apache-2.0.
 
 `README.md` is the product and the crate layout. `docs/SPEC.md` is the architecture, numbered by
@@ -12,19 +12,19 @@ to. This file is only the things you would otherwise learn by breaking something
 Run the sidecar script before the first build of a fresh clone:
 
 ```sh
-sh scripts/sidecar.sh          # builds openbot-cli, stages it at crates/openbot-app/binaries/
+sh scripts/sidecar.sh          # builds botroster-cli, stages it at crates/botroster-app/binaries/
 cargo build --workspace
 ```
 
 The desktop client ships the runtime as a Tauri sidecar, and Tauri's build script wants that binary
-to exist before `openbot-app` will compile. Skip it and the workspace fails at a build script with
+to exist before `botroster-app` will compile. Skip it and the workspace fails at a build script with
 an error that says nothing about the cause. The staged binary is an artefact and is not committed.
 
-On Windows, stop any running `openbot.exe` or `openbot-app.exe` first. A held binary makes
+On Windows, stop any running `botroster.exe` or `botroster-app.exe` first. A held binary makes
 `cargo build` fail with "Access is denied", and the tests then run against the stale one — which
 looks like a passing suite and is not.
 
-Building `openbot-app` on Linux also needs the WebKitGTK development libraries; `.github/workflows/ci.yml`
+Building `botroster-app` on Linux also needs the WebKitGTK development libraries; `.github/workflows/ci.yml`
 installs the set that works.
 
 ## Before you push
@@ -41,10 +41,10 @@ true. `unsafe_code` is `forbid` across the workspace.
 
 ## Two invariants that do not weaken
 
-- **`openbot-guest` must never be able to reach `openbotd`.** The credential store is
-  `openbotd::secrets`, and the guest stays away from it by not depending on `openbotd` at all —
+- **`botroster-guest` must never be able to reach `botrosterd`.** The credential store is
+  `botrosterd::secrets`, and the guest stays away from it by not depending on `botrosterd` at all —
   there is no dependency cycle preventing that edge, so a test walks the manifests instead:
-  `crates/openbot-guest/tests/isolation.rs`.
+  `crates/botroster-guest/tests/isolation.rs`.
 - **The policy gate stays in the hub.** The agent asks the hub to call a tool; the hub evaluates
   policy, asks the person if it must, and only then forwards to the guest. Moving the gate into the
   agent lets the thing being gated remove the gate.
@@ -57,32 +57,32 @@ Files named `*_live.rs` run against a real hub, a real guest, real files, a real
 and a real HTTP model endpoint. They are slow because they are real. Do not replace one with a mock
 to make it fast — that deletes the coverage the file exists for.
 
-The browser suite skips politely when no Chromium is installed. CI sets `OPENBOT_REQUIRE_BROWSER=1`
+The browser suite skips politely when no Chromium is installed. CI sets `BOTROSTER_REQUIRE_BROWSER=1`
 so a missing browser fails instead, because a skip that reads as a pass is worse than a failure.
-Set `OPENBOT_BROWSER` to point at a browser outside the usual install locations.
+Set `BOTROSTER_BROWSER` to point at a browser outside the usual install locations.
 
-`crates/openbot-cli/tests/readme.rs` parses the shell fences out of `README.md` and checks that
-every `openbot ...` line names a real subcommand and real long flags. **Editing the README can
+`crates/botroster-cli/tests/readme.rs` parses the shell fences out of `README.md` and checks that
+every `botroster ...` line names a real subcommand and real long flags. **Editing the README can
 therefore fail `cargo test`.** It checks commands, not prose — which is how the stale
-`./openbot-data` sentence above survived.
+`./botroster-data` sentence above survived.
 
 ## Where things are
 
-- `crates/openbot-app/ui/` — the desktop UI is `index.html`, `main.js` and `styles.css`. Vanilla:
+- `crates/botroster-app/ui/` — the desktop UI is `index.html`, `main.js` and `styles.css`. Vanilla:
   no bundler, no framework, no npm, no build step. Keep it that way.
-- `crates/openbot-app/gen/` — Tauri regenerates it. Gitignored, never edited.
-- `/openbot-data` — local state from running the binaries inside the checkout. Gitignored.
-- The default home is `~/.openbot` (`%USERPROFILE%\.openbot` on Windows), resolved once in
-  `openbot_proto::default_home` so the CLI and the window cannot disagree about where a person's
-  Bots are. They did once. It falls back to `./openbot-data` only when `HOME`/`USERPROFILE` is
+- `crates/botroster-app/gen/` — Tauri regenerates it. Gitignored, never edited.
+- `/botroster-data` — local state from running the binaries inside the checkout. Gitignored.
+- The default home is `~/.botroster` (`%USERPROFILE%\.botroster` on Windows), resolved once in
+  `botroster_proto::default_home` so the CLI and the window cannot disagree about where a person's
+  Bots are. They did once. It falls back to `./botroster-data` only when `HOME`/`USERPROFILE` is
   absent or empty.
-- `$OPENBOT_HOME` overrides it. Runtime knobs are `OPENBOT_*` environment variables throughout.
+- `$BOTROSTER_HOME` overrides it. Runtime knobs are `BOTROSTER_*` environment variables throughout.
 
 ## Provenance
 
 Nothing enters this repository without a row in `PROVENANCE.md` mapping it to its upstream and
-licence. OPENBOT is an independent implementation of the shape xAI shipped as Grok Bot — not a
-fork, and containing none of their code. `openbot-proto` was reimplemented from the published
+licence. BOTROSTER is an independent implementation of the shape xAI shipped as Grok Bot — not a
+fork, and containing none of their code. `botroster-proto` was reimplemented from the published
 types. This is the project's entire legal position; treat the table as a gate, not a formality.
 
 ## How this repository is written

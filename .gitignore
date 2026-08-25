@@ -5,13 +5,13 @@
 # what makes a clone build the same dependency graph as CI.
 
 # Local state from running the binaries in the checkout.
-/openbot-data
+/botroster-data
 *.log
 .DS_Store
 Thumbs.db
 
 # Tauri regenerates these at build time.
-crates/openbot-app/gen/
+crates/botroster-app/gen/
 
 # The overnight UX loop. Competitor reference captures and iteration shots stay
 # local: origin is public, and this project's position is that it contains none

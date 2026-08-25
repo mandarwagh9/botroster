@@ -19,7 +19,7 @@ the thing it guards and confirm it notices.** Writing the gate and watching it p
 proves nothing at all — a gate that always passes and a gate that works look identical there.
 
 1. **`cargo tree` includes dev-dependencies.** So the isolation pre-check reported that
-   `openbot-agent` depends on `openbotd` — true of its test profile, false of everything that ships.
+   `botroster-agent` depends on `botrosterd` — true of its test profile, false of everything that ships.
    `-e normal,build` is the definition `isolation.rs` already uses, and matching an existing test's
    definition beats inventing a second one. *Generalises:* the first false alarm is what decides
    whether a gate survives its first month.
@@ -59,9 +59,9 @@ twice, in two different gates, in the same run.
 `an_explicit_browser_path_is_honoured_when_it_exists` was flagged as assertion-free. It was — but
 the interesting part was underneath. It called the search twice, discarded both results, and set an
 override to a path that does *not* exist, so the one case its name promises was never exercised.
-Following the name into the code found the real defect: a missing `OPENBOT_BROWSER` returned `None`,
+Following the name into the code found the real defect: a missing `BOTROSTER_BROWSER` returned `None`,
 indistinguishable from nothing-installed, and the caller rendered that as *"no Chromium-family
-browser found; set OPENBOT_BROWSER to its path"* — advice to do the thing the user had just done,
+browser found; set BOTROSTER_BROWSER to its path"* — advice to do the thing the user had just done,
 with no hint the variable was even read. CLAUDE.md sends people to that variable when their browser
 is somewhere unusual, so it landed on the users already having the hardest time.
 
@@ -124,7 +124,7 @@ future author will read, not only at what a user will read.**
 
 ### The end-to-end run caught a bug in my own fix
 
-The timer built `openbot --home H routine tick`. `--home` is not a global argument, so clap rejects
+The timer built `botroster --home H routine tick`. `--home` is not a global argument, so clap rejects
 it in the root position and the child would have errored once a minute forever. **The unit test
 passed** — it asserted the joined argument list contained `"--home H"`, which was true and
 irrelevant.
@@ -286,7 +286,7 @@ shows up on someone else's input is the worst kind**, and it is free to avoid at
   indentation. Backslash continuations written through a script keep getting lost; **write those
   strings on one line** and let rustfmt leave them alone.
 - `every_tool_the_computer_offers_has_a_rule_of_its_own` catches a new tool with no policy rule.
-  Adding a tool means adding a rule in `openbotd/src/policy.rs` in the same change.
+  Adding a tool means adding a rule in `botrosterd/src/policy.rs` in the same change.
 
 ---
 
@@ -333,7 +333,7 @@ once is usually copied twice.
 
 ### The protocol already had the answer
 
-`WorkspaceUnavailable`, `Disconnect`, `InFlightCancelled` were defined in `openbot-proto` and had
+`WorkspaceUnavailable`, `Disconnect`, `InFlightCancelled` were defined in `botroster-proto` and had
 **no uses anywhere outside that crate**. Someone designed the failure vocabulary and nothing ever
 spoke it.
 
@@ -388,7 +388,7 @@ reopened the door.
 ### Verify what a security change breaks before shipping it
 
 The Origin check would have broken the product if anything legitimate connected from a page. It does
-not: the viewer is `browser → HTTP → openbot watch → WebSocket → hub`, and the Tauri UI has no
+not: the viewer is `browser → HTTP → botroster watch → WebSocket → hub`, and the Tauri UI has no
 `WebSocket` at all. **Checking that took two greps and was the difference between a fix and an
 outage.**
 
@@ -404,7 +404,7 @@ re-export what the allow-list withheld and can `cd` out of the only confinement 
 
 ### Correct the claim when you can only fix half
 
-The environment vector is closed; `cat ~/.openbot/secrets.json` still works. `isolation.rs` now says
+The environment vector is closed; `cat ~/.botroster/secrets.json` still works. `isolation.rs` now says
 which half is which instead of claiming both. **A partial fix plus an accurate claim is a good
 state; a partial fix under the old claim is worse than no fix**, because it reads as done.
 
@@ -421,7 +421,7 @@ component died.
 
 ## Iteration 8 — 2026-08-25. One command, one terminal.
 
-**Closed:** T3-1 / F-CD3 / F-CD5. `openbot run` starts a computer when one is not already up.
+**Closed:** T3-1 / F-CD3 / F-CD5. `botroster run` starts a computer when one is not already up.
 
 ### The ranking was measuring the wrong thing
 
@@ -463,7 +463,7 @@ the first. Together they pin the mechanism.
 
 ## Iteration 9 — 2026-08-25. Zero-config onboarding.
 
-**Built:** `discover` (local model probing), bare `openbot` as a welcome screen, `run` adopting a
+**Built:** `discover` (local model probing), bare `botroster` as a welcome screen, `run` adopting a
 local model when none is configured. Direction chosen by the operator over three alternatives.
 
 ### The product could do the thing it was asking the person to do
@@ -476,7 +476,7 @@ could the program find out?** Often the answer is a 700ms loopback probe.
 
 Adopting a model for a run is a convenience. Writing to `config.toml` is a decision, and the person
 may have opened that terminal meaning to use something else. So: `run` borrows and prints the
-command that would make it permanent; bare `openbot` asks and saves, and only at a terminal.
+command that would make it permanent; bare `botroster` asks and saves, and only at a terminal.
 **The surface where a decision is being made is the surface that may persist one.**
 
 ### Discovery must never override an explicit choice
@@ -493,7 +493,7 @@ needs to meet the reasoning, not infer it.
 ### `--home` is per-subcommand, so a no-subcommand path has none
 
 The welcome screen read `DEFAULT_HOME` and reported "no model configured" about a home that had one,
-because `OPENBOT_HOME` reaches other commands through clap's `env =` on their own `--home` flag.
+because `BOTROSTER_HOME` reaches other commands through clap's `env =` on their own `--home` flag.
 **Any new code path that skips the subcommand layer has to re-resolve everything that layer was
 providing.**
 
@@ -501,5 +501,5 @@ providing.**
 
 - `messages.rs` also rejects a *run of spaces inside a single-line literal* — it cannot tell column
   alignment from a wrapped line. Build aligned columns with `{:<24}` padding instead.
-- `readme.rs` rejects a documented command with no subcommand. Correct until bare `openbot` became
+- `readme.rs` rejects a documented command with no subcommand. Correct until bare `botroster` became
   one; the test was taught, not weakened.

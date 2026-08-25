@@ -1,5 +1,5 @@
 #!/bin/sh
-# The OPENBOT product review gate.
+# The BOTROSTER product review gate.
 #
 # scripts/ux-verify.sh is the frontend gate and stays the authority there; this is the
 # whole-product one and it *calls* that script rather than reimplementing any of it. Two gates
@@ -47,12 +47,12 @@ fail() {
 
 echo "== structural invariants =="
 
-# G1/G2. CLAUDE.md: "openbot-guest must never be able to reach openbotd", and "the policy gate
+# G1/G2. CLAUDE.md: "botroster-guest must never be able to reach botrosterd", and "the policy gate
 # stays in the hub". Both are properties of the dependency graph.
 #
-# crates/openbot-guest/tests/isolation.rs is the authority on this and is a better test than
+# crates/botroster-guest/tests/isolation.rs is the authority on this and is a better test than
 # anything this script could be: it walks the workspace manifests, follows indirect routes,
-# resolves renamed packages (`store = { package = "openbotd" }` would defeat a name check), and
+# resolves renamed packages (`store = { package = "botrosterd" }` would defeat a name check), and
 # pins the location of the credential store so that moving secrets into a crate the guest already
 # depends on fails there rather than being discovered later. What follows is a cheap pre-check
 # that catches the direct case in a third of a second without a build - not a second opinion.
@@ -60,17 +60,17 @@ echo "== structural invariants =="
 # It matches that test's definition of reachable and must keep matching it: normal and build
 # dependencies count, dev-dependencies do not. A test may use anything it likes; the invariant is
 # about the shipped binary. The first version of this check used a bare `cargo tree`, which
-# includes dev-dependencies, and duly reported that openbot-agent depends on openbotd - true of
+# includes dev-dependencies, and duly reported that botroster-agent depends on botrosterd - true of
 # its test profile, false of everything that ships, and exactly the kind of alarm that gets a
 # gate switched off within a week.
-for crate in openbot-guest openbot-agent; do
+for crate in botroster-guest botroster-agent; do
 	tree=$(cargo tree -p "$crate" -e normal,build --prefix none 2>/dev/null)
 	if [ -z "$tree" ]; then
 		fail "$crate: cargo tree produced nothing, so isolation is unverified"
-	elif printf '%s' "$tree" | grep -q '^openbotd '; then
-		fail "$crate ships a dependency on openbotd" "$(printf '%s' "$tree" | grep '^openbotd ')"
+	elif printf '%s' "$tree" | grep -q '^botrosterd '; then
+		fail "$crate ships a dependency on botrosterd" "$(printf '%s' "$tree" | grep '^botrosterd ')"
 	else
-		pass "$crate cannot reach openbotd"
+		pass "$crate cannot reach botrosterd"
 	fi
 done
 
@@ -78,7 +78,7 @@ done
 # it is a silent weakening no other gate would notice, because a suite with one fewer test still
 # passes. Both of its load-bearing cases are named here, so that gutting the file while leaving
 # it in place fails too.
-iso=crates/openbot-guest/tests/isolation.rs
+iso=crates/botroster-guest/tests/isolation.rs
 if [ ! -f "$iso" ]; then
 	fail "$iso is gone, and it is what enforces the credential boundary"
 elif ! grep -q 'fn the_guest_cannot_reach_the_credential_store' "$iso" \
@@ -111,14 +111,14 @@ echo "== honesty gates =="
 # A plain word scan is unusable here and the first version proved it: five hits, all legitimate.
 # Prose about the *reference* product's sandbox is accurate and belongs in the architecture spec,
 # "sandbox" also names a config file format, "credential isolation" is a different property that
-# OPENBOT genuinely has, and a Bot's coat goes on a DOM container. A gate that cries wolf five
+# BOTROSTER genuinely has, and a Bot's coat goes on a DOM container. A gate that cries wolf five
 # times out of five gets deleted, so this one is a ratchet instead: every occurrence reviewed and
 # recorded in isolation-allowlist.txt with the reason it is fine, and anything not on that list
 # fails. The cost is a line of upkeep when the text legitimately changes. The benefit is that a
 # newly written overclaim cannot arrive unnoticed, which the noisy version could not deliver.
 # The scan covers Rust source as well as prose, and that was not the original scope. It read
 # README.md, docs/SPEC.md and the UI only, on the reasoning that shipped *text* is what a user
-# believes. The Guest & Tools review found the hole: `crates/openbot-guest/src/browser.rs` carried
+# believes. The Guest & Tools review found the hole: `crates/botroster-guest/src/browser.rs` carried
 # the comment "the guest is already a sandbox", and it was not idle prose — it was the stated
 # justification for passing `--no-sandbox` to Chrome, switching off the renderer sandbox in the one
 # process that parses pages a model chose. A false claim in a comment had become a live defect,
@@ -129,7 +129,7 @@ echo "== honesty gates =="
 # comments and matched them.
 ALLOW=.claude/product-review/isolation-allowlist.txt
 hits=$(grep -rniE '(sandbox|isolat|virtual machine|container)' \
-	README.md docs/SPEC.md crates/openbot-app/ui/ crates/*/src/ 2>/dev/null || true)
+	README.md docs/SPEC.md crates/botroster-app/ui/ crates/*/src/ 2>/dev/null || true)
 unreviewed=""
 IFS='
 '
@@ -282,7 +282,7 @@ fi
 # are covered by the licence header story; what this catches is the case that actually happened -
 # a binary asset committed with no row, noticed a turn later and only by hand.
 # Coverage is decided by glob-matching each asset against the paths PROVENANCE.md quotes in
-# backticks, so one row can legitimately cover a set (`crates/openbot-app/icons/*`, `docs/openbot-*.png`)
+# backticks, so one row can legitimately cover a set (`crates/botroster-app/icons/*`, `docs/botroster-*.png`)
 # and does so by saying which set.
 #
 # Two earlier versions of this were wrong in opposite directions and both are worth recording. The

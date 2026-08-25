@@ -1,9 +1,9 @@
-# OPENBOT: v0 architecture spec
+# BOTROSTER: v0 architecture spec
 
 An open-source, self-hostable equivalent of Grok Bot: **a team of persistent, named AI teammates
 that share one durable cloud computer.**
 
-> `openbot` is a placeholder name (a OPENBOT is where a flock lives between flights). Whatever it ends
+> `botroster` is a placeholder name (a BOTROSTER is where a flock lives between flights). Whatever it ends
 > up called, it must not use "Grok", "Grok Bot", or xAI/SpaceXAI/Anysphere branding: Apache-2.0 §6
 > grants patent and copyright, explicitly **not** trademark.
 
@@ -20,7 +20,7 @@ Computer Hub: the WebSocket tool-routing fabric with a live production endpoint 
 `wss://computer-hub.grok.com/v1/tools`: *and* the guest-side daemon (`xai-workspace-server`) that
 runs inside the sandboxed VM. What is **not** published is everything that turns a coding CLI into
 Grok Bot: VM provisioning and lifecycle, the multi-Bot layer, routines, approvals policy, the
-credential broker, and the clients. **That gap is `openbot`.** We are not rebuilding an agent; we are
+credential broker, and the clients. **That gap is `botroster`.** We are not rebuilding an agent; we are
 building the cloud and teammate layer on top of one that already exists.
 
 ## 2. Scope
@@ -55,7 +55,7 @@ Each is a real feature; none is on the critical path to a working system.
 └──────────┬────────────────┘
            │ 1. app protocol (WS + JSON, own schema)
 ┌──────────▼──────────────────────────────────────────────┐
-│  CONTROL PLANE  (openbotd)                                 │
+│  CONTROL PLANE  (botrosterd)                                 │
 │  ├ identity / OIDC          ├ bot registry + personas    │
 │  ├ conversation store        ├ routine scheduler         │
 │  ├ approval engine + policy  ├ credential broker ◄── the │
@@ -68,7 +68,7 @@ Each is a real feature; none is on the critical path to a working system.
 │  COMPUTER HUB      │  │  HYPERVISOR / RUNTIME             │
 │  (adopted)         │  │  one guest per user               │
 │  WS · JSON-RPC 2.0 │  │  ┌──────────────────────────────┐ │
-│  routes harness    │  │  │ guest: openbot-workspace-server│ │
+│  routes harness    │  │  │ guest: botroster-workspace-server│ │
 │  ⇄ tool servers    │◄─┼──┤  browser · shell · fs        │ │
 └────────────────────┘  │  │  /workspace (durable)        │ │
                         │  └──────────────────────────────┘ │
@@ -84,7 +84,7 @@ product promise and it is purely a state-management problem.
 
 ### Storage split
 
-> **Built in P3** as `openbot-store`, hypervisor-agnostic so a container today and a microVM later
+> **Built in P3** as `botroster-store`, hypervisor-agnostic so a container today and a microVM later
 > share it. One correction from building it: the layout below says nothing about *how* snapshots
 > are taken, and the obvious answer: hard links: is wrong. A hard link preserves history only if
 > every writer replaces files; `fs::write`, `>` redirects and appends all truncate in place and
@@ -111,10 +111,10 @@ product promise and it is purely a state-management problem.
 `/workspace` is the user-facing path; it lives on the durable volume. Keep that indirection: it
 lets the durable layout change without breaking a single user path.
 
-**This was written and then not done, for the whole of P3 through P7.** `openbot up` ran its guest in
+**This was written and then not done, for the whole of P3 through P7.** `botroster up` ran its guest in
 a plain `./workspace` while the volume sat empty beside it, so the entire storage layer: the thing
 this section specifies and the README lists as built: operated on a directory the product never
-wrote to. `openbot computer status` beside a working agent reported `live 0 files`. Now `up` resolves
+wrote to. `botroster computer status` beside a working agent reported `live 0 files`. Now `up` resolves
 its workspace to `<home>/volumes/<server-id>/current` and holds the volume while it runs, so
 `snapshot`, `restore`, `prune` and the attach check all act on the files the agent is actually
 using. A layer being *built and tested* says nothing about it being *reached*.
@@ -129,13 +129,13 @@ Mirror the three documented operations, because they are correctly factored:
 | `reset` | roll back to a snapshot | rolled back: **but a safety snapshot is taken first, so it is undoable** |
 | `kill` (admin) | destroy the running guest | preserved; next session provisions fresh |
 
-**Status.** `reset` is built, under the name `openbot computer restore`: the table's verb, but the
+**Status.** `reset` is built, under the name `botroster computer restore`: the table's verb, but the
 CLI says what it does to a workspace rather than what it does to a machine. `update`, `recover` and
 `kill` all mean *replace the guest process*, which needs the hypervisor backend to mean anything;
 today's guest is a process you started, so there is nothing here to rebuild. They are pending, not
 missing by oversight.
 
-**Scheduled snapshots are built.** `openbot up` takes one every 30 minutes and keeps 48: a day of
+**Scheduled snapshots are built.** `botroster up` takes one every 30 minutes and keeps 48: a day of
 history, on by default, because a rollback is worth nothing if the only snapshots are the ones
 somebody remembered to take. Retention is keyed on the label the schedule writes, so it trims its
 own and never a snapshot taken by hand: `prune` is the only irreversible operation in this layer,
@@ -170,7 +170,7 @@ Waiting has a deadline, because a command that sits silently is indistinguishabl
 ### Supervision
 The guest daemon runs under a supervisor that:
 - version-probes the daemon binary via a `--capabilities` manifest before trusting it: **the
-  manifest is built** (`openbot-guest --capabilities` prints protocol version, methods and tool ids,
+  manifest is built** (`botroster-guest --capabilities` prints protocol version, methods and tool ids,
   and a build predating the flag exits non-zero, which is the probe); *no supervisor reads it yet,
   because there is no supervisor*. The mismatch it guards against is handled at the other end
   instead: the hub refuses a handshake whose `protocol_version` it does not speak, and: since a
@@ -253,7 +253,7 @@ reply later. Group chats hold 2-6 Bots with `@mention` routing and `@everyone`. 
 owner per stage**: the documented failure mode is duplicate work from parallel handoffs, and that
 is worth encoding as a constraint rather than a guideline.
 
-## 6. Approvals: where OPENBOT diverges
+## 6. Approvals: where BOTROSTER diverges
 
 ### 6.0 Where enforcement lives (decided before P2)
 
@@ -270,7 +270,7 @@ delete.
 
 Consequences, all of which shape the wire protocol rather than the loop:
 
-1. Policy evaluation happens in `openbotd`, against rules stored server-side per account (§6's
+1. Policy evaluation happens in `botrosterd`, against rules stored server-side per account (§6's
    "account-scoped, not machine-scoped": the same reasoning, arrived at twice).
 2. Approval needs a **request/response pair on the wire**, not a local prompt: the hub sends an
    approval request down the harness connection, the harness answers, the hub then proceeds or
@@ -286,7 +286,7 @@ The one thing that stays in the loop is *presentation*: the model should be told
 denied, so it can revise rather than retry blindly. That is the same path a failed tool already
 takes (§ the loop feeds errors back), so it costs nothing new.
 
-Grok Build's `PreToolUse` hook is the natural interception point, and `openbot` keeps the hook
+Grok Build's `PreToolUse` hook is the natural interception point, and `botroster` keeps the hook
 **format** wire-compatible (same JSON, same events, same `{"decision":"deny","reason":…}`) so
 existing Claude Code hooks work.
 
@@ -295,7 +295,7 @@ response lets the tool call proceed. That is defensible for a local dev CLI wher
 watching the terminal. It is the wrong default for an unattended cloud agent holding your Salesforce
 session and your inbox.
 
-> **`openbot` cloud policy is fail-closed on the blocking event.** A hook that times out, crashes, or
+> **`botroster` cloud policy is fail-closed on the blocking event.** A hook that times out, crashes, or
 > returns garbage **denies** the call and surfaces it for review. Per-hook opt-out
 > (`fail_open: true`) exists for hooks that are genuinely advisory. **Built.** A non-zero exit
 > counts as a failure to answer: a command that does not exist would otherwise exit 1 with an empty
@@ -323,7 +323,7 @@ The best idea in the whole design, stated plainly in the enterprise docs: *"Sign
 hosted MCP servers stay with [the] backend, which runs those tool calls on the computer's behalf.
 **The computer never stores those tokens.**"*
 
-`openbot` adopts this as a hard invariant:
+`botroster` adopts this as a hard invariant:
 
 ```
 guest ──"call linear.create_issue"──► hub ──► broker (holds OAuth token) ──► Linear API
@@ -341,14 +341,14 @@ guest ──"call linear.create_issue"──► hub ──► broker (holds OAut
 - Secure-secret entry is a masked field that is **excluded from the transcript and never shown to
   the model**: not a general password manager, and documented as such. The second half is built
   and enforced by the type system: `Secret` has no `Serialize`, so it cannot reach a transcript by
-  accident. The **masked field is a client concern and does not exist yet**: `openbot secret set`
+  accident. The **masked field is a client concern and does not exist yet**: `botroster secret set`
   reads standard input, and says out loud that a value typed at a terminal is visible.
 
 **The unavoidable caveat, stated loudly in the UI:** browser sessions and shell credentials on the
 shared computer *are* accessible to every Bot on that account. Separate Bots are **not** a security
-boundary. Upstream says this; `openbot` must say it louder, because users will assume otherwise.
+boundary. Upstream says this; `botroster` must say it louder, because users will assume otherwise.
 
-**Where `openbot` can be genuinely better:** upstream rejects `localhost` and RFC1918 MCP URLs
+**Where `botroster` can be genuinely better:** upstream rejects `localhost` and RFC1918 MCP URLs
 outright, so self-hosted MCP servers need ngrok or a Cloudflare tunnel. A self-hosted control plane
 sits inside the user's own network and can reach them directly. That is a real advantage over the
 proprietary product, not just parity.
@@ -373,23 +373,23 @@ Routine {
   creation time with an explanatory error, rather than letting users build a noise machine.
 - **Idle policy:** after a long absence, ask whether to keep routines running and **pause them if
   there is no answer.** An unattended agent that keeps spending money while you are on holiday is a
-  bug. **Built:** `openbot routine tick --idle-days` (14 by default). "Somebody is watching" means a
-  openbot command run *at a terminal*: a cron tick reading the routine list is not a person looking
+  bug. **Built:** `botroster routine tick --idle-days` (14 by default). "Somebody is watching" means a
+  botroster command run *at a terminal*: a cron tick reading the routine list is not a person looking
   at it, and counting it as one would disable the guard permanently. An account nobody has ever
   looked at is not treated as an absence, or a cron-only deployment would pause itself on its first
   tick. Resuming is explicit, because a person deciding to start it again *is* the answer the
   policy asks for.
 - Deleting a Bot deletes its routines. Hiding a Bot does **not** pause them: surface that clearly,
-  it is a genuine footgun in the original. **Built:** `openbot bot rm` removes them, and `openbot bot
+  it is a genuine footgun in the original. **Built:** `botroster bot rm` removes them, and `botroster bot
   hide` lists what will go on running and how to pause it. The warning is silent when the Bot has
   nothing scheduled: a warning that fires when there is nothing to warn about is how a real one
   gets ignored.
 
 ## 9. Clients
 
-**Desktop: OPENBOT** (Tauri: Rust backend, web frontend): the control plane and guest daemon are
-Rust, so one toolchain, and Tauri ships far smaller than Electron. "OPENBOT" is the product name for
-the desktop client, chosen by the person paying for the work; the code lives in `crates/openbot-desktop`.
+**Desktop: BOTROSTER** (Tauri: Rust backend, web frontend): the control plane and guest daemon are
+Rust, so one toolchain, and Tauri ships far smaller than Electron. "BOTROSTER" is the product name for
+the desktop client, chosen by the person paying for the work; the code lives in `crates/botroster-desktop`.
 
 The client must do four things the web cannot:
 1. Local command execution under the three-state policy
@@ -419,18 +419,18 @@ The surface, verified against the SDK source rather than prose:
 `max_turn_requests`, `refusal` or `cancelled`. Send `ProtocolVersion::V1`: v2 exists in the schema
 crate but sits behind an `unstable_protocol_v2` feature.
 
-**Openbot is the Agent, and that makes the fs/terminal methods a security decision rather than a
+**Botroster is the Agent, and that makes the fs/terminal methods a security decision rather than a
 backlog item.** Those are *Client* methods: an editor implementing them is offering the agent **the
-user's local disk and shell**, which is the boundary §11.2 and `openbot-guest/tests/isolation.rs`
-exist to defend. Openbot does its own file and command work inside the guest, where the policy engine
+user's local disk and shell**, which is the boundary §11.2 and `botroster-guest/tests/isolation.rs`
+exist to defend. Botroster does its own file and command work inside the guest, where the policy engine
 is.
 
-An earlier draft of this section said OPENBOT "declines them in its `initialize` capabilities". It
+An earlier draft of this section said BOTROSTER "declines them in its `initialize` capabilities". It
 cannot: `fs` and `terminal` are fields of **`ClientCapabilities`**, not the agent's: the client
 advertises what it is willing to do, and the schema's own comment says that determines "which file
-operations the agent can request". There is no field in which OPENBOT can refuse. The posture is
-therefore stronger and entirely on us: **OPENBOT never calls `fs/*` or `terminal/*`, whatever the
-client offers.** A capability OPENBOT declines to use is a promise with nothing enforcing it, so the
+operations the agent can request". There is no field in which BOTROSTER can refuse. The posture is
+therefore stronger and entirely on us: **BOTROSTER never calls `fs/*` or `terminal/*`, whatever the
+client offers.** A capability BOTROSTER declines to use is a promise with nothing enforcing it, so the
 adapter should be tested for the absence of those call sites the way the guest is tested for the
 absence of a path to the credential store.
 
@@ -441,29 +441,29 @@ absence of a path to the credential store.
 picks one*: which fits §6 exactly, provided the layering is kept straight: **`request_permission`
 is how the human is asked; the hub is still what enforces.** A client selecting `allow_always` must
 never be able to satisfy a call that a hub `deny` rule forbids, or the fail-closed inversion in §6
-is decorative. The options OPENBOT offers are therefore derived from policy, not the other way round.
+is decorative. The options BOTROSTER offers are therefore derived from policy, not the other way round.
 V1 has no field for *why* a call needs approval, so our approval reason travels in the reserved
 `_meta` object; v2 adds a proper prompt title and should be used when it stabilises.
 
 **The constraint the transport must be built around: handlers run on the event
 loop.** The SDK says it plainly: "the connection cannot process new messages
-while your handler is running": and for OPENBOT that is not a performance note,
+while your handler is running": and for BOTROSTER that is not a performance note,
 it is a deadlock. A `session/prompt` handler that awaits the turn inline holds
 the loop; the turn asks for approval via `session/request_permission`; the
 client answers; and **the answer can never be read, because the thing waiting
 for it is the thing blocking the reader.** The agent then sits until the hub's
-approval timeout denies the call, and OPENBOT looks broken in a way that has
-nothing to do with openbot.
+approval timeout denies the call, and BOTROSTER looks broken in a way that has
+nothing to do with botroster.
 
 So `session/prompt` must hand the turn to `ConnectionTo::spawn` and return,
 carrying the `Responder` (which takes `self` by value, so it moves) into the
 spawned task to answer later. The event drain that today throws `AgentEvent`s
-away at `openbot-cli/src/main.rs:2059` is where the `session/update` stream
+away at `botroster-cli/src/main.rs:2059` is where the `session/update` stream
 belongs. Written down because the failure mode is a hang with no error, and a
 hang teaches you nothing.
 
 **A suspected integration hazard, which measurement dissolved.** The core crate carries `async-io`,
-`async-process` and `blocking`: the smol family: while OPENBOT is tokio throughout, so this section
+`async-process` and `blocking`: the smol family: while BOTROSTER is tokio throughout, so this section
 first concluded we would need `tokio-util`'s `compat` shim over tokio stdio. Building it says
 otherwise: the crate's own example runs under `#[tokio::main]` and hands `Stdio::new()` straight to
 `connect_to`, and a probe built that way answered a real `initialize` on this machine , 
@@ -480,7 +480,7 @@ what an agent may ask of a client.
 
 What remains true is the version trap: the official `agent-client-protocol-tokio` companion depends
 on `agent-client-protocol` **0.11.1**, a major generation behind the 2.0.0 core. It looks like the
-tokio answer and would pin OPENBOT to an older ACP. **Do not take it**: the core crate is already
+tokio answer and would pin BOTROSTER to an older ACP. **Do not take it**: the core crate is already
 tokio-friendly, which is the thing worth knowing before someone adds the companion to fix a problem
 that is not there.
 
@@ -497,12 +497,12 @@ are driving.
 | **P1** | **Agent loop**: a real harness driving an LLM, executing tool calls through the hub until the task is done | it is an *agent*, not a router | ✅ **done**: both dialects verified against a real HTTP endpoint |
 | **P2** | Approval engine (fail-closed) + policy | it is safe to leave alone | ✅ **done** |
 | **P3** | Durable volume + update/recover/reset + snapshots | "context compounds": the core promise | ◐ **storage layer done**; hypervisor backend pending |
-| **P4** | Browser in the guest, CDP contexts, computer viewer + takeover | it can actually use apps | ✅ **done**: browser, CDP input, `openbot watch`, hub-enforced takeover |
+| **P4** | Browser in the guest, CDP contexts, computer viewer + takeover | it can actually use apps | ✅ **done**: browser, CDP input, `botroster watch`, hub-enforced takeover |
 | **P5** | Multiple Bots, per-Bot contexts, messaging, group chats | it is a *team* | ✅ **done** |
-| **P6** | Credential broker + MCP connectors | it reaches real systems safely | ✅ **done**: broker, connectors, `openbot secret`/`connector` |
+| **P6** | Credential broker + MCP connectors | it reaches real systems safely | ✅ **done**: broker, connectors, `botroster secret`/`connector` |
 | **P7** | Routines: schedules, then events | it works while you sleep | ✅ **done** |
-| **P8** | **ACP agent adapter**: `openbot acp`, speaking the published protocol over stdio | any ACP editor can drive a Bot | ✅ **done**: handshake, sessions bound to Bots, a whole prompt turn streamed to a live client against a real hub |
-| **P9** | **OPENBOT**: desktop client over that same ACP surface | it is a product | ◐ **the window works**: chat streams as the Bot speaks, approvals are answered in a dialog, Stop withdraws pending questions with the turn. **Left:** packaging is unsigned and there is no updater |
+| **P8** | **ACP agent adapter**: `botroster acp`, speaking the published protocol over stdio | any ACP editor can drive a Bot | ✅ **done**: handshake, sessions bound to Bots, a whole prompt turn streamed to a live client against a real hub |
+| **P9** | **BOTROSTER**: desktop client over that same ACP surface | it is a product | ◐ **the window works**: chat streams as the Bot speaks, approvals are answered in a dialog, Stop withdraws pending questions with the turn. **Left:** packaging is unsigned and there is no updater |
 
 Order work by which assumption is riskiest, not by which layer is lowest:
 
@@ -533,17 +533,17 @@ backend developed with no view of itself drifts toward shapes that are awkward t
 > client will, so it doubles as the test of whether the wire format is renderable: and it
 > keeps the product visible from the first working agent instead of the eighth milestone.
 
-**Delivered** (`openbot run --html <path>`). What shipped is a *transcript* view: one self-contained file, no network, no
+**Delivered** (`botroster run --html <path>`). What shipped is a *transcript* view: one self-contained file, no network, no
 build step, rendered from the same `AgentEvent` stream the terminal consumes. A **live** view
-arrived separately in P4 as `openbot watch`, which serves its own loopback HTTP surface rather than
-adding one to `openbotd`: the viewer is a client, and giving the control plane a web server it did
+arrived separately in P4 as `botroster watch`, which serves its own loopback HTTP surface rather than
+adding one to `botrosterd`: the viewer is a client, and giving the control plane a web server it did
 not otherwise need would have been the wrong place to put it. The constraint it
 already enforces is the useful one: if something is visible in the terminal and not in the page,
 the event is missing, not the surface.
 
-The full OPENBOT client: with the approval gate open to the person, so the local execution and
+The full BOTROSTER client: with the approval gate open to the person, so the local execution and
 file transfer §9 lists can hang off it: is P9. The gate itself shipped first: the client asks and
-answers `session/request_permission`, and `openbot acp --demo-tools` plays the tool script so that
+answers `session/request_permission`, and `botroster acp --demo-tools` plays the tool script so that
 surface is exercised without a model.
 
 **Then it was run, which is a different thing from being tested.** Driving the real window through
@@ -565,11 +565,11 @@ work*, which is cheap and disproportionately valuable.
    violate the first time a tool appears to need the token directly. Enforce it structurally: the guest must
    have no code path that can read the credential store.
 
-   *Enforced by:* `crates/openbot-guest/tests/isolation.rs` walks the workspace's own dependency
-   graph and fails if the guest can reach `openbotd` at all. It is aimed at the guest and
-   not at the agent because `openbotd → openbot-bots → openbot-agent` already exists, so an edge back from the
+   *Enforced by:* `crates/botroster-guest/tests/isolation.rs` walks the workspace's own dependency
+   graph and fails if the guest can reach `botrosterd` at all. It is aimed at the guest and
+   not at the agent because `botrosterd → botroster-bots → botroster-agent` already exists, so an edge back from the
    agent would be a dependency cycle and cargo refuses it: that invariant enforces itself. Nothing
-   equivalent protects the guest, because `openbotd` does not depend on it, so the edge would simply
+   equivalent protects the guest, because `botrosterd` does not depend on it, so the edge would simply
    compile. "Structurally" was true of one of the two and assumed of both.
 3. **Computer-use reliability.** Sites break, block datacenter IPs, and expire sessions. Upstream's
    answer is "pause and ask the human", which is correct. Build the pause path first, not last.

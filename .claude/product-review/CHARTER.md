@@ -1,4 +1,4 @@
-# OPENBOT product review
+# BOTROSTER product review
 
 The UX loop in `.claude/ux-loop/` reviewed one axis — how the desktop client looks and behaves —
 and it worked. This is the same instrument aimed at the whole product: the runtime, the agent, the
@@ -12,7 +12,7 @@ a gate with no procedure gets run once, and a procedure with no gate is a docume
 
 ## 0. The rule that overrides the others
 
-> **Does this matter to most people who would use OPENBOT?**
+> **Does this matter to most people who would use BOTROSTER?**
 
 Every finding carries a `reach:` field, and a finding that cannot honestly claim `most users` or
 better needs a P0 severity to survive. This is not a nicety. The failure mode of a thorough review
@@ -32,11 +32,11 @@ Rust source, and the split is deliberately weighted: the two largest crates get 
 
 | Department | Scope | LOC | Report |
 |---|---|---|---|
-| Runtime & Security | `openbotd`, `openbot-store`, `openbot-proto` | ~11.4k | `reports/runtime-security.md` |
-| Agent & Model | `openbot-agent`, `openbot-bots` | ~10.7k | `reports/agent-model.md` |
-| Guest & Tools | `openbot-guest` | ~3.8k | `reports/guest-tools.md` |
-| CLI & DevEx | `openbot-cli`, `README.md`, `CONTRIBUTING.md` | ~14.2k | `reports/cli-devex.md` |
-| Design & Client | `openbot-app`, `openbot-desktop`, the UI | ~14.9k | `reports/design-client.md` |
+| Runtime & Security | `botrosterd`, `botroster-store`, `botroster-proto` | ~11.4k | `reports/runtime-security.md` |
+| Agent & Model | `botroster-agent`, `botroster-bots` | ~10.7k | `reports/agent-model.md` |
+| Guest & Tools | `botroster-guest` | ~3.8k | `reports/guest-tools.md` |
+| CLI & DevEx | `botroster-cli`, `README.md`, `CONTRIBUTING.md` | ~14.2k | `reports/cli-devex.md` |
+| Design & Client | `botroster-app`, `botroster-desktop`, the UI | ~14.9k | `reports/design-client.md` |
 | Product Management | Grok Bot parity, the customization thesis | — | `reports/parity.md` |
 
 A reviewer is a fresh agent with no memory of having written any of it, which is the property that
@@ -82,7 +82,7 @@ The bar is `CONTRIBUTING.md`, unchanged. This system does not get its own:
 - Anything with a face is checked in the shipped binary, not only in a library test.
 - `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`.
 - Nothing enters the repository without a row in `PROVENANCE.md`.
-- Neither structural invariant weakens: the guest cannot reach `openbotd`, and the policy gate stays
+- Neither structural invariant weakens: the guest cannot reach `botrosterd`, and the policy gate stays
   in the hub.
 
 Plus, for this loop: `sh scripts/review.sh` passes. `--full` before anything is pushed.
