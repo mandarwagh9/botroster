@@ -666,6 +666,78 @@ function wearCoat(el, id, name) {
   el.style.setProperty("--coat", `var(--coat-${markOf(id, name).hue})`);
 }
 
+/// The three states anything awaited can be in, and the one rule about them.
+///
+/// **`empty` may only be shown after an answer has arrived.** A list that
+/// paints its "nothing scheduled" line while the read is still in flight is
+/// saying something it does not know, and it is saying it in exactly the words
+/// it would use if it did know. Every one of these calls shells out to an
+/// `openbot` subprocess, so the gap is not theoretical: a person with three
+/// routines and a slow machine read "Nothing scheduled" and believed it.
+///
+/// `failed` is the fourth, and it is the one this window had no way to say at
+/// all. A read that threw left the list blank and the empty line hidden — no
+/// rows, no explanation, nothing to distinguish it from a home with nothing in
+/// it. That is the same lie with a different cause.
+///
+/// The state line is its own element rather than the empty paragraph reworded.
+/// The empty copy is authored prose that carries markup, and a helper that
+/// overwrites and restores it would have to reconstruct that markup.
+function listState(list, stateEl, emptyEl, state, detail) {
+  // Announced through the list itself. A visible "Reading…" line is for the
+  // eye; `aria-busy` is the same fact in the form a screen reader acts on, and
+  // it belongs on the thing that is busy.
+  list.setAttribute("aria-busy", String(state === "pending"));
+  stateEl.className = (state === "failed" ? "error" : "hint") + " list-state";
+  stateEl.textContent = state === "pending" ? "Reading…" : detail || "";
+  show(stateEl, state === "pending" || state === "failed");
+  // Never at the same time as the state line: they are two answers to one
+  // question and at most one of them is true.
+  //
+  // Optional, because two of the lists here decide it themselves. Groups have
+  // no "none yet" line and want none — a home with no groups is the ordinary
+  // case and the section header is simply absent — and the roster's line
+  // depends on whether hidden Bots are being shown, which is a rule this
+  // helper has no business knowing.
+  if (emptyEl) show(emptyEl, state === "empty");
+}
+
+/// Read one list and draw it, saying so throughout, and saying so if it fails.
+///
+/// Each list gets its own call, which is the point. `refreshWiring` used to
+/// await `connectors` and then `routines` inside a single `try`, so a failing
+/// connector read meant routines were never fetched — and since the empty
+/// state only ran on the drawing path, both sections rendered as nothing at
+/// all. A broken connector made a person's routines disappear, silently, and
+/// `refreshMentionable` already argued the rule in a comment three hundred
+/// lines away: "a home with a broken connector should still offer skills,
+/// rather than one failing list leaving the composer with nothing".
+///
+/// `what` names the list in its own failure, because "could not be read" over
+/// a blank panel does not say which panel.
+async function fillList({ list, state, empty, what, read, draw }) {
+  listState(list, state, empty, "pending");
+  let rows;
+  try {
+    rows = await read();
+  } catch (err) {
+    // Whatever was drawn last stays drawn. The instinct is to clear it —
+    // stale rows are a claim about now, and the read that would have confirmed
+    // them is the one that failed — but the roster already settled this
+    // argument and settled it the other way: "never an empty list on failure:
+    // that is indistinguishable from having no Bots, and the person would go
+    // looking for their work, not the error". An empty list plus an error says
+    // less than the last known list plus the same error, and the failure was
+    // never the silence's cause. On a first read there is nothing there to
+    // keep, which is the case that made clearing look free.
+    listState(list, state, empty, "failed", `${what} could not be read — ${err}`);
+    return false;
+  }
+  draw(rows);
+  listState(list, state, empty, rows.length ? "filled" : "empty");
+  return true;
+}
+
 // ------------------------------------------------------------------- roster
 
 /// One roster row, made once.
@@ -798,14 +870,19 @@ function renderRoster(bots) {
 /// the thread comes back with it and the composer stays live, because the
 /// agent resolves which member answers from the `@mention` in each message.
 async function refreshGroups() {
-  let all;
-  try {
-    all = await invoke("groups");
-  } catch {
-    return;
-  }
   const list = $("groups");
-  list.innerHTML = "";
+  await fillList({
+    list,
+    state: $("groups-state"),
+    empty: null,
+    what: "Groups",
+    read: () => invoke("groups"),
+    draw: (all) => drawGroups(list, all),
+  });
+}
+
+function drawGroups(list, all) {
+  list.replaceChildren();
   for (const group of all) idOf.set(group.name, group.id);
   for (const group of all) {
     const li = document.createElement("li");
@@ -904,17 +981,30 @@ async function openGroup(name) {
   }
 }
 
+/// The Bots, and then the Groups under them, each read on its own.
+///
+/// `roster-error` is the state line rather than a second element beside it:
+/// the roster already had somewhere to put a failure, and it says the thing
+/// `listState` would have said. What it did not have was anything to say while
+/// the read was in flight — and this read spawns a subprocess.
+///
+/// `renderRoster` keeps the decision about its own empty line, because that
+/// one depends on whether hidden Bots are being shown.
+///
+/// Groups are not awaited into this path. A slow or broken `groups` read must
+/// not hold up the Bots, which is the list somebody is actually looking for.
 async function refreshRoster() {
-  try {
-    renderRoster(await invoke("roster", { hidden: showHidden }));
-    show(rosterError, false);
-    refreshGroups();
-  } catch (err) {
+  await fillList({
+    list: botsList,
+    state: rosterError,
+    empty: null,
+    what: "Your Bots",
+    read: () => invoke("roster", { hidden: showHidden }),
     // Never an empty list on failure: that is indistinguishable from having
     // no Bots, and the person would go looking for their work, not the error.
-    rosterError.textContent = String(err);
-    show(rosterError, true);
-  }
+    draw: (bots) => renderRoster(bots),
+  });
+  refreshGroups();
 }
 
 async function openBot(name) {
@@ -2134,49 +2224,67 @@ const ACTIONS = {
 };
 
 async function refreshRules() {
-  let rules;
-  try {
-    rules = await invoke("policy_list");
-  } catch (err) {
-    ruleError.textContent = String(err);
-    return;
-  }
-  rulesList.innerHTML = "";
-  rules.forEach((rule, i) => {
-    const dt = document.createElement("dt");
-    dt.textContent = rule.tool + (rule.when ? ` when ${rule.when.key}=${rule.when.glob}` : "");
-    const dd = document.createElement("dd");
-    const what = document.createElement("span");
-    what.className = rule.action === "allow" ? "rule-allow" : "rule-stop";
-    what.textContent = ACTIONS[rule.action] || rule.action;
-    dd.appendChild(what);
-    if (rule.reason) {
-      const why = document.createElement("span");
-      why.className = "rule-why";
-      why.textContent = " — " + rule.reason;
-      dd.appendChild(why);
-    }
-    const remove = document.createElement("button");
-    remove.className = "danger forget";
-    remove.textContent = "Remove";
-    // By position, which is what the binary addresses. Recomputed on every
-    // render, so removing one cannot shift the target of another.
-    remove.addEventListener("click", async () => {
-      await settingsAction(() => invoke("policy_remove", { number: i + 1 }));
-      refreshRules();
-    });
-    dd.appendChild(remove);
-    rulesList.appendChild(dt);
-    rulesList.appendChild(dd);
+  await fillList({
+    list: rulesList,
+    state: $("rules-state"),
+    empty: rulesEmpty,
+    what: "The rules",
+    read: () => invoke("policy_list"),
+    draw: (rules) => {
+      rulesList.replaceChildren();
+      rules.forEach((rule, i) => {
+        const dt = document.createElement("dt");
+        dt.textContent = rule.tool + (rule.when ? ` when ${rule.when.key}=${rule.when.glob}` : "");
+        const dd = document.createElement("dd");
+        const what = document.createElement("span");
+        what.className = rule.action === "allow" ? "rule-allow" : "rule-stop";
+        what.textContent = ACTIONS[rule.action] || rule.action;
+        dd.appendChild(what);
+        if (rule.reason) {
+          const why = document.createElement("span");
+          why.className = "rule-why";
+          why.textContent = " — " + rule.reason;
+          dd.appendChild(why);
+        }
+        const remove = document.createElement("button");
+        remove.className = "danger forget";
+        remove.textContent = "Remove";
+        // By position, which is what the binary addresses. Recomputed on every
+        // render, so removing one cannot shift the target of another.
+        remove.addEventListener("click", async () => {
+          await settingsAction(() => invoke("policy_remove", { number: i + 1 }));
+          refreshRules();
+        });
+        dd.appendChild(remove);
+        rulesList.appendChild(dt);
+        rulesList.appendChild(dd);
+      });
+    },
   });
-  show(rulesEmpty, rules.length === 0);
 }
 
+/// The two lists in Settings that are read from the runtime, each on its own.
+///
+/// Independently, and that is the whole change. These two awaits used to sit
+/// in one `try` with each call in `draw`'s argument list, so a failing
+/// `connectors` read meant `routines` was never fetched at all — and because
+/// the empty state was only reached on the drawing path, both sections
+/// rendered as nothing: no rows, no empty line, no error. Somebody with a
+/// broken connector and three routines opened Settings, saw no routines and
+/// nothing saying why, and concluded they had none.
+///
+/// Concurrent as well as independent. They are two subprocess calls with
+/// nothing to say to each other, and running them in series only made the
+/// slower one wait for the other first.
 async function refreshWiring() {
   /// `action` adds a control to the row; connectors have none, because
   /// installing one is a browser sign-in rather than a button.
-  const draw = (rows, listEl, emptyEl, term, sub, action) => {
-    listEl.innerHTML = "";
+  ///
+  /// No empty state here any more. What to show when a list has no rows is one
+  /// of four things this list could be saying, and `listState` is where that
+  /// decision lives now — `draw` only draws.
+  const draw = (rows, listEl, term, sub, action) => {
+    listEl.replaceChildren();
     for (const row of rows) {
       const dt = document.createElement("dt");
       dt.textContent = term(row);
@@ -2186,54 +2294,66 @@ async function refreshWiring() {
       listEl.appendChild(dt);
       listEl.appendChild(dd);
     }
-    show(emptyEl, rows.length === 0);
   };
-  try {
-    draw(
-      await invoke("connectors"),
-      $("connectors-list"),
-      $("connectors-empty"),
-      (c) => c.id,
-      // The credential names it needs, never a value. If it needs none, say
-      // so rather than leaving the line blank.
-      (c) => (c.secrets.length ? c.secrets.join(", ") : "no credential"),
-    );
-    draw(
-      await invoke("routines"),
-      $("routines-list"),
-      $("routines-empty"),
-      (r) => `${r.bot_name || r.bot} / ${r.id}`,
-      // Paused first, because that is the state somebody needs to notice; a
-      // paused routine looks identical to a working one otherwise.
-      (r) =>
-        (r.enabled ? "" : "paused — ") +
-        r.trigger +
-        (r.next ? `, next ${r.next.replace("T", " ").slice(0, 16)}` : ""),
-      // The docs' "pausable". A routine is the run nobody is watching, so
-      // this is the control that matters when one starts failing every night
-      // or costing more than it is worth. Pausing keeps the definition and
-      // the history, so it needs no confirmation: the same button undoes it,
-      // which is exactly what deleting a Bot cannot offer.
-      (r) => {
-        const btn = document.createElement("button");
-        btn.className = "forget" + (r.enabled ? "" : " primary");
-        btn.textContent = r.enabled ? "Pause" : "Resume";
-        btn.addEventListener("click", async () => {
-          await settingsAction(() =>
-            invoke("routine_pause", {
-              bot: r.bot,
-              routine: r.id,
-              paused: r.enabled,
-            }),
-          );
-          refreshWiring();
-        });
-        return btn;
-      },
-    );
-  } catch (err) {
-    ruleError.textContent = String(err);
-  }
+
+  await Promise.all([
+    fillList({
+      list: $("connectors-list"),
+      state: $("connectors-state"),
+      empty: $("connectors-empty"),
+      what: "Connected apps",
+      read: () => invoke("connectors"),
+      draw: (rows) =>
+        draw(
+          rows,
+          $("connectors-list"),
+          (c) => c.id,
+          // The credential names it needs, never a value. If it needs none, say
+          // so rather than leaving the line blank.
+          (c) => (c.secrets.length ? c.secrets.join(", ") : "no credential"),
+        ),
+    }),
+    fillList({
+      list: $("routines-list"),
+      state: $("routines-state"),
+      empty: $("routines-empty"),
+      what: "Runs on a schedule",
+      read: () => invoke("routines"),
+      draw: (rows) =>
+        draw(
+          rows,
+          $("routines-list"),
+          (r) => `${r.bot_name || r.bot} / ${r.id}`,
+          // Paused first, because that is the state somebody needs to notice; a
+          // paused routine looks identical to a working one otherwise.
+          (r) =>
+            (r.enabled ? "" : "paused — ") +
+            r.trigger +
+            (r.next ? `, next ${r.next.replace("T", " ").slice(0, 16)}` : ""),
+          // The docs' "pausable". A routine is the run nobody is watching, so
+          // this is the control that matters when one starts failing every night
+          // or costing more than it is worth. Pausing keeps the definition and
+          // the history, so it needs no confirmation: the same button undoes it,
+          // which is exactly what deleting a Bot cannot offer.
+          (r) => {
+            const btn = document.createElement("button");
+            btn.className = "forget" + (r.enabled ? "" : " primary");
+            btn.textContent = r.enabled ? "Pause" : "Resume";
+            btn.addEventListener("click", async () => {
+              await settingsAction(() =>
+                invoke("routine_pause", {
+                  bot: r.bot,
+                  routine: r.id,
+                  paused: r.enabled,
+                }),
+              );
+              refreshWiring();
+            });
+            return btn;
+          },
+        ),
+    }),
+  ]);
 }
 
 $("rules-btn").addEventListener("click", () => {

@@ -181,6 +181,7 @@
       <ul id="bots" class="bots"></ul>
       <h3 id="groups-head" class="roster-section hidden">Groups</h3>
       <ul id="groups" class="bots"></ul>
+      <p id="groups-state" class="hint list-state hidden"></p>
       <p id="roster-error" class="error hidden"></p>
 
       <footer class="roster-foot">
@@ -414,6 +415,7 @@
         <strong>restart <code>openbot up</code> for a change to take effect.</strong>
       </p>
       <dl id="rules-list" class="dialog-fields"></dl>
+      <p id="rules-state" class="hint list-state hidden"></p>
       <p id="rules-empty" class="hint hidden">
         No rules. The shipped default applies: reading is free, changing asks.
       </p>
@@ -434,6 +436,7 @@
       <p id="rule-error" class="error"></p>
       <h2 class="section">Connected apps</h2>
       <dl id="connectors-list" class="dialog-fields"></dl>
+      <p id="connectors-state" class="hint list-state hidden"></p>
       <p id="connectors-empty" class="hint hidden">
         Nothing connected. Add one with <code>openbot connector add</code>; it
         needs a browser sign-in, which is not a form.
@@ -441,6 +444,7 @@
 
       <h2 class="section">Runs on a schedule</h2>
       <dl id="routines-list" class="dialog-fields"></dl>
+      <p id="routines-state" class="hint list-state hidden"></p>
       <p id="routines-empty" class="hint hidden">
         Nothing scheduled. A routine is the run nobody watches, so it is worth
         seeing one listed here even when it is working.

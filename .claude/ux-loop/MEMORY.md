@@ -362,3 +362,28 @@ where the claim came from.
 **Generalisable: reproduce each half of a finding separately before fixing it. A compound claim can
 be half true, and the false half quietly becomes a test asserting something that never broke —
 which then passes against the unfixed code and certifies it.**
+
+### The rule was already in the file, stated once, applied once
+
+`refreshMentionable` carried this comment: *"Independently: a home with a broken connector should
+still offer skills, rather than one failing list leaving the composer with nothing."* Three hundred
+lines away, `refreshWiring` did exactly what that sentence forbids — two awaits in one `try`, so a
+failing connector read meant routines were never fetched and **both** sections rendered as nothing.
+`refreshGroups` had the same fault, one level out, with `catch { return; }` — directly under
+`refreshRoster`'s comment insisting it must never do that.
+
+Three functions, one rule, stated in prose next to the one place that honoured it.
+
+**Generalisable: a rule written as a comment is applied exactly where it is written. If a comment
+argues for a general principle, that is the signal to grep for the other call sites now — and the
+durable fix is a helper, so honouring it is the default rather than something to remember.**
+
+### Every state a surface can be in needs a name, or `empty` absorbs them all
+
+Blank-because-nobody-has-looked, blank-because-there-is-nothing, and blank-because-the-read-failed
+are three different facts that rendered identically. The empty state is the greedy one: it is the
+only one with copy written for it, so it becomes the default answer to every kind of blank.
+
+**Generalisable: `pending` / `empty` / `failed` / `filled`, and `empty` may only be shown after an
+answer has arrived. If a surface can only say one of these, it is saying it about states it has not
+distinguished.**

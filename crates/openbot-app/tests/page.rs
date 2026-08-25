@@ -5657,3 +5657,161 @@ async fn a_roster_that_keeps_its_rows_still_shows_what_changed() {
          agrees with the pane beside it"
     );
 }
+
+/// One failing read does not take a sibling list's data with it.
+///
+/// `refreshWiring` awaited `connectors` and then `routines` inside a single
+/// `try`, with each call sitting in the drawing function's argument list. A
+/// failing connector read therefore meant `routines` was never fetched at all,
+/// and because the empty state only ran on the drawing path, **both** sections
+/// rendered as nothing: no rows, no empty line, no error. Somebody with a
+/// broken connector and three routines opened Settings, saw no routines and
+/// nothing saying why, and had every reason to conclude they had none.
+///
+/// The rule was already written down in this file — `refreshMentionable` says
+/// "a home with a broken connector should still offer skills, rather than one
+/// failing list leaving the composer with nothing" — and applied there and
+/// nowhere else.
+#[tokio::test]
+async fn a_broken_connector_read_does_not_take_the_routines_with_it() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    b.text_of(
+        "window.__throw = { connectors: 'the connector store is unreadable' };
+         window.__replies.routines = [
+           { bot: 'talent-scout', bot_name: 'Talent Scout', id: 'nightly',
+             enabled: true, trigger: 'every day at 09:00', next: null }];
+         document.getElementById('rules-btn').click(); 'ok'",
+    )
+    .await
+    .expect("open settings");
+
+    let listed = wait_until(
+        &b,
+        "String(document.querySelectorAll('#routines-list dt').length === 1)",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(
+        listed,
+        "a failing connector read took the routines with it; the panel says this person has none"
+    );
+
+    // And the section that did fail says so, rather than reading as empty.
+    let why = b
+        .text_of("document.getElementById('connectors-state').textContent")
+        .await
+        .unwrap_or_default();
+    assert!(
+        why.contains("Connected apps") && why.contains("unreadable"),
+        "the failing section named neither itself nor the failure: {why:?}"
+    );
+    let looks_empty = b
+        .text_of("String(document.getElementById('connectors-empty').classList.contains('hidden'))")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        looks_empty, "true",
+        "the section that could not be read is claiming there is nothing connected"
+    );
+}
+
+/// A list says nothing about being empty until it knows.
+///
+/// Every one of these reads shells out to an `openbot` subprocess, so the gap
+/// between opening a panel and having an answer is real. It used to be filled
+/// with the empty state — "Nothing scheduled", in the same words the panel
+/// would use if it had looked and found nothing. A person with three routines
+/// and a slow machine read that and believed it.
+#[tokio::test]
+async fn a_list_says_nothing_about_being_empty_until_it_knows() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    b.text_of(
+        "window.__replies.routines = () => new Promise((r) => setTimeout(() => r([]), 2500));
+         document.getElementById('rules-btn').click(); 'ok'",
+    )
+    .await
+    .expect("open settings over a slow read");
+
+    let reading = wait_until(
+        &b,
+        "String(!document.getElementById('routines-state').classList.contains('hidden'))",
+        Duration::from_secs(5),
+    )
+    .await;
+    assert!(
+        reading,
+        "the panel opened over a read in flight and said nothing about it"
+    );
+
+    let claimed = b
+        .text_of("String(document.getElementById('routines-empty').classList.contains('hidden'))")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        claimed, "true",
+        "the panel said there is nothing scheduled before anything had looked"
+    );
+    let busy = b
+        .text_of("document.getElementById('routines-list').getAttribute('aria-busy')")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        busy, "true",
+        "nothing told a screen reader the list was still being read"
+    );
+
+    // And when the answer does arrive, the empty state is finally the truth.
+    let settled = wait_until(
+        &b,
+        "String(!document.getElementById('routines-empty').classList.contains('hidden')
+                && document.getElementById('routines-state').classList.contains('hidden'))",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(
+        settled,
+        "the read finished and the panel never got round to saying there is nothing scheduled"
+    );
+}
+
+/// A failed groups read is not silent, and does not take the Bots with it.
+///
+/// `refreshGroups` swallowed its own failure with a bare `catch { return; }`,
+/// so a broken `groups` read left the Bots listed and the Groups section
+/// simply absent — the same fault the roster's own comment goes out of its way
+/// to avoid one function above it.
+#[tokio::test]
+async fn a_failed_groups_read_is_not_silent() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    b.text_of(
+        "window.__throw = { groups: 'the group store is unreadable' }; refreshRoster(); 'ok'",
+    )
+    .await
+    .expect("a failing groups read");
+
+    let said = wait_until(
+        &b,
+        "String(!document.getElementById('groups-state').classList.contains('hidden'))",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(
+        said,
+        "the groups read failed and the sidebar said nothing at all"
+    );
+
+    let bots = b
+        .text_of("String(document.querySelectorAll('#bots .bot').length)")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        bots, "1",
+        "a failing groups read took the Bots with it, which is the fault one level out"
+    );
+}
