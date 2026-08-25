@@ -1222,7 +1222,7 @@ async fn an_agent_that_was_killed_stops_reporting_itself_alive() {
         let single = run(pid.to_string());
         assert!(
             group || single,
-            "neither `kill -9 -{pid}` nor `kill -9 {pid}` reported success, so nothing was              killed and what follows would be measuring a healthy agent"
+            "neither `kill -9 -{pid}` nor `kill -9 {pid}` reported success, so nothing was killed and what follows would be measuring a healthy agent"
         );
         Ok::<(), ()>(())
     };
