@@ -1475,6 +1475,19 @@ function stopWatchingRuntime() {
   watchingRuntime = null;
 }
 
+/// Has the runtime gone, asked once rather than waited for.
+///
+/// `false` when the answer cannot be got at all: an IPC failure says nothing
+/// about the runtime, and reporting a death on no evidence is the one mistake
+/// worse than reporting it late.
+async function runtimeIsGone() {
+  try {
+    return !(await invoke("runtime_alive"));
+  } catch {
+    return false;
+  }
+}
+
 /// Say the runtime is gone, and stop offering what cannot work.
 ///
 /// The composer keeps its text and its focus. Only Send goes dead: whatever
@@ -1536,7 +1549,21 @@ async function sendPrompt(text) {
     // Bot had stopped reading: the agent says so rather than pretending it
     // landed, and the text goes back in the box so it can be sent again
     // without being retyped.
-    reportProblem(err, "the run stopped");
+    // Ask why before saying what. A turn that fails because the runtime died
+    // reaches here as whatever the transport happened to say — "openbot acp is
+    // gone" is the literal string — which names a component a person does not
+    // have and no action they can take. Asking outright is one IPC call on a
+    // path that has already failed, it needs no pattern-matching on error
+    // text, and it turns the worst message in the window into the one that
+    // says what happened and how to come back from it. The poll would find
+    // this within three seconds anyway; that is three seconds of a person
+    // reading a protocol error and drawing their own conclusions.
+    if (await runtimeIsGone()) {
+      stopWatchingRuntime();
+      runtimeStopped();
+    } else {
+      reportProblem(err, "the run stopped");
+    }
     if (joining && !input.value.trim()) input.value = text;
   } finally {
     // Whatever ended the turn, a step still open at this point is never going

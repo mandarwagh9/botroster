@@ -5416,3 +5416,96 @@ async fn disconnecting_is_not_reported_as_a_crash() {
         "the pill reports a deliberate disconnect as a runtime that died"
     );
 }
+
+/// A turn that fails because the runtime died says so, not what the wire said.
+///
+/// A dead runtime reaches the turn as whatever the transport happened to
+/// report — the literal string is "openbot acp is gone" — and that went into
+/// the problem banner verbatim: a component a person does not have, and
+/// nothing they can do about it. The poll would arrive at the truth within
+/// three seconds, which is three seconds of somebody reading a protocol error
+/// and drawing their own conclusions from it.
+///
+/// So the failure path asks outright before it reports. No pattern-matching on
+/// error text, which would break the first time the transport reworded itself.
+#[tokio::test]
+async fn a_turn_that_fails_over_a_dead_runtime_says_the_runtime_died() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    b.text_of(
+        "window.__throw = { prompt: 'openbot acp is gone' };
+         window.__replies.runtime_alive = false;
+         document.getElementById('input').value = 'do the thing';
+         document.getElementById('composer').requestSubmit(); 'ok'",
+    )
+    .await
+    .expect("a turn that fails");
+
+    let said = wait_until(
+        &b,
+        "String(!document.getElementById('runtime-gone').classList.contains('hidden'))",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(
+        said,
+        "the turn failed over a runtime that is gone and the window did not say the runtime is gone"
+    );
+
+    let generic = b
+        .text_of("String(document.getElementById('problem').classList.contains('hidden'))")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        generic, "true",
+        "both banners are up, so the window says it twice and disagrees with itself once"
+    );
+}
+
+/// And a turn that fails for any other reason still says what it was told.
+///
+/// The overreach half. Routing every failed turn to "the runtime stopped"
+/// would be a worse bug than the one above: a model that refused, a workspace
+/// that could not be read, a tool that errored — all of them would come back
+/// as a runtime crash, and the record of what actually happened would be gone
+/// from a window whose whole job is showing it.
+#[tokio::test]
+async fn a_turn_that_fails_for_any_other_reason_still_says_what_it_was_told() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+
+    b.text_of(
+        "window.__throw = { prompt: 'the model refused' };
+         document.getElementById('input').value = 'do the thing';
+         document.getElementById('composer').requestSubmit(); 'ok'",
+    )
+    .await
+    .expect("a turn that fails");
+
+    let said = wait_until(
+        &b,
+        "String(!document.getElementById('problem').classList.contains('hidden'))",
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(said, "a failed turn was not reported at all");
+
+    let raw = b
+        .text_of("document.getElementById('problem-raw').textContent")
+        .await
+        .unwrap_or_default();
+    assert!(
+        raw.contains("the model refused"),
+        "the record of what went wrong is not in the banner, got {raw:?}"
+    );
+
+    let blamed = b
+        .text_of("String(document.getElementById('runtime-gone').classList.contains('hidden'))")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        blamed, "true",
+        "a live runtime was blamed for a failure that had nothing to do with it"
+    );
+}
