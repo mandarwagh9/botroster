@@ -5509,3 +5509,151 @@ async fn a_turn_that_fails_for_any_other_reason_still_says_what_it_was_told() {
         "a live runtime was blamed for a failure that had nothing to do with it"
     );
 }
+
+/// Fills the roster with `n` Bots and waits for them to be on screen.
+///
+/// Enough of them to overflow the sidebar, which is the only condition under
+/// which "the list kept its scroll position" means anything.
+async fn roster_of(b: &Browser, n: usize) {
+    b.text_of(&format!(
+        "window.__replies.roster = Array.from({{ length: {n} }}, (_, i) => ({{
+           id: 'bot-' + i, name: 'Bot ' + i, title: '', description: '',
+           hidden: false, messages: 0 }}));
+         refreshRoster(); 'ok'"
+    ))
+    .await
+    .expect("a big roster");
+    let drawn = wait_until(
+        b,
+        &format!("String(document.querySelectorAll('#bots .bot').length === {n})"),
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(drawn, "the roster never drew {n} Bots");
+}
+
+/// The roster does not take focus off the row you were on.
+///
+/// It redraws at the end of every turn, and it used to redraw by emptying the
+/// list and building it again. Destroying the focused element sends focus to
+/// `<body>`, so anybody moving through the roster from the keyboard was
+/// returned to the start of the document every time any Bot finished
+/// speaking — an interruption a pointer user never sees and a keyboard user
+/// cannot avoid.
+///
+/// Asserted by node identity, not by text. The first version of this compared
+/// `document.activeElement.textContent`, which on `<body>` is the text of the
+/// entire document: it matched the row's name perfectly well after focus had
+/// been thrown to the body, and passed against the very code it was written to
+/// condemn.
+#[tokio::test]
+async fn the_roster_does_not_take_focus_off_the_row_you_were_on() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+    roster_of(&b, 20).await;
+
+    const ON_THE_ROW: &str =
+        "String(document.activeElement === document.querySelectorAll('#bots .bot')[7])";
+
+    b.text_of("document.querySelectorAll('#bots .bot')[7].focus(); 'ok'")
+        .await
+        .expect("focus a row");
+    let held = b.text_of(ON_THE_ROW).await.unwrap_or_default();
+    assert_eq!(
+        held, "true",
+        "focus did not land on the row, so losing it would prove nothing"
+    );
+
+    b.text_of("refreshRoster(); 'ok'").await.expect("redraw");
+    settle().await;
+
+    let still = b.text_of(ON_THE_ROW).await.unwrap_or_default();
+    let landed = b
+        .text_of("document.activeElement.tagName")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        still, "true",
+        "the redraw took focus off the row somebody was on; it is on <{landed}> now"
+    );
+}
+
+/// A roster that keeps its rows still has to change when the roster does.
+///
+/// The anti-vacuity half, and the one that would catch the reconcile going
+/// wrong. A list that never updates keeps its scroll and its focus perfectly,
+/// and the two tests above would pass over it: added, removed, renamed and
+/// reordered Bots all have to land, and the row that is open has to keep
+/// saying so.
+#[tokio::test]
+async fn a_roster_that_keeps_its_rows_still_shows_what_changed() {
+    let Some((b, _p)) = page().await else { return };
+    open_session(&b, "s1").await;
+    roster_of(&b, 4).await;
+
+    // Reordered, one gone, one renamed, one gaining history.
+    b.text_of(
+        "window.__replies.roster = [
+           { id: 'bot-3', name: 'Bot 3', title: '', description: '', hidden: false, messages: 9 },
+           { id: 'bot-1', name: 'Bot 1', title: 'keeps the books', description: '',
+             hidden: false, messages: 0 },
+           { id: 'bot-0', name: 'Renamed', title: '', description: '', hidden: true, messages: 0 },
+         ];
+         refreshRoster(); 'ok'",
+    )
+    .await
+    .expect("the roster changes");
+    settle().await;
+
+    let order = b
+        .text_of(
+            "[...document.querySelectorAll('#bots .bot-name')].map(n => n.textContent).join('|')",
+        )
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        order, "Bot 3|Bot 1|Renamed",
+        "the reconcile did not reorder, remove and rename the rows it was given"
+    );
+
+    let subs = b
+        .text_of(
+            "[...document.querySelectorAll('#bots .bot-sub')].map(n => n.textContent).join('|')",
+        )
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        subs, "9 messages|keeps the books|no messages yet",
+        "a row kept the line it was drawn with instead of the one it was given"
+    );
+
+    let hidden = b
+        .text_of("String(document.querySelectorAll('#bots .bot-hidden').length)")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        hidden, "1",
+        "the hidden tag did not follow the Bot that became hidden"
+    );
+
+    // And the open Bot still reads as open, which is the one piece of state
+    // the row carries that nothing else on screen repeats.
+    b.text_of(
+        "window.__replies.roster = [
+           { id: 'talent-scout', name: 'Talent Scout', title: '', description: '',
+             hidden: false, messages: 0 }];
+         refreshRoster(); 'ok'",
+    )
+    .await
+    .expect("back to the open Bot");
+    settle().await;
+    let open = b
+        .text_of("String(document.querySelectorAll('#bots .bot.open').length)")
+        .await
+        .unwrap_or_default();
+    assert_eq!(
+        open, "1",
+        "the row for the conversation that is open stopped saying so, so the sidebar no longer \
+         agrees with the pane beside it"
+    );
+}

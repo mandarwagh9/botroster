@@ -668,50 +668,118 @@ function wearCoat(el, id, name) {
 
 // ------------------------------------------------------------------- roster
 
-/// Draw the roster. Nothing here mutates state; it renders what it is given,
-/// so a failed refresh cannot half-update the list.
-function renderRoster(bots) {
-  botsList.innerHTML = "";
-  for (const bot of bots) idOf.set(bot.name, bot.id);
-  for (const bot of bots) {
-    const li = document.createElement("li");
-    const btn = document.createElement("button");
-    btn.className = "bot" + (bot.name === openName ? " open" : "");
-    btn.title = bot.description || bot.name;
+/// One roster row, made once.
+///
+/// Split out from the patch below because the two have different jobs and
+/// only this one may attach a listener: a row that is patched keeps the
+/// handler it was born with, and a row that is rebuilt every turn would
+/// accumulate them.
+function newBotRow(bot) {
+  const li = document.createElement("li");
+  // The key the reconcile matches on. `openBot` takes a name, and the click
+  // handler below closes over one, so the row is identified by the same thing
+  // it acts on.
+  li.dataset.bot = bot.name;
 
-    btn.appendChild(markEl(bot.id, bot.name));
-    wearCoat(btn, bot.id, bot.name);
+  const btn = document.createElement("button");
+  btn.className = "bot";
+  btn.appendChild(markEl(bot.id, bot.name));
 
-    const name = document.createElement("span");
-    name.className = "bot-name";
-    name.textContent = bot.name;
-    btn.appendChild(name);
+  const name = document.createElement("span");
+  name.className = "bot-name";
+  btn.appendChild(name);
 
-    // The job, or how much conversation there is to come back to. One line
-    // either way: a sidebar that reflows as Bots gain history is a sidebar
-    // whose entries move under the cursor.
-    const sub = document.createElement("span");
-    sub.className = "bot-sub";
-    sub.textContent = bot.title || (bot.messages ? bot.messages + " messages" : "no messages yet");
-    btn.appendChild(sub);
+  // The job, or how much conversation there is to come back to. One line
+  // either way: a sidebar that reflows as Bots gain history is a sidebar
+  // whose entries move under the cursor.
+  const sub = document.createElement("span");
+  sub.className = "bot-sub";
+  btn.appendChild(sub);
 
-    if (bot.hidden) {
-      const tag = document.createElement("span");
-      tag.className = "bot-hidden";
-      tag.textContent = "hidden";
-      btn.appendChild(tag);
-    }
+  btn.addEventListener("click", () => openBot(bot.name));
+  li.appendChild(btn);
+  return li;
+}
 
-    // What `@` has to insert: the id, not the name shown here.
-    // `Group::owner_for` matches a mention against `BotId::as_str()`, and
-    // `openbot_bots::mentions` stops at the first character outside
-    // `[a-z0-9_-]`, so `@Talent Scout` reaches it as `talent` and resolves
-    // to nobody. See `mentionEntries`.
+/// Bring an existing row up to date, touching only what changed.
+function patchBotRow(li, bot) {
+  const btn = li.firstElementChild;
+  btn.className = "bot" + (bot.name === openName ? " open" : "");
+  btn.title = bot.description || bot.name;
+  wearCoat(btn, bot.id, bot.name);
+
+  // What `@` has to insert: the id, not the name shown here. `Group::owner_for`
+  // matches a mention against `BotId::as_str()`, and `openbot_bots::mentions`
+  // stops at the first character outside `[a-z0-9_-]`, so `@Talent Scout`
+  // reaches it as `talent` and resolves to nobody. See `mentionEntries`.
+  //
+  // Doubles as the check for whether the mark is still the right one: the mark
+  // is drawn from the id, so they go stale together or not at all.
+  if (btn.dataset.mention !== bot.id) {
     btn.dataset.mention = bot.id;
-    btn.addEventListener("click", () => openBot(bot.name));
-    li.appendChild(btn);
-    botsList.appendChild(li);
+    btn.replaceChild(markEl(bot.id, bot.name), btn.firstElementChild);
   }
+
+  btn.querySelector(".bot-name").textContent = bot.name;
+  btn.querySelector(".bot-sub").textContent =
+    bot.title || (bot.messages ? bot.messages + " messages" : "no messages yet");
+
+  const tag = btn.querySelector(".bot-hidden");
+  if (bot.hidden && !tag) {
+    const mark = document.createElement("span");
+    mark.className = "bot-hidden";
+    mark.textContent = "hidden";
+    btn.appendChild(mark);
+  } else if (!bot.hidden && tag) {
+    tag.remove();
+  }
+}
+
+/// Draw the roster into the list that is already there. Nothing here mutates
+/// state; it renders what it is given, so a failed refresh cannot half-update
+/// the list.
+///
+/// This was `botsList.innerHTML = ""` and a rebuild, which is the obvious way
+/// to render a list and the wrong way to render one that redraws at the end of
+/// every turn: destroying the focused element sends focus to `<body>`, so
+/// anybody moving through the roster from the keyboard was returned to the top
+/// of the document every time any Bot finished speaking.
+///
+/// The review that raised this (F-DC9) also said the redraw threw away the
+/// sidebar's scroll position. Measured, it did not. The wipe and the rebuild
+/// are one synchronous block, no layout runs between them, and the scroll
+/// offset is never clamped — 300px before, 300px after. Force a layout in
+/// between and it does go to zero, which is presumably where the claim came
+/// from, but nothing on this path forces one. Only the focus loss was real.
+///
+/// Restoring focus around the rebuild would have hidden that symptom and left
+/// the cause, along with a flicker on every turn and a growing list of things
+/// to remember to put back.
+///
+/// Keyed by name, because that is what `openBot` opens and what a row's click
+/// handler closes over. A renamed Bot is therefore a removal and an addition,
+/// which is the truth: it is not the row that was there.
+function renderRoster(bots) {
+  for (const bot of bots) idOf.set(bot.name, bot.id);
+
+  const had = new Map();
+  for (const li of botsList.children) had.set(li.dataset.bot, li);
+
+  let at = 0;
+  for (const bot of bots) {
+    const li = had.get(bot.name) || newBotRow(bot);
+    had.delete(bot.name);
+    patchBotRow(li, bot);
+    // Moved only when it is actually out of place. Re-inserting a node that is
+    // already where it belongs is not free — it is a move as far as the DOM is
+    // concerned, and a move can take focus off it.
+    if (botsList.children[at] !== li) {
+      botsList.insertBefore(li, botsList.children[at] || null);
+    }
+    at += 1;
+  }
+  for (const li of had.values()) li.remove();
+
   show(rosterEmpty, bots.length === 0 && !showHidden);
 
   // The empty conversation pane has to say something true. With an empty
