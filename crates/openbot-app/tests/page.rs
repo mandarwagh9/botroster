@@ -167,7 +167,48 @@ async fn serve() -> String {
 /// The skip says so out loud, and CI sets `OPENBOT_REQUIRE_BROWSER` so a missing
 /// browser there is a failure rather than a green run over tests that never
 /// executed.
-async fn page() -> Option<(Browser, tempfile::TempDir)> {
+/// A directory for one test's Chromium profile, under `target/`, not in TEMP.
+///
+/// This was `tempfile::tempdir()`, which deletes itself on drop — and on
+/// Windows that delete is best-effort and fails silently while any process
+/// still holds a file open. `Browser`'s `kill_on_drop` ends Chrome's root
+/// process and returns; its renderer and GPU processes take a moment longer,
+/// and they are still holding the profile open when the directory is asked to
+/// remove itself. Its own source says so: *"`kill_on_drop` terminates the root
+/// and returns, and Chrome's other processes take a moment."*
+///
+/// So every test in this file leaked a profile. Not a slow leak: this suite
+/// leaked **twenty thousand** directories and filled a 952GB disk, and a full
+/// disk fails tests in ways that read exactly like flaky ones — which is how
+/// it went unnoticed while the flake was blamed on descriptor pressure.
+///
+/// The fix is to stop racing. Profiles go under `target/`, and the whole
+/// directory is removed **once at the start of a run**, when the processes
+/// that held the previous run's profiles are certainly gone. Leakage is
+/// bounded by a single run and cleaned by the next, and nothing this suite
+/// does can reach the user's TEMP again.
+fn fresh_profile() -> std::path::PathBuf {
+    static ROOT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+    let root = ROOT.get_or_init(|| {
+        let root = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("page-profiles");
+        // Last run's, not this one's. Best-effort on purpose: a directory a
+        // dead process still somehow holds is a reason to leave it, never a
+        // reason to fail a test run that has not started yet.
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("somewhere to put test profiles");
+        root
+    });
+    let dir = root.join(format!(
+        "p{}",
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).expect("a profile");
+    dir
+}
+
+async fn page() -> Option<(Browser, std::path::PathBuf)> {
     if find_browser().is_none() {
         assert!(
             std::env::var("OPENBOT_REQUIRE_BROWSER").is_err(),
@@ -176,8 +217,8 @@ async fn page() -> Option<(Browser, tempfile::TempDir)> {
         eprintln!("skipping: no browser installed");
         return None;
     }
-    let profile = tempfile::tempdir().expect("a profile");
-    let browser = Browser::launch(profile.path()).await.expect("launch");
+    let profile = fresh_profile();
+    let browser = Browser::launch(&profile).await.expect("launch");
     let url = serve().await;
     browser.navigate(&url).await.expect("navigate");
     // Retried once, and only when the navigation demonstrably never happened.
