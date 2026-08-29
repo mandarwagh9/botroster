@@ -235,6 +235,20 @@ pub trait SessionLog: Send + Sync {
     /// the call it was recording — the work is the point and the record is
     /// evidence about it — so an implementation logs and drops.
     fn record(&self, bot: &str, session: &SessionId, step: StepDraft);
+
+    /// Every step of a past session, oldest first, for replaying it.
+    ///
+    /// Unlike [`Self::record`] this one reads, and reading is allowed to
+    /// block: it happens once, at `session_open`, on one small file — not on
+    /// the path a tool call takes. An empty vector for a session that was never
+    /// recorded, so a caller can tell "nothing to replay" from a failure
+    /// without a second error type.
+    ///
+    /// Lines that do not parse are skipped rather than fatal. A record written
+    /// by a newer build can carry a field this one does not know, and a
+    /// half-written last line is possible after a hard kill; refusing to replay
+    /// the rest would make the file useless exactly when it is most wanted.
+    fn steps(&self, bot: &str, session: &SessionId) -> Vec<Step>;
 }
 
 /// A step without its sequence number, which only the writer can assign.
@@ -260,12 +274,16 @@ pub struct StepDraft {
 ///   cannot be trusted is worse than one that lags.
 pub struct ToBotStore {
     tx: tokio::sync::mpsc::UnboundedSender<(String, SessionId, StepDraft)>,
+    /// Kept for reading. Writes go through the channel above so the hub never
+    /// blocks; reads happen once per replayed session and can be direct.
+    store: Arc<botroster_bots::BotStore>,
 }
 
 impl ToBotStore {
     /// Start the writer task.
     #[must_use]
     pub fn spawn(store: Arc<botroster_bots::BotStore>) -> Self {
+        let reads = Arc::clone(&store);
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(String, SessionId, StepDraft)>();
         tokio::spawn(async move {
             // Per session, so a Bot's first session starts at 1 and a long one
@@ -311,11 +329,20 @@ impl ToBotStore {
                 }
             }
         });
-        Self { tx }
+        Self { tx, store: reads }
     }
 }
 
 impl SessionLog for ToBotStore {
+    fn steps(&self, bot: &str, session: &SessionId) -> Vec<Step> {
+        self.store
+            .session_record(&botroster_bots::BotId(bot.to_owned()), session.as_str())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
+    }
+
     fn record(&self, bot: &str, session: &SessionId, step: StepDraft) {
         // The receiver is dropped only when this process is going away, so a
         // failure here is a shutdown and not something to report on every call.

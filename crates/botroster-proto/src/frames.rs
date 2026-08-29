@@ -46,6 +46,28 @@ pub struct SessionOpenParams {
     /// rather than taking the client's word for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bot: Option<String>,
+    /// Serve this session's tool calls from a past session's record instead of
+    /// running them.
+    ///
+    /// Attribution, not authorisation, like `bot` above: the client says what
+    /// it wants and the hub decides what that means. What it means here is
+    /// restrictive rather than permissive — a replaying session can do *less*,
+    /// not more, because the hub stops forwarding anything to the computer.
+    ///
+    /// `None` is an ordinary session, which is every session that existed
+    /// before this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<Replay>,
+}
+
+/// Which past session to answer from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Replay {
+    /// The Bot whose record it is. A record lives beside the Bot it belongs to,
+    /// and a session id is only unique within one.
+    pub bot: String,
+    /// The recorded session.
+    pub session: SessionId,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -92,11 +92,28 @@ impl Fixture {
 
     /// Open a session, optionally acting as a Bot.
     async fn open(&mut self, bot: Option<&str>) -> anyhow::Result<SessionId> {
+        self.open_with(bot, None).await
+    }
+
+    /// Open a session that answers from a past session's record.
+    async fn replay(&mut self, bot: &str, of: &SessionId) -> anyhow::Result<SessionId> {
+        self.open_with(Some(bot), Some((bot.to_owned(), of.clone())))
+            .await
+    }
+
+    async fn open_with(
+        &mut self,
+        bot: Option<&str>,
+        replay: Option<(String, SessionId)>,
+    ) -> anyhow::Result<SessionId> {
         let id = self.id();
-        let params = match bot {
+        let mut params = match bot {
             Some(b) => json!({ "bot": b }),
             None => json!({}),
         };
+        if let Some((rb, rs)) = replay {
+            params["replay"] = json!({ "bot": rb, "session": rs.as_str() });
+        }
         self.sock
             .send(Message::Text(
                 Frame::Request(Request::new(
@@ -113,8 +130,9 @@ impl Fixture {
             };
             if let Frame::Response(r) = Frame::decode(&t)? {
                 if r.id == RpcId::Num(id) {
-                    let Outcome::Result(v) = r.outcome else {
-                        anyhow::bail!("session/open failed");
+                    let v = match r.outcome {
+                        Outcome::Result(v) => v,
+                        Outcome::Error(e) => anyhow::bail!("{}", e.message),
                     };
                     return Ok(serde_json::from_value::<SessionOpenResult>(v)?.session_id);
                 }
@@ -201,6 +219,45 @@ impl Fixture {
                 Frame::Response(r) if r.id == RpcId::Num(id) => return Ok(r.outcome),
                 _ => {}
             }
+        }
+    }
+
+    /// Start a real guest on `work` and wait for it to register.
+    ///
+    /// Extracted because two replay tests need one: the property being checked
+    /// is that a replayed call never reaches the guest, and that is only
+    /// meaningful if there is a guest it could have reached.
+    async fn attach_guest(&self, work: &std::path::Path) -> anyhow::Result<()> {
+        let ctx = Arc::new(botroster_guest::Context::new(
+            botroster_guest::Workspace::new(work, true)?,
+            work.join(".browser-profile"),
+        ));
+        let cfg = botroster_guest::GuestConfig {
+            hub_url: self.url.clone(),
+            server_id: "botroster-workspace".into(),
+            description: "the guest for the record tests".into(),
+            token: None,
+        };
+        tokio::spawn(async move {
+            let _ = botroster_guest::run(cfg, ctx).await;
+        });
+        Ok(())
+    }
+
+    /// Bind, polling until the guest has registered.
+    ///
+    /// A fixed sleep is either flaky on a loaded machine or slow on an idle
+    /// one.
+    async fn bind_with_patience(&mut self, sid: &SessionId, server: &str) -> anyhow::Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if self.bind(sid, server).await.is_ok() {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!("the guest never registered with the hub");
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
 
@@ -532,34 +589,9 @@ async fn a_call_that_reaches_the_guest_is_recorded_with_how_it_ended() -> anyhow
     // A real guest on a real workspace, so the result recorded is one a tool
     // actually produced.
     let work = tempfile::tempdir()?;
-    let ctx = Arc::new(botroster_guest::Context::new(
-        botroster_guest::Workspace::new(work.path(), true)?,
-        work.path().join(".browser-profile"),
-    ));
-    let cfg = botroster_guest::GuestConfig {
-        hub_url: f.url.clone(),
-        server_id: "botroster-workspace".into(),
-        description: "the guest for the record test".into(),
-        token: None,
-    };
-    tokio::spawn(async move {
-        let _ = botroster_guest::run(cfg, ctx).await;
-    });
-
+    f.attach_guest(work.path()).await?;
     let sid = f.open(Some("scout")).await?;
-
-    // Bind, polling for the guest to have registered rather than sleeping: on a
-    // loaded machine a fixed wait is either flaky or slow.
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        if f.bind(&sid, "botroster-workspace").await.is_ok() {
-            break;
-        }
-        if Instant::now() >= deadline {
-            anyhow::bail!("the guest never registered with the hub");
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    f.bind_with_patience(&sid, "botroster-workspace").await?;
 
     let wrote = f
         .call(
@@ -609,6 +641,373 @@ async fn a_call_that_reaches_the_guest_is_recorded_with_how_it_ended() -> anyhow
     assert!(
         !why.head.is_empty(),
         "a failure was recorded with nothing said about it"
+    );
+    Ok(())
+}
+
+// ── replaying a record ────────────────────────────────────────────────────
+
+/// The result the record holds for one step, or a panic saying what it holds
+/// instead.
+fn recorded_ok(step: &botrosterd::record::Step) -> String {
+    match &step.ended {
+        botrosterd::record::Ended::Ok(c) => c.head.clone(),
+        other => panic!("step was recorded as {other:?}, not as a success"),
+    }
+}
+
+/// **A replay touches nothing**, and the proof is a file that does not appear.
+///
+/// The property the whole feature rests on, and the one that cannot be checked
+/// by asserting an absence of evidence: a guest that is never contacted
+/// produces nothing to look at, so "no calls happened" is a test that passes
+/// just as well when the plumbing is missing entirely.
+///
+/// So this is byte-level. A real `fs.write` is recorded against a real guest and
+/// the file is confirmed on disk. The file is then deleted and the run
+/// replayed. If a single call reached the guest, the file comes back. It must
+/// not — and the recorded result must still be returned.
+#[tokio::test]
+async fn a_replay_answers_from_the_record_and_the_file_never_reappears() -> anyhow::Result<()> {
+    let mut f = Fixture::start(Policy::allow_all()).await?;
+    let work = tempfile::tempdir()?;
+    f.attach_guest(work.path()).await?;
+
+    let live = f.open(Some("scout")).await?;
+    f.bind_with_patience(&live, "botroster-workspace").await?;
+    let wrote = f
+        .call(
+            &live,
+            "fs.write",
+            json!({"path": "notes.md", "contents": "a week of work"}),
+            None,
+        )
+        .await?;
+    assert!(matches!(wrote, Outcome::Result(_)), "{wrote:?}");
+
+    let on_disk = work.path().join("notes.md");
+    assert!(
+        on_disk.exists(),
+        "the recorded run did not write the file, so deleting it below proves nothing"
+    );
+    let recorded = f.steps("scout", &live, 1).await;
+    assert_eq!(recorded.len(), 1);
+    let expected = recorded_ok(&recorded[0]);
+
+    // From here on, the evidence is its absence.
+    std::fs::remove_file(&on_disk)?;
+
+    let again = f.replay("scout", &live).await?;
+    // Deliberately *not* bound to a tool server. A replaying session has
+    // nothing to bind, and a call that escaped the replay branch would fail on
+    // the missing binding rather than quietly writing the file — so both ways
+    // of getting this wrong are visible rather than one.
+    let replayed = f
+        .call(
+            &again,
+            "fs.write",
+            json!({"path": "notes.md", "contents": "a week of work"}),
+            None,
+        )
+        .await?;
+
+    match replayed {
+        // `output`, because the response is a `ToolCallResult` and the record
+        // holds what the tool returned rather than the frame it travelled in.
+        // The frame's `call_id` belongs to *this* call and must not be the
+        // recorded one.
+        Outcome::Result(v) => {
+            assert_eq!(
+                serde_json::to_string(&v["output"])?,
+                expected,
+                "the replay did not return what was recorded"
+            );
+            assert_eq!(
+                v["call_id"].as_str(),
+                Some("call-7"),
+                "the replay answered with the recorded call's id instead of this one's: {v}"
+            );
+        }
+        Outcome::Error(e) => panic!("the replay failed: [{}] {}", e.code, e.message),
+    }
+
+    assert!(
+        !on_disk.exists(),
+        "replaying `fs.write` wrote the file, so a call reached the guest and this is not a \
+         replay: {}",
+        on_disk.display()
+    );
+    Ok(())
+}
+
+/// A run that asks for something else says what changed, and stops.
+#[tokio::test]
+async fn a_different_call_diverges_and_names_the_difference() -> anyhow::Result<()> {
+    let mut f = Fixture::start(Policy::allow_all()).await?;
+    let live = f.open(Some("scout")).await?;
+    f.call(&live, "bot.list", json!({}), None).await?;
+    f.steps("scout", &live, 1).await;
+
+    let again = f.replay("scout", &live).await?;
+    let out = f
+        .call(&again, "bot.send", json!({"to": "x", "text": "y"}), None)
+        .await?;
+
+    let Outcome::Error(e) = out else {
+        panic!("a call the record does not contain was answered as though it did: {out:?}");
+    };
+    assert_eq!(e.code, botroster_proto::codes::DIVERGED, "{}", e.message);
+    assert!(
+        e.message.contains("bot.list") && e.message.contains("bot.send"),
+        "the divergence does not say what was expected and what was asked for: {}",
+        e.message
+    );
+
+    // And it stops, rather than reporting every later step as a difference too:
+    // those would all be consequences of this one, burying the finding.
+    let after = f.call(&again, "bot.list", json!({}), None).await?;
+    let Outcome::Error(e2) = after else {
+        panic!("the run carried on comparing after it had diverged");
+    };
+    assert_eq!(e2.code, botroster_proto::codes::DIVERGED);
+    assert!(
+        e2.message.contains("already diverged"),
+        "the second failure should say the run is past comparing: {}",
+        e2.message
+    );
+    Ok(())
+}
+
+/// The same tool with different arguments is a divergence too.
+///
+/// Compared on the hash of the canonical arguments rather than the kept prefix:
+/// two long argument sets can share their first four kilobytes and differ
+/// after, and calling those the same call is exactly what `Captured::sha256`
+/// exists to prevent.
+#[tokio::test]
+async fn the_same_tool_with_different_arguments_diverges() -> anyhow::Result<()> {
+    let mut f = Fixture::start(Policy::allow_all()).await?;
+    let live = f.open(Some("scout")).await?;
+    f.call(&live, "bot.list", json!({"all": true}), None)
+        .await?;
+    f.steps("scout", &live, 1).await;
+
+    let again = f.replay("scout", &live).await?;
+    let out = f
+        .call(&again, "bot.list", json!({"all": false}), None)
+        .await?;
+
+    let Outcome::Error(e) = out else {
+        panic!("different arguments were treated as the same call: {out:?}");
+    };
+    assert_eq!(e.code, botroster_proto::codes::DIVERGED, "{}", e.message);
+    assert!(
+        e.message.contains("different arguments"),
+        "the message does not say the arguments differed: {}",
+        e.message
+    );
+    Ok(())
+}
+
+/// A step that was refused replays as refused.
+///
+/// Replaying a refusal as a success would change what the Bot saw, which is the
+/// one thing a replay must never do: the run would take a branch it never took,
+/// and every step after it would be a divergence the replay itself caused.
+#[tokio::test]
+async fn a_refused_step_replays_as_refused() -> anyhow::Result<()> {
+    let policy = Policy {
+        rules: vec![Rule::deny("bot.send", "not from a test")],
+        fallback: Action::Allow,
+        grants: std::collections::BTreeSet::new(),
+    };
+    let mut f = Fixture::start(policy).await?;
+    let live = f.open(Some("scout")).await?;
+    f.call(&live, "bot.send", json!({"to": "x", "text": "y"}), None)
+        .await?;
+    f.steps("scout", &live, 1).await;
+
+    let again = f.replay("scout", &live).await?;
+    let out = f
+        .call(&again, "bot.send", json!({"to": "x", "text": "y"}), None)
+        .await?;
+
+    let Outcome::Error(e) = out else {
+        panic!("a refusal replayed as a success: {out:?}");
+    };
+    assert_eq!(
+        e.code,
+        botroster_proto::codes::APPROVAL_DENIED,
+        "a replayed refusal should still read as a refusal: {}",
+        e.message
+    );
+    Ok(())
+}
+
+/// **A replay is not itself recorded.**
+///
+/// It did not happen, so a record of it is a record of work nobody did — sitting
+/// in the same directory as the real ones and listed by `botroster bot record`
+/// as though the Bot had done it twice. The replay branch returns before
+/// anything is written, so this holds structurally; it is asserted because
+/// "structurally" is a claim about code, and code changes.
+#[tokio::test]
+async fn replaying_writes_no_record_of_its_own() -> anyhow::Result<()> {
+    let mut f = Fixture::start(Policy::allow_all()).await?;
+    let live = f.open(Some("scout")).await?;
+    f.call(&live, "bot.list", json!({}), None).await?;
+    f.steps("scout", &live, 1).await;
+
+    let before = f
+        .store
+        .sessions(&BotId("scout".into()))
+        .expect("listing is readable");
+    assert_eq!(before.len(), 1, "expected the one real session: {before:?}");
+
+    let again = f.replay("scout", &live).await?;
+    f.call(&again, "bot.list", json!({}), None).await?;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let after = f
+        .store
+        .sessions(&BotId("scout".into()))
+        .expect("listing is readable");
+    assert_eq!(
+        after, before,
+        "replaying wrote a record of a run that never happened"
+    );
+    assert_eq!(
+        f.steps("scout", &live, 1).await.len(),
+        1,
+        "replaying appended to the record it was reading"
+    );
+    Ok(())
+}
+
+/// Replaying something never recorded is refused when the session opens.
+///
+/// A caller asking for a replay is asking for the guarantee that nothing
+/// happens. Quietly handing them a live session instead is the worst available
+/// answer, because they would find out by watching it do the work.
+#[tokio::test]
+async fn a_replay_of_nothing_is_refused_at_the_door() -> anyhow::Result<()> {
+    let mut f = Fixture::start(Policy::allow_all()).await?;
+    let missing = SessionId::new("sess-never-happened");
+    let refused = f
+        .replay("scout", &missing)
+        .await
+        .expect_err("replaying a session that was never recorded should be refused");
+    let said = refused.to_string();
+    assert!(
+        said.contains("no record") && said.contains("sess-never-happened"),
+        "the refusal does not say what could not be found: {said}"
+    );
+    Ok(())
+}
+
+/// An ordinary session is untouched by any of this.
+///
+/// The anti-vacuity half: every test above would pass on a hub that had broken
+/// normal sessions entirely.
+#[tokio::test]
+async fn a_session_that_is_not_replaying_still_runs_for_real() -> anyhow::Result<()> {
+    let mut f = Fixture::start(Policy::allow_all()).await?;
+    let work = tempfile::tempdir()?;
+    f.attach_guest(work.path()).await?;
+
+    let live = f.open(Some("scout")).await?;
+    f.bind_with_patience(&live, "botroster-workspace").await?;
+    let wrote = f
+        .call(
+            &live,
+            "fs.write",
+            json!({"path": "real.md", "contents": "this one happened"}),
+            None,
+        )
+        .await?;
+    assert!(matches!(wrote, Outcome::Result(_)), "{wrote:?}");
+    assert!(
+        work.path().join("real.md").exists(),
+        "an ordinary session stopped doing the work"
+    );
+    Ok(())
+}
+
+/// A result the record could not keep whole is not replayed, and says so.
+///
+/// The record keeps a bounded prefix of every value. A longer one survives as a
+/// prefix, a length and a hash — enough to *identify* it and not enough to
+/// reproduce it. Handing the prefix back would be worse than refusing: it is a
+/// truncated serialisation, so it usually will not even parse, and if it
+/// happened to, the Bot would be reasoning about a value nobody ever gave it
+/// and every step after would diverge for a reason the replay invented.
+///
+/// Distinct from a divergence, and the message has to make that distinction:
+/// the Bot did nothing different. The record is the thing that cannot answer.
+#[tokio::test]
+async fn a_result_too_long_to_keep_is_not_replayed() -> anyhow::Result<()> {
+    let mut f = Fixture::start(Policy::allow_all()).await?;
+    let work = tempfile::tempdir()?;
+    f.attach_guest(work.path()).await?;
+
+    let live = f.open(Some("scout")).await?;
+    f.bind_with_patience(&live, "botroster-workspace").await?;
+
+    // Comfortably past `record::KEPT_BYTES`, so the read below cannot be kept.
+    let big = "x".repeat(botrosterd::record::KEPT_BYTES * 3);
+    f.call(
+        &live,
+        "fs.write",
+        json!({"path": "big.md", "contents": big}),
+        None,
+    )
+    .await?;
+    let read = f
+        .call(&live, "fs.read", json!({"path": "big.md"}), None)
+        .await?;
+    assert!(matches!(read, Outcome::Result(_)), "{read:?}");
+
+    let steps = f.steps("scout", &live, 2).await;
+    assert_eq!(steps.len(), 2, "{steps:?}");
+    let botrosterd::record::Ended::Ok(kept) = &steps[1].ended else {
+        panic!("the read was recorded as {:?}", steps[1].ended);
+    };
+    assert!(
+        !kept.is_complete(),
+        "the result fitted after all, so this test is not exercising truncation"
+    );
+
+    // Replayed up to the read, which cannot be answered.
+    let again = f.replay("scout", &live).await?;
+    let first = f
+        .call(
+            &again,
+            "fs.write",
+            json!({"path": "big.md", "contents": "x".repeat(botrosterd::record::KEPT_BYTES * 3)}),
+            None,
+        )
+        .await?;
+    assert!(
+        matches!(first, Outcome::Result(_)),
+        "the write should replay: its own result is small. Got {first:?}"
+    );
+
+    let out = f
+        .call(&again, "fs.read", json!({"path": "big.md"}), None)
+        .await?;
+    let Outcome::Error(e) = out else {
+        panic!("a result the record only holds a prefix of was replayed as though whole: {out:?}");
+    };
+    assert_eq!(
+        e.code,
+        botroster_proto::codes::NOT_REPLAYABLE,
+        "a record that cannot answer is not the Bot diverging: {}",
+        e.message
+    );
+    assert!(
+        e.message.contains(&kept.bytes.to_string()),
+        "the message does not say how much was returned: {}",
+        e.message
     );
     Ok(())
 }

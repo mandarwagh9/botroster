@@ -637,3 +637,44 @@ seeds a previous hub's token before connecting. Mutation-checked both ways.
   the suite then fails with things like `unrecognized subcommand 'record'` for a subcommand that is
   in the source. `CLAUDE.md` warns about this; it still cost twenty minutes of reading the wrong
   failures.
+
+## T6-2 — replay (2026-08-29)
+
+### Placement *is* the guarantee
+
+The replay branch sits in `tool_call` before policy, the hook, approvals and the forward. That is
+not tidiness — it is the whole enforcement. Replay claims to touch nothing, and the way that claim
+is kept is that a replaying session cannot reach the code that forwards, in the same function that
+already refuses to forward an unapproved call. **An agent asked to behave is not a guarantee; a
+branch it cannot get past is.** Same argument as the policy gate living in the hub, applied again.
+
+### "Nothing happened" cannot be tested by looking for nothing
+
+The load-bearing property — a replayed call never reaches the guest — produces no evidence when it
+holds. `assert!(no_calls_happened)` passes just as well when the plumbing is missing entirely, which
+is the vacuity trap that has now bitten twice in this project.
+
+The version with teeth is byte-level and negative: record a real `fs.write` against a real guest,
+confirm the file, **delete it**, replay, assert the file does not come back. Same shape as the
+credential test. Deliberately leaving the replaying session *unbound* to a tool server helps too: a
+call that escaped the branch fails on the missing binding instead of silently succeeding, so both
+ways of being wrong are visible rather than one.
+
+### A truncated serialisation is not a value
+
+Replaying a result the record could only keep a prefix of looked like a judgement call until the
+mutation ran: handing the prefix over fails with `EOF while parsing a string at line 1 column 4096`.
+A capped `Captured.head` is a cut *serialisation*, not a cut value, so it frequently is not JSON at
+all — and if it happened to be, the Bot would reason about a value nobody gave it. `NOT_REPLAYABLE`
+is a separate code from `DIVERGED` because the Bot did nothing different; the record is what cannot
+answer.
+
+### The first replay found a T6-1 bug the record's own tests could not
+
+Forwarded calls recorded the RPC envelope `{call_id, output}`; internal tools recorded the bare
+output. Every T6-1 test passed, because each only ever looked at one kind. **Replay was the first
+consumer that had to treat both alike**, and it surfaced immediately — the replay returned the old
+envelope, with the recorded call id, wrapped in a new one.
+
+The generalisable bit: a format's inconsistencies are invisible until something *reads* it. Writing
+tests for a writer proves the writer runs, not that what it wrote means one thing.

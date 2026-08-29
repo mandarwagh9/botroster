@@ -502,6 +502,25 @@ pub mod codes {
     /// where no session exists to be forbidden from and the remedy is a file to
     /// read rather than a permission to request.
     pub const UNAUTHENTICATED: i32 = -32007;
+    /// A replayed run asked for something the record does not describe.
+    ///
+    /// Not an error in the ordinary sense and not a failure of the tool: the
+    /// Bot did something different from what it did last time, which is the
+    /// **finding** a replay exists to produce. Distinct from [`TOOL_FAILED`]
+    /// because no tool ran, and from [`APPROVAL_DENIED`] because nobody
+    /// refused it.
+    pub const DIVERGED: i32 = -32008;
+    /// A recorded step cannot be replayed faithfully, so it is not replayed.
+    ///
+    /// The record keeps a bounded prefix of every value; a result longer than
+    /// that survives as a prefix, a length and a hash, which identifies it but
+    /// cannot reproduce it. Handing a truncated serialisation back to an agent
+    /// would be worse than refusing: it may not even parse, and if it did the
+    /// Bot would be answering a question about a value nobody ever gave it.
+    ///
+    /// Distinct from [`DIVERGED`] because the Bot did nothing wrong — the
+    /// record is the thing that cannot answer.
+    pub const NOT_REPLAYABLE: i32 = -32009;
 }
 
 impl Request {

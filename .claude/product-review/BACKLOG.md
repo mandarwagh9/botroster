@@ -304,7 +304,7 @@ Five mutations were run against it. The one that mattered: removing the record f
 left every test passing, because nothing covered the path every `fs.*` and `shell.exec` call takes.
 That is now `a_call_that_reaches_the_guest_is_recorded_with_how_it_ended`, against a real guest.
 
-### T6-2 — a past run cannot be re-run. `open`
+### T6-2 — a past run cannot be re-run. `done` (the mechanism; no command yet)
 `P1` · reach: most users · `PROPOSAL-run-records.md` §3.2
 
 *Durable fix:* a stub at the hub's forwarding point that answers every `tool.call` from the
@@ -312,6 +312,35 @@ recording instead of forwarding it. Enforced by the same code path that enforces
 touches nothing — no file written, no page opened, no outbound call — which is what makes it safe to
 run on the machine a person actually works on. A call the recording does not contain is a
 **divergence**, not an error, and naming the step where it happened is the output.
+
+**Closed 2026-08-29 — the mechanism only.** `session_open` takes `replay: Option<{bot, session}>`
+(`#[serde(default)]`, so every existing client is unchanged on the wire) and the branch sits in
+`tool_call` *before* policy, the hook, approvals and the forward. That placement is the guarantee,
+not a nicety: replay's whole claim is that it touches nothing, and the way that is enforced is by
+never reaching the code that forwards.
+
+- Matched **by position**, then tool name, then the **hash** of the canonical arguments. The hash
+  and not the kept prefix: two long argument sets can share four kilobytes and differ after.
+- Refusals replay as refusals. Replaying one as a success would make the Bot take a branch it never
+  took, and every step after would be a divergence the replay itself caused.
+- A first divergence sets a flag and every later call reports it. Otherwise the output is a list of
+  differences that are all consequences of the first, burying the finding.
+- **A result the record could not keep whole is not replayed** — `NOT_REPLAYABLE`, distinct from
+  `DIVERGED`, because the Bot did nothing different and the record is what cannot answer. Proven by
+  a mutation: handing the prefix over fails with `EOF while parsing a string at line 1 column 4096`,
+  which is what a truncated *serialisation* does.
+- **A replay is not recorded.** It did not happen, and a record of it would sit beside the real ones
+  and be listed by `bot record` as work the Bot did twice.
+
+Found while building it: **forwarded calls were recording the RPC envelope** (`{call_id, output}`)
+while internal tools recorded the bare output — two shapes in one file, differing by which side of
+the wire a tool happened to live on, which is the distinction the catalogue takes trouble to hide.
+Fixed. It surfaced because a replay returned the old envelope, complete with the original call id,
+wrapped inside a new one.
+
+**No command yet, on purpose.** The hub sees sessions, not turns, so it cannot know what a run was
+*asked* to do — recorded in T6-1 and still true. Whoever drives a replay has to supply the task, and
+answering that badly now would put a guess into a file format. It is T6-3's question.
 
 ### T6-3 — changing a Bot's brief is unfalsifiable. `open`
 `P0` · reach: everyone who chose an open product in order to change something

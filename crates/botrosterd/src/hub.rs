@@ -116,6 +116,32 @@ struct Session {
     policy: Policy,
     /// Which Bot the session acts as, for attributing handoffs.
     bot: Option<String>,
+    /// Set when this session answers from a record instead of doing anything.
+    replay: Option<Replaying>,
+}
+
+/// A session being served from a past session's record.
+///
+/// Held in the session rather than on the hub because replaying is a property
+/// of one conversation: a window can have a replay open beside a Bot doing real
+/// work, and neither should be able to affect the other.
+#[derive(Debug)]
+struct Replaying {
+    /// What was recorded, oldest first.
+    steps: Vec<crate::record::Step>,
+    /// How far through it this run has got. Compared position by position: a
+    /// replay is a claim about a *sequence*, so matching a call against any
+    /// step that happens to look similar would report agreement where there is
+    /// none.
+    at: usize,
+    /// Set on the first divergence and never cleared.
+    ///
+    /// Once a run has done something the record does not describe, every step
+    /// after it is being compared against a record that has stopped describing
+    /// this run. Continuing would produce a list of differences that are all
+    /// consequences of the first one, which buries the finding under its own
+    /// fallout.
+    diverged: bool,
 }
 
 /// A tool call in flight: who asked for it, and who is doing it.
@@ -970,6 +996,95 @@ impl Hub {
         self.finish_relay(relay, resp.outcome).await;
     }
 
+    /// Answer one call from the record, or say why it cannot be.
+    ///
+    /// Matched by position, then by tool name and by the **hash** of the
+    /// canonical arguments. The hash rather than the kept prefix: two argument
+    /// sets longer than the cap could share their first four kilobytes and
+    /// differ after, and reporting those as the same call is exactly the
+    /// failure `Captured::sha256` was added to prevent.
+    fn from_the_record(
+        replay: &mut Replaying,
+        tool: &str,
+        args: &crate::record::Captured,
+    ) -> Result<serde_json::Value, RpcError> {
+        use crate::record::Ended;
+
+        if replay.diverged {
+            return Err(err(
+                codes::DIVERGED,
+                "this run already diverged; nothing after that point is comparable",
+            ));
+        }
+
+        let Some(step) = replay.steps.get(replay.at) else {
+            replay.diverged = true;
+            return Err(err(
+                codes::DIVERGED,
+                &format!(
+                    "the record has {} steps and this run is asking for another one: `{tool}`",
+                    replay.steps.len()
+                ),
+            ));
+        };
+
+        if step.tool != tool || step.args.sha256 != args.sha256 {
+            replay.diverged = true;
+            let what = if step.tool == tool {
+                format!(
+                    "`{tool}` with different arguments
+  was {}",
+                    step.args.head
+                )
+            } else {
+                format!("`{}`, and this run asked for `{tool}`", step.tool)
+            };
+            return Err(err(
+                codes::DIVERGED,
+                &format!("step {} of the record is {what}", replay.at + 1),
+            ));
+        }
+
+        replay.at += 1;
+        match &step.ended {
+            Ended::Ok(value) => {
+                // A value the record could not keep whole cannot be handed
+                // back. The kept prefix is a truncated *serialisation*, so it
+                // frequently is not even parseable — and if it happened to be,
+                // the Bot would be answering about a value nobody ever gave it.
+                // Saying so is the honest answer; `bytes` and `sha256` are what
+                // make it possible to say it precisely.
+                if !value.is_complete() {
+                    return Err(err(
+                        codes::NOT_REPLAYABLE,
+                        &format!(
+                            "step {} returned {} bytes and the record keeps {}",
+                            replay.at,
+                            value.bytes,
+                            value.head.len()
+                        ),
+                    ));
+                }
+                serde_json::from_str(&value.head).map_err(|e| {
+                    err(
+                        codes::NOT_REPLAYABLE,
+                        &format!("step {} of the record does not parse: {e}", replay.at),
+                    )
+                })
+            }
+            // A failure is a result. Replaying it as success would change what
+            // the Bot saw, which is the one thing a replay must not do.
+            Ended::Failed(why) => Err(err(codes::TOOL_FAILED, &why.head)),
+            Ended::Refused => Err(err(
+                codes::APPROVAL_DENIED,
+                &format!(
+                    "step {} was refused when this was recorded: {:?}",
+                    replay.at, step.decided
+                ),
+            )),
+        }
+    }
+
     /// End a forwarded call, whichever of its three endings arrived.
     ///
     /// A tool call could only end one way before this existed: the server
@@ -998,7 +1113,20 @@ impl Hub {
         if let Some(pending) = &relay.record {
             let ended = match &outcome {
                 Outcome::Result(value) => {
-                    crate::record::Ended::Ok(crate::record::Captured::of(value))
+                    // What the *tool* returned, not the frame it came back in.
+                    //
+                    // A forwarded result arrives as a `ToolCallResult`, so the
+                    // obvious `Captured::of(value)` records `{call_id, output}`
+                    // — while an internal tool a few lines up records just its
+                    // output. Two shapes in one file, differing by which side
+                    // of the wire the tool happened to live on, which is
+                    // exactly what the catalogue takes trouble to hide.
+                    //
+                    // It also made a replay return the old envelope, complete
+                    // with the original call id, wrapped inside a new one. That
+                    // is how this was found.
+                    let output = value.get("output").unwrap_or(value);
+                    crate::record::Ended::Ok(crate::record::Captured::of(output))
                 }
                 Outcome::Error(e) => {
                     crate::record::Ended::Failed(crate::record::Captured::of_str(&e.message))
@@ -1069,6 +1197,41 @@ impl Hub {
             .session_id
             .unwrap_or_else(|| SessionId::new(self.next("sess")));
 
+        // Read before the lock: this touches a file, and holding the hub's
+        // state mutex across a disk read would stall every other session for
+        // as long as it takes. Once per replayed session, never on the path a
+        // tool call takes.
+        let replay = match (&p.replay, self.sessions.as_ref()) {
+            (Some(want), Some(log)) => {
+                let steps = log.steps(&want.bot, &want.session);
+                if steps.is_empty() {
+                    return Err(err(
+                        codes::INVALID_PARAMS,
+                        &format!(
+                            "there is no record of session `{}` for `{}` to replay",
+                            want.session, want.bot
+                        ),
+                    ));
+                }
+                Some(Replaying {
+                    steps,
+                    at: 0,
+                    diverged: false,
+                })
+            }
+            // Asked for a replay on a hub that records nothing. Refused rather
+            // than quietly served live: a caller that asked for a replay is
+            // asking for the guarantee that nothing runs, and silently running
+            // it for real is the worst possible answer.
+            (Some(_), None) => {
+                return Err(err(
+                    codes::INVALID_PARAMS,
+                    "this hub keeps no records, so there is nothing to replay",
+                ))
+            }
+            (None, _) => None,
+        };
+
         let mut st = self.state.lock().await;
         let policy = st.default_policy.clone();
         st.sessions.insert(
@@ -1079,6 +1242,7 @@ impl Hub {
                 tools: Vec::new(),
                 policy,
                 bot: p.bot.clone(),
+                replay,
             },
         );
         // The principal may now act on the session; dispatch checks it later.
@@ -1286,6 +1450,43 @@ impl Hub {
         // Filled in below: `noting` cannot be built until the session says
         // which Bot it acts as, which is read under the same lock as the
         // policy so the two cannot disagree.
+
+        // A replaying session is answered here and goes no further.
+        //
+        // Before policy, before the hook, before an approval and before the
+        // forward — because none of them should happen. Nothing is going to
+        // run, so nothing needs approving, and waking somebody to approve a
+        // call that will not happen is how people learn to answer prompts
+        // without reading them.
+        //
+        // The placement is also the guarantee. Replay's whole claim is that it
+        // touches nothing, and the way that is enforced is by never reaching
+        // the code that forwards, in the same function that already refuses to
+        // forward an unapproved call. An agent asked to behave is not a
+        // guarantee; a branch it cannot get past is.
+        {
+            let mut st = self.state.lock().await;
+            if let Some(replay) = st.sessions.get_mut(&sid).and_then(|s| s.replay.as_mut()) {
+                {
+                    let answer =
+                        Self::from_the_record(replay, params.tool_id.as_str(), &recorded_args);
+                    return Some(match answer {
+                        Ok(output) => Response::ok(
+                            origin_id,
+                            ToolCallResult {
+                                call_id: params.call_id,
+                                output,
+                            },
+                        ),
+                        Err(e) => Response {
+                            jsonrpc: "2.0".into(),
+                            id: origin_id,
+                            outcome: Outcome::Error(e),
+                        },
+                    });
+                }
+            }
+        }
 
         // Policy first: nothing is dispatched, and no tool server is even
         // contacted, until the verdict is Allow.
