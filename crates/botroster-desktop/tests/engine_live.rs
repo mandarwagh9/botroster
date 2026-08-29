@@ -1167,8 +1167,21 @@ async fn a_key_that_could_never_be_sent_is_refused_when_it_is_stored() {
 /// Returns `None` rather than panicking so the caller can say what it was
 /// looking for. It never skips: a suite that cannot find the child has lost
 /// the thing this test exists to kill.
-fn spawned_agent_pid() -> Option<u32> {
+fn spawned_agent_pid(home: &std::path::Path) -> Option<u32> {
     let me = std::process::id();
+    // Matched on this engine's own `--home`, not on ` acp` alone.
+    //
+    // There are twenty `Engine::connect` calls in this file and `cargo test`
+    // runs them concurrently, so several `botroster acp` processes are children
+    // of this one test process at any moment. Matching ` acp` found all of them
+    // and took whichever came first, so this test regularly killed *another
+    // test's* agent and then waited twenty seconds for its own — healthy —
+    // agent to notice. That is the CI failure at 0.4.1: it killed pid 26846 and
+    // reported pid 26872 still running.
+    //
+    // The home is unique per engine and is already on the command line, so it
+    // is the discriminator that needs no new plumbing.
+    let home = home.to_string_lossy().into_owned();
     #[cfg(windows)]
     let out = std::process::Command::new("powershell")
         .args([
@@ -1176,7 +1189,8 @@ fn spawned_agent_pid() -> Option<u32> {
             "-Command",
             &format!(
                 "Get-CimInstance Win32_Process -Filter 'ParentProcessId={me}' | \
-                 Where-Object {{ $_.CommandLine -like '* acp*' }} | \
+                 Where-Object {{ $_.CommandLine -like '* acp*' -and \
+                 $_.CommandLine -like '*{home}*' }} | \
                  Select-Object -First 1 -ExpandProperty ProcessId"
             ),
         ])
@@ -1184,12 +1198,20 @@ fn spawned_agent_pid() -> Option<u32> {
         .ok()?;
     #[cfg(not(windows))]
     let out = std::process::Command::new("pgrep")
-        .args(["-P", &me.to_string(), "-f", " acp"])
+        .args(["-P", &me.to_string(), "-f", &format!("acp --home {home}")])
         .output()
         .ok()?;
-    String::from_utf8_lossy(&out.stdout)
+    let found: Vec<u32> = String::from_utf8_lossy(&out.stdout)
         .lines()
-        .find_map(|line| line.trim().parse().ok())
+        .filter_map(|line| line.trim().parse().ok())
+        .collect();
+    // Exactly one, or the discriminator is not discriminating and killing the
+    // first would be the bug this replaced.
+    match found.as_slice() {
+        [pid] => Some(*pid),
+        [] => None,
+        many => panic!("`--home {home}` matched {} agents: {many:?}", many.len()),
+    }
 }
 
 /// A dead agent stops reporting itself alive.
@@ -1231,7 +1253,7 @@ async fn an_agent_that_was_killed_stops_reporting_itself_alive() {
         "it should be up before anything kills it, or the assertion below proves nothing"
     );
 
-    let pid = spawned_agent_pid().expect(
+    let pid = spawned_agent_pid(agent_home).expect(
         "could not find the `botroster acp` this test spawned, so there is nothing to kill",
     );
     #[cfg(windows)]
