@@ -41,6 +41,11 @@ pub async fn hub_from_home(
     admission: Admission,
 ) -> anyhow::Result<Booted> {
     let bots = Arc::new(botroster_bots::BotStore::open(home)?);
+    // The record of what each session did, written beside the Bot it belongs
+    // to. Shared with the tool provider rather than opened twice: `BotStore`
+    // keeps a root and re-reads, so a second instance would behave identically
+    // and there would be two answers to "which store".
+    let sessions = Arc::new(crate::record::ToBotStore::spawn(Arc::clone(&bots)));
     let mut sources: Vec<Arc<dyn InternalTools>> =
         vec![Arc::new(crate::bot_tools::BotTools::new(bots))];
 
@@ -70,6 +75,7 @@ pub async fn hub_from_home(
     // when a connector exists: a new connector's first need is a token.
     let mut hub = Hub::with_policy(policy)
         .admitting(admission)
+        .recording_to(sessions)
         .with_internal_tools(Arc::new(Composite::new(sources)))
         .with_secrets(secrets);
 

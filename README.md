@@ -97,6 +97,7 @@ one, so a Bot you make in either shows up in the other.
 | **Credentials the Bot never reads** | A broker holds tokens. Connectors attach them at the moment of the outbound call, inside the hub, and upstream errors are scrubbed before they are returned. |
 | **Two ways in** | `botroster acp` speaks the Agent Client Protocol to any editor that does. The desktop client runs over the same surface. |
 | **Routines** | Cron and event triggers, with an inactivity brake: routines pause when nobody has looked at the account for a while. |
+| **A record of the work** | The hub writes down every tool call a Bot makes — the arguments, whether policy allowed it or a person did, and how it ended. Written by the control plane rather than by the agent, so it is not a report the Bot writes about itself. `botroster bot record <bot>` reads it back. |
 
 ## Status
 
@@ -129,6 +130,7 @@ botroster bot ls
 botroster bot show talent-scout
 botroster bot send talent-scout "the Rust role is open again"    # lands in its inbox for its next run
 botroster run --bot talent-scout "find three candidates for the Rust role"
+botroster bot record talent-scout      # every tool it called, how it was allowed, how it ended
 botroster group new hiring --members talent-scout,expense-manager
 botroster group post hiring "@talent-scout what did you find?"
 botroster routine new talent-scout morning --cron "0 9 * * *" --instructions "summarise overnight applications"

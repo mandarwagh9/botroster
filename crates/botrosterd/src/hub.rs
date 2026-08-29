@@ -142,6 +142,48 @@ struct Relay {
     /// back off a success payload would leak the entry whenever a tool fails,
     /// which is a normal outcome.
     call_id: ToolCallId,
+    /// What the record needs, carried from the decision to the ending.
+    ///
+    /// A forwarded call is decided in `tool_call` and ends in `finish_relay`,
+    /// and only the first of those knows the tool, the arguments and how the
+    /// call was permitted. Looking any of it back up at the end is not an
+    /// option: the session's policy may have changed in between (an "allow for
+    /// the session" answer rewrites it), so the record would report the state
+    /// at the end as though it were the state at the decision.
+    ///
+    /// `None` when nothing is recording, or when the session names no Bot.
+    record: Option<Box<Noting>>,
+}
+
+/// Everything about a call that is known before it ends.
+///
+/// Built once in `tool_call` and used by both paths: the endings decided in the
+/// hub read it immediately, and a forwarded call carries it in its [`Relay`]
+/// until `finish_relay`. One value rather than eight arguments, which is also
+/// what stops the two paths recording subtly different things.
+#[derive(Debug, Clone)]
+struct Noting {
+    /// `None` for a session that names no Bot, which is not recorded at all.
+    bot: Option<String>,
+    session: SessionId,
+    tool: String,
+    args: crate::record::Captured,
+    decided: crate::record::Decided,
+    started: std::time::Instant,
+}
+
+impl Noting {
+    /// The same call, decided another way.
+    ///
+    /// A refusal is the same tool with the same arguments at the same moment;
+    /// only the verdict differs, and copying the rest by hand at each of the
+    /// four refusal sites is how two of them end up disagreeing.
+    fn decided(&self, decided: crate::record::Decided) -> Self {
+        Self {
+            decided,
+            ..self.clone()
+        }
+    }
 }
 
 #[derive(Default)]
@@ -263,6 +305,9 @@ pub struct Hub {
     internal: Option<Arc<dyn InternalTools>>,
     /// Who this hub admits at the handshake. See [`Admission`].
     admission: Admission,
+    /// Where what a session did is written, if anywhere. See
+    /// [`crate::record`].
+    sessions: Option<Arc<dyn crate::record::SessionLog>>,
     /// Injectable so the fail-closed path is reachable in a test without
     /// waiting two minutes.
     approval_timeout: std::time::Duration,
@@ -299,6 +344,7 @@ impl Hub {
             seq: AtomicU64::new(1),
             internal: None,
             admission: Admission::Anyone,
+            sessions: None,
             approval_timeout: DEFAULT_APPROVAL_TIMEOUT,
             call_timeout: DEFAULT_CALL_TIMEOUT,
             hooks: None,
@@ -317,6 +363,42 @@ impl Hub {
     pub fn admitting(mut self, admission: Admission) -> Self {
         self.admission = admission;
         self
+    }
+
+    /// Write down what each session does.
+    ///
+    /// Off by default, so every hub built before this existed — and every test
+    /// that builds one directly — behaves exactly as it did. The shipped hubs
+    /// turn it on in `boot::hub_from_home`, which is the only place that knows
+    /// where a Bot's files live.
+    #[must_use]
+    pub fn recording_to(mut self, log: Arc<dyn crate::record::SessionLog>) -> Self {
+        self.sessions = Some(log);
+        self
+    }
+
+    /// Write one step down, if anything is listening and the session has a Bot
+    /// to attribute it to.
+    ///
+    /// One helper rather than the same three lines at six endings: a call can
+    /// finish by policy, by a hook, by a person saying no, as an internal tool,
+    /// as a stored credential, or out at the guest, and a record missing one of
+    /// those is worse than no record — it reads as "the Bot did not do that".
+    fn note(&self, ctx: &Noting, ended: crate::record::Ended) {
+        let (Some(log), Some(bot)) = (self.sessions.as_ref(), ctx.bot.as_deref()) else {
+            return;
+        };
+        log.record(
+            bot,
+            &ctx.session,
+            crate::record::StepDraft {
+                tool: ctx.tool.clone(),
+                args: ctx.args.clone(),
+                decided: ctx.decided.clone(),
+                ended,
+                hub_ms: ctx.started.elapsed().as_millis() as u64,
+            },
+        );
     }
 
     /// Serve these tools from the hub itself.
@@ -908,6 +990,22 @@ impl Hub {
     /// and must not leak either.
     async fn finish_relay(self: &Arc<Self>, relay: Relay, outcome: Outcome) {
         self.state.lock().await.calls.remove(&relay.call_id);
+        // Recorded here because this is the *only* place a forwarded call ends.
+        // The server's answer, the server's disconnect and the deadline all
+        // arrive through this function — which is why it exists — so a record
+        // written here cannot miss the two endings that are not a reply, and
+        // those are exactly the ones somebody debugging comes looking for.
+        if let Some(pending) = &relay.record {
+            let ended = match &outcome {
+                Outcome::Result(value) => {
+                    crate::record::Ended::Ok(crate::record::Captured::of(value))
+                }
+                Outcome::Error(e) => {
+                    crate::record::Ended::Failed(crate::record::Captured::of_str(&e.message))
+                }
+            };
+            self.note(pending, ended);
+        }
         self.send(
             &relay.origin_conn,
             &Frame::Response(Response {
@@ -1178,14 +1276,26 @@ impl Hub {
             }
         };
 
+        // Captured before anything can change it. The arguments are recorded
+        // as they arrived, and the clock starts here so `hub_ms` covers the
+        // whole of what the hub did — including the time a person spent looking
+        // at an approval dialog, which is usually the interesting part.
+        let started = std::time::Instant::now();
+        let recorded_args = crate::record::Captured::of(&params.args);
+        let tool_name = params.tool_id.as_str().to_owned();
+        // Filled in below: `noting` cannot be built until the session says
+        // which Bot it acts as, which is read under the same lock as the
+        // policy so the two cannot disagree.
+
         // Policy first: nothing is dispatched, and no tool server is even
         // contacted, until the verdict is Allow.
-        let (verdict, owner) = {
+        let (verdict, owner, as_bot) = {
             let st = self.state.lock().await;
             match st.sessions.get(&sid) {
                 Some(s) => (
                     s.policy.evaluate(params.tool_id.as_str(), &params.args),
                     s.owner.clone(),
+                    s.bot.clone(),
                 ),
                 None => {
                     return Some(Response::err(
@@ -1195,6 +1305,17 @@ impl Hub {
                     ))
                 }
             }
+        };
+
+        let noting = Noting {
+            bot: as_bot.clone(),
+            session: sid.clone(),
+            tool: tool_name,
+            args: recorded_args,
+            // The starting point. Each ending replaces it with what actually
+            // decided the call.
+            decided: crate::record::Decided::Policy,
+            started,
         };
 
         // A `PreToolUse` hook gets its veto before anyone is asked anything.
@@ -1209,6 +1330,10 @@ impl Hub {
                     .check(&sid, params.tool_id.as_str(), &params.args)
                     .await
                 {
+                    self.note(
+                        &noting.decided(crate::record::Decided::RefusedByHook(why.clone())),
+                        crate::record::Ended::Refused,
+                    );
                     return Some(Response::err(
                         origin_id,
                         codes::APPROVAL_DENIED,
@@ -1218,14 +1343,21 @@ impl Hub {
             }
         }
 
+        // How this call came to be permitted, for the record. Overwritten by
+        // the `Ask` arm when a person is the one who decided.
+        let mut decided = crate::record::Decided::Policy;
         match verdict {
             Verdict::Allow => {}
             Verdict::Deny(reason) => {
+                self.note(
+                    &noting.decided(crate::record::Decided::RefusedByPolicy(reason.clone())),
+                    crate::record::Ended::Refused,
+                );
                 return Some(Response::err(
                     origin_id,
                     codes::APPROVAL_DENIED,
                     format!("refused by policy: {reason}"),
-                ))
+                ));
             }
             Verdict::Ask(reason) => {
                 let decision = self
@@ -1240,6 +1372,10 @@ impl Hub {
                     .await;
                 match decision {
                     Ok(d) if d.decision.permits() => {
+                        // Which permission they gave, not merely that they gave
+                        // one: "allow for the session" is what explains every
+                        // call after it that nobody was asked about.
+                        decided = crate::record::Decided::Person(format!("{:?}", d.decision));
                         if d.decision == Decision::AllowAlways {
                             let mut st = self.state.lock().await;
                             if let Some(sess) = st.sessions.get_mut(&sid) {
@@ -1249,13 +1385,27 @@ impl Hub {
                     }
                     Ok(d) => {
                         let note = d.note.unwrap_or_else(|| "denied".into());
+                        self.note(
+                            &noting.decided(crate::record::Decided::RefusedByPerson(note.clone())),
+                            crate::record::Ended::Refused,
+                        );
                         return Some(Response::err(
                             origin_id,
                             codes::APPROVAL_DENIED,
                             format!("denied by the approver: {note}"),
                         ));
                     }
-                    Err(why) => return Some(Response::err(origin_id, codes::APPROVAL_DENIED, why)),
+                    Err(why) => {
+                        // Timed out, withdrawn, or nobody there to ask. All of
+                        // them are a refusal and all of them belong in the
+                        // record: a step that vanished reads as one the Bot
+                        // never attempted.
+                        self.note(
+                            &noting.decided(crate::record::Decided::RefusedByPerson(why.clone())),
+                            crate::record::Ended::Refused,
+                        );
+                        return Some(Response::err(origin_id, codes::APPROVAL_DENIED, why));
+                    }
                 }
             }
         }
@@ -1311,12 +1461,22 @@ impl Hub {
                     format!("could not store `{name}`: {e}"),
                 ));
             }
+            let stored = serde_json::to_value(SecretStoredResult { name, fingerprint })
+                .expect("the stored result serialises");
+            // What is recorded is this result, which is the name and a
+            // fingerprint — `SecretStoredResult` has no field for the value, by
+            // design, because a tool result travels into the conversation and
+            // onto disk. The credential the person just typed is not in scope
+            // here and must never be given one.
+            self.note(
+                &noting.decided(decided),
+                crate::record::Ended::Ok(crate::record::Captured::of(&stored)),
+            );
             return Some(Response::ok(
                 origin_id,
                 ToolCallResult {
                     call_id: params.call_id,
-                    output: serde_json::to_value(SecretStoredResult { name, fingerprint })
-                        .expect("the stored result serialises"),
+                    output: stored,
                 },
             ));
         }
@@ -1327,23 +1487,34 @@ impl Hub {
         // client that could skip the check.
         if let Some(internal) = self.internal.clone() {
             if internal.serves(params.tool_id.as_str()) {
-                let as_bot = {
-                    let st = self.state.lock().await;
-                    st.sessions.get(&sid).and_then(|s| s.bot.clone())
-                };
                 return Some(
                     match internal
                         .invoke(as_bot.as_deref(), params.tool_id.as_str(), &params.args)
                         .await
                     {
-                        Ok(output) => Response::ok(
-                            origin_id,
-                            ToolCallResult {
-                                call_id: params.call_id,
-                                output,
-                            },
-                        ),
-                        Err(e) => Response::err(origin_id, codes::TOOL_FAILED, e),
+                        Ok(output) => {
+                            self.note(
+                                &noting.decided(decided),
+                                crate::record::Ended::Ok(crate::record::Captured::of(&output)),
+                            );
+                            Response::ok(
+                                origin_id,
+                                ToolCallResult {
+                                    call_id: params.call_id,
+                                    output,
+                                },
+                            )
+                        }
+                        Err(e) => {
+                            // A failed tool is an ordinary outcome and belongs
+                            // in the record as much as a successful one — more,
+                            // since it is what somebody will come looking for.
+                            self.note(
+                                &noting.decided(decided),
+                                crate::record::Ended::Failed(crate::record::Captured::of_str(&e)),
+                            );
+                            Response::err(origin_id, codes::TOOL_FAILED, e)
+                        }
                     },
                 );
             }
@@ -1443,6 +1614,14 @@ impl Hub {
                     target: server_conn.clone(),
                     origin_id: origin_id.clone(),
                     call_id: params.call_id.clone(),
+                    // Only built when something is recording and the session
+                    // names a Bot, so a hub with no log allocates nothing per
+                    // call.
+                    record: self
+                        .sessions
+                        .as_ref()
+                        .zip(as_bot.as_ref())
+                        .map(|_| Box::new(noting.decided(decided.clone()))),
                 },
             );
             st.calls.insert(

@@ -105,10 +105,24 @@ Three decisions were recorded before this loop started and are still the operato
 1. **The app icon's origin is unconfirmed.** `PROVENANCE.md` §4 records it honestly rather than
    claiming a licence. It ships in every release. Everything derives from one file, so swapping it
    is a one-command change.
-2. **The page suite flakes**, twice now, on different tests, passing 3/3 in isolation both times.
-   The shape of the fix is recorded in `.claude/ux-loop/MEMORY.md`: retry once, and only on
+2. **The page suite flakes.** The recorded fix — retry once, and only on
    `chrome-error://chromewebdata/`, which is a navigation that never completed and is
-   distinguishable from an assertion failure. A blanket retry would hide real failures.
+   distinguishable from an assertion failure — **was implemented** and is in `page.rs:227-241`. A
+   blanket retry would hide real failures, and that reasoning still holds.
+
+   It is no longer enough. Third occurrence 2026-08-29, on
+   `an_hourly_routine_does_not_ask_what_time_it_runs`, in a full `--workspace` run: the retry fired
+   (`navigation retried: true`) and the second navigation landed on the error page too. The suite
+   then passed 101/101 on its own and 1/1 for that test alone, as both earlier occurrences did.
+
+   What the new data point says: the cause is **contention**, not a one-off. All three failures are
+   in the full workspace run, where the page suite shares a machine with the live hub, guest and
+   browser suites; none has ever reproduced alone. So the next move is not a wider retry — it is to
+   find out what the page suite is contending with. `BOTROSTER_REQUIRE_BROWSER=1` in CI means a
+   missing browser fails rather than skips, so this cannot be hidden by a skip either.
+
+   Still the operator's call, and still not worth spending an iteration on while it costs one
+   re-run.
 3. **`DIRECTION.md`'s neutral-accent derivation was never applied.** The shipped `--accent` is
    `#6f45e0` violet, and the derivation said colour in this app means status and never emphasis.
    One of the two is wrong and nobody has decided which.

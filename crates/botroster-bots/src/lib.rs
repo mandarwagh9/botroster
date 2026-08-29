@@ -148,6 +148,19 @@ impl BotStore {
     fn log_path(&self, id: &BotId) -> PathBuf {
         self.dir(id).join("conversation.jsonl")
     }
+    /// Where the hub writes what a session did.
+    ///
+    /// `sessions/`, not `runs/`. The hub sees sessions; it does not see turns
+    /// or prompts, and a "run" means a turn to anybody reading it. Those
+    /// coincide for `botroster run`, which opens one session per invocation,
+    /// and do not for the desktop client, which keeps one session across a
+    /// whole conversation. Naming the directory after what is actually in it
+    /// costs nothing now and saves a rename later.
+    fn session_path(&self, id: &BotId, session: &str) -> PathBuf {
+        self.dir(id)
+            .join("sessions")
+            .join(format!("{session}.jsonl"))
+    }
 
     /// Turn a display name into a stable, filesystem-safe id.
     pub fn slug(name: &str) -> Result<BotId> {
@@ -415,6 +428,74 @@ impl BotStore {
     pub fn duplicate(&self, id: &BotId, new_name: &str) -> Result<Bot> {
         let src = self.get(id)?;
         self.create(new_name, &src.title, &src.description)
+    }
+
+    // ── the record of what a session did ──────────────────────────────
+
+    /// Append one already-serialised line to a session's record.
+    ///
+    /// Takes a line rather than a typed step because the type belongs to the
+    /// hub, which owns what a record means; this crate owns where a Bot's
+    /// files live and nothing else. The dependency runs that way round —
+    /// `botrosterd` knows about Bots, and this crate must not learn about the
+    /// hub to store a string for it.
+    ///
+    /// Append-only, through the same helper `conversation.jsonl` uses, for the
+    /// same reason: a single append-mode `write_all` is atomic on the
+    /// platforms this ships to, so two writers interleave whole lines rather
+    /// than splicing one into another.
+    ///
+    /// # Errors
+    /// If the directory cannot be created or the file cannot be appended to.
+    pub fn append_session(&self, id: &BotId, session: &str, line: &str) -> Result<()> {
+        let path = self.session_path(id, session);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        append_lines(&path, [line.to_owned()])
+    }
+
+    /// Every line of one session's record, oldest first.
+    ///
+    /// Returns an empty vector for a session that was never recorded, rather
+    /// than an error: a Bot that has done nothing is the ordinary state of a
+    /// new one, and a caller listing records should not have to tell "no such
+    /// session" from "no such Bot".
+    ///
+    /// # Errors
+    /// If the file exists and cannot be read.
+    pub fn session_record(&self, id: &BotId, session: &str) -> Result<Vec<String>> {
+        let path = self.session_path(id, session);
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        Ok(fs::read_to_string(&path)?
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(str::to_owned)
+            .collect())
+    }
+
+    /// Which sessions this Bot has a record for, oldest first by name.
+    ///
+    /// # Errors
+    /// If the directory exists and cannot be listed.
+    pub fn sessions(&self, id: &BotId) -> Result<Vec<String>> {
+        let dir = self.dir(id).join("sessions");
+        if !dir.is_dir() {
+            return Ok(Vec::new());
+        }
+        let mut out: Vec<String> = fs::read_dir(&dir)?
+            .filter_map(std::result::Result::ok)
+            .filter_map(|e| {
+                let p = e.path();
+                (p.extension()? == "jsonl")
+                    .then(|| p.file_stem()?.to_str().map(str::to_owned))
+                    .flatten()
+            })
+            .collect();
+        out.sort();
+        Ok(out)
     }
 
     // ── conversation ──────────────────────────────────────────────────

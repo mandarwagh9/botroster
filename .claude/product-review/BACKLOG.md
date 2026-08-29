@@ -267,7 +267,7 @@ competes on *what happened, and what of it can be taken back*.
 Ordered so each step ships something usable and none of it is wasted if the next is dropped.
 Steps T6-1 to T6-3 need no change to `botroster-store` at all.
 
-### T6-1 — a run is not an artefact. `open`
+### T6-1 — a run is not an artefact. `done`
 `P1` · reach: all users · `PROPOSAL-run-records.md` §3.1
 
 Nothing durable records what a run did. `conversation.jsonl` holds the messages; the tool calls,
@@ -277,6 +277,32 @@ recorded thing can edit is not a record, for the same reason the policy gate is 
 
 *Durable fix:* `<home>/bots/<id>/runs/<run-id>.jsonl`, append-only, beside the conversation log that
 already works this way. Must not be able to contain a credential; that gets its own failing test.
+
+**Closed 2026-08-29.** `crates/botrosterd/src/record.rs`, written at both ends of a call: the five
+endings decided inside the hub, and `finish_relay` for everything forwarded to the guest — which is
+the one place a forwarded call ends, and therefore the only place that catches the two endings that
+are *not* a reply. `botroster bot record <bot>` reads it back.
+
+Decisions worth keeping:
+
+- **`sessions/`, not `runs/`.** The hub sees sessions; it does not see turns or prompts. A "run"
+  means a turn to anybody reading it, and for the desktop client — one session across a whole
+  conversation — that would be false. Naming the directory after what is in it cost nothing.
+- **Every captured value carries the full byte length and a SHA-256 of the *whole* value** beside
+  the 4 KiB kept. Two different four-megabyte reads must not compare equal because their first four
+  kilobytes match, and that is exactly the comparison T6-3 makes.
+- **Arguments are canonical.** `serde_json`'s `Map` is a `BTreeMap` in this build, so keys sort and
+  the same call always records the same bytes. Without it, T6-3's first act would be re-normalising
+  every record ever written.
+- **One writer task behind a channel.** The hub never blocks on a disk to answer a tool call, and
+  the file's order is the record's order — `seq` is assigned by the writer, so two concurrent calls
+  finishing in either order still produce a file whose numbering and whose lines agree.
+- **A session naming no Bot is not recorded**, and there is a test asserting it, because the
+  alternative is a script's one-off calls landing in a teammate's history.
+
+Five mutations were run against it. The one that mattered: removing the record from `finish_relay`
+left every test passing, because nothing covered the path every `fs.*` and `shell.exec` call takes.
+That is now `a_call_that_reaches_the_guest_is_recorded_with_how_it_ended`, against a real guest.
 
 ### T6-2 — a past run cannot be re-run. `open`
 `P1` · reach: most users · `PROPOSAL-run-records.md` §3.2

@@ -12,6 +12,7 @@ pub mod hooks;
 pub mod hub;
 pub mod internal;
 pub mod policy;
+pub mod record;
 pub mod secrets;
 pub mod server;
 pub mod skills;

@@ -559,3 +559,42 @@ Two of those six were found only by running the *whole* workspace suite. I had r
 concluded from the pair that both crates were green — they were not, and `engine_live` and `viewer`
 were red for an hour. **A partial suite proves nothing about a change that crosses crates**, which
 is the same mistake as the eleven-commit CI-red stretch recorded earlier, made faster.
+
+## T6-1 — the record (2026-08-29)
+
+### The mutation that found the untested path was the only one worth running
+
+Four mutations of the recording code failed a test immediately. The fifth — deleting the record
+from `finish_relay`, where every forwarded call ends — **compiled and passed the whole file**,
+because every test used internal tools (`bot.*`, `secret.request`) that never leave the hub. The
+path that was untested is the one every `fs.read`, `shell.exec` and `browser.*` call takes, which
+is to say almost all of them.
+
+**The lesson is about which tests get written, not about mutation testing.** Internal tools were
+easy to test because they need no guest, so that is what got covered, and the coverage looked
+complete. A feature that touches two code paths needs a test on the awkward one *first*; the easy
+one will get written anyway.
+
+### A truncated value without a hash is a lie a diff will believe
+
+The record caps values at 4 KiB. The obvious version keeps a prefix — and then two different
+four-megabyte files whose first four kilobytes match record identically, so the diff this whole
+feature exists to support reports "no change" about a rewritten file. Every captured value carries
+the full byte length and a SHA-256 of the **whole** value. Cheap, and it is the difference between
+a record and a plausible-looking one.
+
+### The type system refused the leak before the test did
+
+Mutating the hub to write a credential into the record did not compile: `Secret` is moved into the
+store, so there is nothing left to read afterwards. That is a real property of `secrets.rs` and
+worth knowing — but it is not the guarantee, because the raw `String` is still in scope one line
+earlier, and cloning it made the mutation compile and the test fail as it should.
+**Structural absence is not the claim; byte-absence is**, and only the test that greps the file
+for the value checks it.
+
+### Eight arguments is a design smell, not a lint to silence
+
+`clippy::too_many_arguments` fired on the recording helper. The fix was not `#[allow]`: the eight
+values were one thing — a call, from its decision to its ending — and the forwarded path already
+needed exactly that struct to carry them across `Relay`. Grouping them removed the lint, removed a
+duplicate type, and removed the way the two recording paths could drift apart.

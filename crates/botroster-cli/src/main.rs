@@ -467,6 +467,27 @@ enum BotCmd {
     Show {
         name: String,
     },
+    /// What a Bot actually did: every tool call, how it was allowed, and how it
+    /// ended.
+    ///
+    /// Written by the hub as the work happens, not by the agent, so it records
+    /// what the Bot was *permitted* to do as well as what it asked for — and it
+    /// cannot be edited by the thing it is about. `bot log` is the
+    /// conversation; this is the work.
+    Record {
+        /// The Bot, by name or id.
+        name: String,
+        /// One session, rather than a list of them.
+        #[arg(long)]
+        session: Option<String>,
+        /// Print the recorded lines as they are stored.
+        ///
+        /// Already JSON on disk, one object per line, so this prints them
+        /// rather than re-encoding: a script and a person reading the file see
+        /// exactly the same bytes.
+        #[arg(long)]
+        json: bool,
+    },
     /// Copy a Bot's brief under a new name. The conversation is not copied.
     /// Change a Bot's name, title or description.
     ///
@@ -1102,6 +1123,18 @@ async fn run() -> anyhow::Result<()> {
                     println!("{} messages", bots.message_count(&b.id)?);
                     if !b.description.is_empty() {
                         println!("\nstanding brief:\n{}", b.description);
+                    }
+                }
+                BotCmd::Record {
+                    name,
+                    session,
+                    json,
+                } => {
+                    let b = bots.resolve(&name)?;
+                    let st = render::Style::detect();
+                    match session {
+                        Some(sid) => record_one(&bots, &b, &sid, json, st)?,
+                        None => record_list(&bots, &b, json, st)?,
                     }
                 }
                 BotCmd::Log { name, limit, full } => {
@@ -2940,6 +2973,170 @@ async fn run() -> anyhow::Result<()> {
 /// Writing to the config happens only on a yes, and only at a terminal. A
 /// person piping this somewhere has not been asked anything and must not have
 /// their configuration written for them.
+/// The sessions a Bot has a record for.
+///
+/// Listed rather than shown, because a Bot that has been working for a month
+/// has a lot of them and the useful first question is which one.
+fn record_list(
+    bots: &botroster_bots::BotStore,
+    b: &botroster_bots::Bot,
+    json: bool,
+    st: render::Style,
+) -> anyhow::Result<()> {
+    let sessions = bots.sessions(&b.id)?;
+    if json {
+        println!("{}", serde_json::to_string(&sessions)?);
+        return Ok(());
+    }
+    if sessions.is_empty() {
+        // The empty state says what would fill it. A bare "no records" invites
+        // the reading that the feature is broken.
+        println!(
+            "{} has not used a tool yet. Give it a task and this fills up:",
+            b.id
+        );
+        println!(
+            "{}",
+            st.dim(&format!("  botroster run --bot {} \"...\"", b.id))
+        );
+        return Ok(());
+    }
+    println!(
+        "{}  {}",
+        st.bold(&b.name),
+        st.dim(&plural(sessions.len(), "session"))
+    );
+    println!();
+    for sid in &sessions {
+        let steps = read_steps(bots, b, sid)?;
+        let tools = summarise(&steps);
+        println!(
+            "  {:<24}{:<12}{}",
+            sid,
+            plural(steps.len(), "step"),
+            st.dim(&tools)
+        );
+    }
+    println!();
+    println!(
+        "{}",
+        st.dim(&format!(
+            "  botroster bot record {} --session {}",
+            b.id,
+            sessions.last().map_or("<id>", String::as_str)
+        ))
+    );
+    Ok(())
+}
+
+/// Every step of one session.
+fn record_one(
+    bots: &botroster_bots::BotStore,
+    b: &botroster_bots::Bot,
+    sid: &str,
+    json: bool,
+    st: render::Style,
+) -> anyhow::Result<()> {
+    let lines = bots.session_record(&b.id, sid)?;
+    if json {
+        for line in &lines {
+            println!("{line}");
+        }
+        return Ok(());
+    }
+    if lines.is_empty() {
+        anyhow::bail!(
+            "no record of session `{sid}` for {}. `botroster bot record {}` lists the ones there are",
+            b.id,
+            b.id
+        );
+    }
+    let steps = read_steps(bots, b, sid)?;
+    println!(
+        "{}  {}",
+        st.bold(&format!("{} / {sid}", b.name)),
+        st.dim(&plural(steps.len(), "step"))
+    );
+    println!();
+    for step in &steps {
+        let (mark, tail) = match &step.ended {
+            botrosterd::record::Ended::Ok(_) => ("ok", String::new()),
+            botrosterd::record::Ended::Failed(why) => ("failed", first_line(&why.head)),
+            botrosterd::record::Ended::Refused => ("refused", why_refused(&step.decided)),
+        };
+        // Padded with `{:<n}` rather than spaces in the literal: a run of
+        // spaces inside a single-line literal is what `messages.rs` catches,
+        // and it cannot tell column alignment from a wrapped line.
+        println!(
+            "  {:<4}{:<9}{:<14}{:>7}  {}",
+            step.seq,
+            mark,
+            step.tool,
+            format!("{}ms", step.hub_ms),
+            st.dim(&first_line(&step.args.head))
+        );
+        if !tail.is_empty() {
+            println!("{}", st.dim(&format!("      {tail}")));
+        }
+    }
+    println!();
+    Ok(())
+}
+
+/// Parse a session's lines, skipping any that do not.
+///
+/// A record written by a newer build can hold a field this one does not know,
+/// and a half-written last line is possible after a hard kill. Neither is a
+/// reason to refuse to show the rest: the point of the file is that somebody
+/// can read it when something has gone wrong.
+fn read_steps(
+    bots: &botroster_bots::BotStore,
+    b: &botroster_bots::Bot,
+    sid: &str,
+) -> anyhow::Result<Vec<botrosterd::record::Step>> {
+    Ok(bots
+        .session_record(&b.id, sid)?
+        .iter()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect())
+}
+
+/// The distinct tools a session used, in the order they first appear.
+fn summarise(steps: &[botrosterd::record::Step]) -> String {
+    let mut seen: Vec<&str> = Vec::new();
+    for s in steps {
+        if !seen.contains(&s.tool.as_str()) {
+            seen.push(&s.tool);
+        }
+    }
+    if seen.len() > 4 {
+        format!("{}, and {} more", seen[..4].join(", "), seen.len() - 4)
+    } else {
+        seen.join(", ")
+    }
+}
+
+/// Who refused a step, in the words they refused it with.
+fn why_refused(decided: &botrosterd::record::Decided) -> String {
+    use botrosterd::record::Decided as D;
+    match decided {
+        D::RefusedByPolicy(w) => format!("refused by policy: {}", first_line(w)),
+        D::RefusedByHook(w) => format!("refused by a hook: {}", first_line(w)),
+        D::RefusedByPerson(w) => format!("refused: {}", first_line(w)),
+        D::Policy | D::Person(_) => String::new(),
+    }
+}
+
+/// One line of a value, bounded, for a table that must not wrap.
+fn first_line(text: &str) -> String {
+    let line = text.lines().next().unwrap_or("");
+    if line.chars().count() <= 72 {
+        return line.to_owned();
+    }
+    let cut: String = line.chars().take(71).collect();
+    format!("{cut}\u{2026}")
+}
+
 async fn welcome() -> anyhow::Result<()> {
     use std::io::{IsTerminal, Write};
 
