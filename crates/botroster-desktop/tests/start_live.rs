@@ -8,6 +8,10 @@
 
 mod common;
 
+use agent_client_protocol::schema::v1::{
+    RequestPermissionOutcome, SelectedPermissionOutcome, StopReason,
+};
+use botroster_desktop::engine::{Config, Engine};
 use botroster_desktop::hub;
 use std::time::Duration;
 
@@ -207,5 +211,136 @@ async fn the_home_the_hub_was_started_on_reaches_it() {
     assert!(
         reach.is_serving(),
         "the window could not reach a hub started on the home it was given: {reach:?}"
+    );
+}
+
+/// A window that starts its own computer can then use it.
+///
+/// The ordering no other test here exercises, and the one every real first
+/// launch takes: the window spawns `botroster acp` **first**, then looks for a
+/// computer, then starts one. Every other live test in this workspace has a hub
+/// already running before the engine connects, so all of them missed what
+/// shipped in 0.5.0 — the agent was handed the token that existed at spawn
+/// time, `botroster up` then minted a fresh one two seconds later, and since
+/// `hub_token` reads the environment before the file the agent went on
+/// presenting the dead one until the window was restarted. Every turn came back
+/// "the hub refused this connection".
+///
+/// So this drives the real sequence and then does something that needs the hub.
+/// A handshake alone would have passed throughout: the agent reaches the hub
+/// lazily, per turn, which is exactly why the failure only appeared on use.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_spawned_before_the_computer_can_still_reach_it() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let home = dir.path().join("home");
+    let hub_url = format!("ws://127.0.0.1:{}/v1/tools", free_port());
+
+    // A token from a hub that is no longer running — the ordinary state of any
+    // home a window has been opened on before, since `botroster up` writes one
+    // every start and nothing removes it on exit.
+    //
+    // **This is the whole mechanism.** Written first, this test passed with the
+    // defect restored: with an *empty* home the agent is handed nothing, falls
+    // back to `--home`, and works by accident. The bug needs a stale value to
+    // capture, which is why a real install hit it and an empty temp dir did
+    // not.
+    const STALE: &str = "a token from a hub that has already stopped";
+    botroster_proto::write_hub_token(&home, STALE).expect("seed a previous hub's token");
+
+    // The agent first, as `botroster-app`'s `connect` does it.
+    let mut engine = Engine::connect(Config {
+        botroster: common::up::botroster(),
+        home: home.clone(),
+        hub: hub_url.clone(),
+        demo: false,
+        demo_tools: true,
+        demo_secret: false,
+        bot: None,
+        api_key: None,
+    })
+    .await
+    .expect("the engine could not connect");
+
+    // Then the computer, which mints a token the agent could not have seen.
+    let _started = hub::start(
+        &common::up::botroster(),
+        &home,
+        &hub_url,
+        Duration::from_secs(90),
+    )
+    .await
+    .expect("a computer starts");
+
+    let minted = botroster_desktop::hub::token_at(&home)
+        .expect("`botroster up` writes a token into the home it was started on");
+    assert_ne!(
+        minted, STALE,
+        "`botroster up` reused the token already in the home, so nothing went stale"
+    );
+
+    // A turn that actually calls a tool. The scripted tool demo writes a file
+    // and reads it back, so it cannot succeed without the hub admitting the
+    // agent.
+    let session = engine
+        .new_session(dir.path().to_string_lossy().as_ref())
+        .await
+        .expect("the agent could not open a session against the computer it was given");
+
+    // Driven the way the shell drives it: start the turn, then drain updates
+    // and answer the dialogs it blocks on. The scripted tool demo calls
+    // `fs.write` and `shell.exec`, which the default policy asks about, and an
+    // unanswered ask is indistinguishable from a hub that never replied.
+    let mut turn = engine
+        .prompt_start(&session, "prove it")
+        .await
+        .expect("the turn did not start");
+
+    let mut updates = 0usize;
+    let stop = tokio::time::timeout(Duration::from_secs(120), async {
+        loop {
+            while engine.next_update().is_some() {
+                updates += 1;
+            }
+            while let Some(mut pending) = engine.next_permission() {
+                assert!(
+                    pending.answer(RequestPermissionOutcome::Selected(
+                        SelectedPermissionOutcome::new("allow-once"),
+                    )),
+                    "the approval this turn is blocked on refused the answer"
+                );
+            }
+            match turn.try_recv() {
+                Ok(reply) => {
+                    return reply.unwrap_or_else(|e| {
+                        panic!(
+                            "the agent could not use the computer the window started for it: \
+                             {e}\nIf this says the hub refused the connection, the agent is \
+                             presenting a token it read before `botroster up` replaced it — see \
+                             the comment in `engine.rs` about why this child is given `--home` \
+                             and no token."
+                        )
+                    })
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                    panic!("`botroster acp` is gone")
+                }
+            }
+        }
+    })
+    .await
+    .expect("the turn did not finish in time");
+
+    assert_eq!(
+        stop,
+        StopReason::EndTurn,
+        "the scripted tool demo completes when its tools are allowed, so anything else means \
+         the turn broke"
+    );
+    assert!(
+        updates > 0,
+        "the turn produced no updates, so it proves nothing about reaching the computer"
     );
 }

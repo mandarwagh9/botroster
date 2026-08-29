@@ -241,10 +241,12 @@ fn every_child_pointed_at_a_hub_is_given_the_token_for_it() {
             }
             checked += 1;
             assert!(
-                chunk.contains("HUB_TOKEN_ENV"),
-                "{file} builds a `botroster` child with --hub and never gives it \
-                 HUB_TOKEN_ENV. A hub that requires a token will refuse it, and the person \
-                 sees the window fail at whatever that child was for. See `hub::token_at`."
+                chunk.contains("HUB_TOKEN_ENV") || chunk.contains(r#".arg("--home")"#),
+                "{file} builds a `botroster` child with --hub, hands it no HUB_TOKEN_ENV, and \
+                 gives it no --home to find one with. A hub that requires a token refuses it, \
+                 and the person sees the window fail at whatever that child was for. Give it \
+                 the token, or give it --home so it resolves one when it connects; \
+                 `hub::token_at` says which is right."
             );
         }
     }

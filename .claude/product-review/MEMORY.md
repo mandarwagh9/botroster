@@ -598,3 +598,42 @@ for the value checks it.
 values were one thing — a call, from its decision to its ending — and the forwarded path already
 needed exactly that struct to carry them across `Relay`. Grouping them removed the lint, removed a
 duplicate type, and removed the way the two recording paths could drift apart.
+
+## The 0.5.0 window regression (2026-08-29)
+
+### A child spawned before the thing it needs cannot be handed a snapshot of it
+
+`botroster-app`'s `connect` spawns the agent, *then* looks for a computer, *then* starts one.
+0.5.0 gave the agent `BOTROSTER_HUB_TOKEN` at spawn time; `botroster up` started two seconds later
+and minted a fresh one. Because `hub_token` reads the environment before the home and never falls
+back, the agent presented a dead token for the life of the window.
+
+**The generalisable form: a value read at spawn time is a snapshot, and a snapshot of something
+that has not happened yet is a guess.** The agent already had `--home` and reaches the hub lazily,
+so it could resolve the token at the moment it mattered. Handing it one made it *worse* than
+telling it nothing — an env var is not a hint, it is an override.
+
+Making six call sites "answer the question the same way" is what introduced this. Consistency is a
+good instinct and it was the wrong one here: five of those children are short-lived and run against
+a hub that is already up, and one is spawned before the hub exists. **The sweep test now encodes
+the real rule — handed the token, *or* given a `--home` to find one with — which is the rule that
+was always true and that I had flattened.**
+
+### A regression test written on a clean fixture can be vacuous
+
+The first version of `an_agent_spawned_before_the_computer_can_still_reach_it` **passed with the
+defect restored**. A fresh temp home holds no token, so there is nothing stale to capture and the
+agent falls back to `--home` by accident. The bug needs prior state — which is exactly why a real
+install hit it on the first launch and the whole suite did not.
+
+**When a defect only appears on an upgrade, the fixture has to be an upgraded one.** The test now
+seeds a previous hub's token before connecting. Mutation-checked both ways.
+
+### Two operational notes from the same hour
+
+- `taskkill /F /IM botroster.exe` to free a build lock **killed the user's running window's hub and
+  agent**. Kill by pid.
+- A held `botroster.exe` during `cargo build` silently leaves the old binary in `target/debug`, and
+  the suite then fails with things like `unrecognized subcommand 'record'` for a subcommand that is
+  in the source. `CLAUDE.md` warns about this; it still cost twenty minutes of reading the wrong
+  failures.

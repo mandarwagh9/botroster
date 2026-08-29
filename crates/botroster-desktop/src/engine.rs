@@ -502,17 +502,29 @@ impl Engine {
                 .arg(cfg.home.to_str().expect("a utf-8 home path"))
                 .env("BOTROSTER_HUB_URL", &cfg.hub)
                 .env("NO_COLOR", "1")
-                // The agent reaches the hub per turn and must be admitted.
-                // Passed rather than left to the child's own `--home` lookup so
-                // that all four of this crate's hub-touching children answer
-                // the question the same way, through `hub::token_at`. `Option`
-                // is an iterator of at most one pair, so a home with no token
-                // adds nothing and the inherited variable stands — see
-                // `token_at` for why that fallback is deliberate.
-                .envs(
-                    crate::hub::token_at(&cfg.home)
-                        .map(|t| (botroster_proto::HUB_TOKEN_ENV.to_owned(), t)),
-                )
+                // **No token here, deliberately.** This is the one child of
+                // the window that must find its own.
+                //
+                // The window spawns the agent and *then* starts the computer:
+                // `Engine::connect` runs before `hub::reach`, which runs before
+                // `hub::start`. Measured on a shipped 0.5.0 install — `acp` at
+                // 17:32:00, `up` at 17:32:02. `botroster up` mints a fresh
+                // token as it starts and overwrites `<home>/hub.token`, so a
+                // token read at spawn time is the *previous* hub's, two seconds
+                // before it stops being true.
+                //
+                // Handing it over would be worse than not: `hub_token` reads
+                // `BOTROSTER_HUB_TOKEN` first and never looks at the file, so
+                // the stale value poisons every later lookup and every turn is
+                // refused for the life of the window. Left alone, the agent —
+                // which reaches the hub lazily, per turn — resolves the token
+                // from the `--home` below at the moment it connects, by which
+                // time `up` has written it.
+                //
+                // The environment is still the way to reach a hub on another
+                // machine: the SDK's config is additive, so a
+                // `BOTROSTER_HUB_TOKEN` the window inherited reaches this child
+                // untouched.
                 // The key, when the window collected one. `Option` is an
                 // iterator of at most one pair, so an absent key adds nothing
                 // rather than an empty variable — which the runtime would read
