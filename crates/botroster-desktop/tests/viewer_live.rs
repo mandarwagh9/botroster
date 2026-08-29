@@ -37,7 +37,7 @@ fn post(port: u16, path: &str, body: &str) -> String {
 
 /// Ask the computer to do something, the way an agent would: through the hub,
 /// past the policy gate. `Err` is the refusal text.
-fn agent_says(hub: &str) -> Result<String, String> {
+fn agent_says(hub: &str, home: &std::path::Path) -> Result<String, String> {
     let out = std::process::Command::new(common::up::botroster())
         .arg("call")
         .arg("fs.list")
@@ -46,6 +46,10 @@ fn agent_says(hub: &str) -> Result<String, String> {
         .arg(hub)
         .env("NO_COLOR", "1")
         .env_remove("BOTROSTER_HUB_URL")
+        // `botroster call` declares no `--home`, so it cannot find the token
+        // the hub requires. The window's own children are given it by
+        // `hub::token_at`; this probe is given it here.
+        .envs(common::up::token_in(home))
         .output()
         .expect("could not run botroster call");
     if out.status.success() {
@@ -72,7 +76,7 @@ fn parts(url: &str) -> (u16, String) {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_window_can_open_the_computer_and_lock_the_bot_out_of_it() {
     let up = Up::start().expect("botroster up");
-    let mut view = viewer::open(&common::up::botroster(), &up.hub)
+    let mut view = viewer::open(&common::up::botroster(), &up.hub, &up.home)
         .await
         .expect("the window could not open the computer");
 
@@ -93,7 +97,7 @@ async fn the_window_can_open_the_computer_and_lock_the_bot_out_of_it() {
     // Without this the test could pass on a computer that was already
     // unusable, which would say nothing about the lock at all.
     assert!(
-        agent_says(&up.hub).is_ok(),
+        agent_says(&up.hub, &up.home).is_ok(),
         "the computer was already refusing work before anyone took control"
     );
 
@@ -107,8 +111,8 @@ async fn the_window_can_open_the_computer_and_lock_the_bot_out_of_it() {
         "taking control through the window's viewer failed: {taken}"
     );
 
-    let refused =
-        agent_says(&up.hub).expect_err("the Bot kept working while a person held the computer");
+    let refused = agent_says(&up.hub, &up.home)
+        .expect_err("the Bot kept working while a person held the computer");
     assert!(
         refused.contains("taken over"),
         "the Bot was not locked out: {refused}"
@@ -128,7 +132,7 @@ async fn the_window_can_open_the_computer_and_lock_the_bot_out_of_it() {
         "giving control back failed: {released}"
     );
     assert!(
-        agent_says(&up.hub).is_ok(),
+        agent_says(&up.hub, &up.home).is_ok(),
         "the computer stayed locked after control was given back"
     );
 }
@@ -138,7 +142,7 @@ async fn the_window_can_open_the_computer_and_lock_the_bot_out_of_it() {
 #[tokio::test(flavor = "multi_thread")]
 async fn dropping_the_viewer_stops_it_serving() {
     let up = Up::start().expect("botroster up");
-    let view = viewer::open(&common::up::botroster(), &up.hub)
+    let view = viewer::open(&common::up::botroster(), &up.hub, &up.home)
         .await
         .expect("open the computer");
     let (port, _key) = parts(view.url());
@@ -163,9 +167,15 @@ async fn dropping_the_viewer_stops_it_serving() {
 /// A hub that is not there is an error the window can show, not a wait.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_viewer_that_cannot_reach_a_hub_says_so() {
-    let err = viewer::open(&common::up::botroster(), "ws://127.0.0.1:1/v1/tools")
-        .await
-        .expect_err("a viewer with no hub should not report success");
+    // Nothing was started, so no home holds a token for this address.
+    let nowhere = tempfile::tempdir().expect("a temp dir");
+    let err = viewer::open(
+        &common::up::botroster(),
+        "ws://127.0.0.1:1/v1/tools",
+        nowhere.path(),
+    )
+    .await
+    .expect_err("a viewer with no hub should not report success");
     let text = err.to_string();
     assert!(
         text.contains("exited early") || text.contains("never said"),
@@ -186,7 +196,7 @@ async fn a_viewer_that_cannot_reach_a_hub_says_so() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_viewer_that_was_killed_stops_reporting_itself_alive() {
     let up = Up::start().expect("botroster up");
-    let mut view = viewer::open(&common::up::botroster(), &up.hub)
+    let mut view = viewer::open(&common::up::botroster(), &up.hub, &up.home)
         .await
         .expect("open the computer");
     assert!(view.alive(), "it should be up before anything kills it");

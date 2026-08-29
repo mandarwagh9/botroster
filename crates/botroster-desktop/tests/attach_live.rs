@@ -21,7 +21,7 @@ async fn an_attached_file_is_readable_by_the_guest() {
     let src = dir.path().join("notes.md");
     std::fs::write(&src, BODY).expect("write the source");
 
-    let at = botroster_desktop::attach::put(&botroster, &up.hub, &src)
+    let at = botroster_desktop::attach::put(&botroster, &up.hub, &up.home, &src)
         .await
         .expect("could not attach the file");
     assert_eq!(at, "attachments/notes.md");
@@ -33,6 +33,10 @@ async fn an_attached_file_is_readable_by_the_guest() {
         .arg("fs.read")
         .arg(format!(r#"{{"path":"{at}"}}"#))
         .env("BOTROSTER_HUB_URL", &up.hub)
+        // Driven straight at the hub with no `--home`, so it has nowhere to
+        // find the token the hub requires. The window's children are given it
+        // by `hub::token_at`; this one is given it here.
+        .envs(up.token())
         .output()
         .await
         .expect("botroster call");
@@ -56,10 +60,10 @@ async fn two_files_of_one_name_both_survive() {
     std::fs::write(a.join("report.txt"), "first").unwrap();
     std::fs::write(b.join("report.txt"), "second").unwrap();
 
-    let one = botroster_desktop::attach::put(&botroster, &up.hub, &a.join("report.txt"))
+    let one = botroster_desktop::attach::put(&botroster, &up.hub, &up.home, &a.join("report.txt"))
         .await
         .expect("first");
-    let two = botroster_desktop::attach::put(&botroster, &up.hub, &b.join("report.txt"))
+    let two = botroster_desktop::attach::put(&botroster, &up.hub, &up.home, &b.join("report.txt"))
         .await
         .expect("second");
     assert_ne!(one, two, "the second attachment replaced the first");
@@ -72,6 +76,7 @@ async fn two_files_of_one_name_both_survive() {
             .arg("fs.read")
             .arg(format!(r#"{{"path":"{path}"}}"#))
             .env("BOTROSTER_HUB_URL", &up.hub)
+            .envs(up.token())
             .output()
             .await
             .expect("botroster call");

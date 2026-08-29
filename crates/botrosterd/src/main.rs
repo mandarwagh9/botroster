@@ -75,8 +75,28 @@ async fn main() -> anyhow::Result<()> {
     // integration delays the first tool call rather than breaking the boot.
     let (listener, local) = Server::bind(&args.bind).await?;
 
-    let booted =
-        botrosterd::boot::hub_from_home(&args.home, botrosterd::policy::Policy::default()).await?;
+    // Require whatever token this home holds. Unlike `botroster up`, this
+    // daemon does not generate one: it may be serving a home somebody else
+    // populated, on a machine where the guest connects from elsewhere, and
+    // minting a secret those peers have never seen would break every one of
+    // them at the handshake. So the home's own file is the switch — write a
+    // `hub.token` and this daemon starts requiring it, with no flag to learn.
+    let admission = botrosterd::hub::Admission::from_home(&args.home);
+    if matches!(admission, botrosterd::hub::Admission::Anyone) {
+        tracing::warn!(
+            home = %args.home.display(),
+            file = botroster_proto::HUB_TOKEN_FILE,
+            "this home holds no hub token, so any local process can open a session here — and \
+             a session owns the approvals it is asked for, so it can approve its own shell.exec. \
+             Write a random string to that file in this home and restart to require it."
+        );
+    }
+    let booted = botrosterd::boot::hub_from_home(
+        &args.home,
+        botrosterd::policy::Policy::default(),
+        admission,
+    )
+    .await?;
     let hub = booted.hub;
     tracing::info!(home = %args.home.display(), "serving bot.list and bot.send");
     if !booted.connector_tools.is_empty() {

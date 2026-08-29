@@ -69,7 +69,7 @@ impl Drop for Viewer {
 ///
 /// # Errors
 /// If the binary cannot be run, exits early, or never announces an address.
-pub async fn open(botroster: &Path, hub: &str) -> anyhow::Result<Viewer> {
+pub async fn open(botroster: &Path, hub: &str, home: &Path) -> anyhow::Result<Viewer> {
     let dir = tempfile::tempdir()?;
     let log = dir.path().join("watch.log");
 
@@ -92,6 +92,12 @@ pub async fn open(botroster: &Path, hub: &str) -> anyhow::Result<Viewer> {
         .env_remove("BOTROSTER_HUB_URL")
         .stdout(Stdio::from(std::fs::File::create(&log)?))
         .stderr(Stdio::null());
+    // `botroster watch` opens its own connection to the hub, so it needs the
+    // token as much as the agent does — and having no home argument, it cannot
+    // find one for itself. See `crate::hub::token_at`.
+    if let Some(t) = crate::hub::token_at(home) {
+        cmd.env(botroster_proto::HUB_TOKEN_ENV, t);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

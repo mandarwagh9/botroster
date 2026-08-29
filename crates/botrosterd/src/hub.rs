@@ -179,10 +179,90 @@ struct Takeover {
     reason: String,
 }
 
+/// Who a hub will admit at the handshake.
+///
+/// # What this defends
+///
+/// The hub used to accept every connection that spoke the protocol, on a fixed
+/// `127.0.0.1:8443`, and hand each one `dev_principal()`. Approvals are
+/// authorised on socket identity, and a connection that opens its own session
+/// is the owner of it — so it is the one the hub asks for permission. Anything
+/// that could open the socket could approve its own `shell.exec`.
+///
+/// `server::browser_origin` closes that path for a web page. This closes it for
+/// a program: the token lives in the home, so the bar rises from *anything that
+/// can open a socket* to *anything that can read this user's files*. See
+/// [`botroster_proto::Hello::token`] for the honest limit — a process running
+/// as this user reads `hub.token` exactly as the desktop client does, and
+/// nothing here changes that.
+///
+/// # Why an enum and not `Option<String>`
+///
+/// So that a call site choosing to accept anyone has to write it down. `None`
+/// at a boot site reads as a value nobody supplied; `Admission::Anyone` reads
+/// as a decision somebody made, and it greps.
+#[derive(Debug, Clone, Default)]
+pub enum Admission {
+    /// Every connection that speaks the protocol, presenting a token or not.
+    ///
+    /// What a hub built for a test does, and what `botrosterd` falls back to
+    /// when its home holds no token — loudly. Refusing to start there would
+    /// break every daemon somebody has been running since before this existed,
+    /// to defend a home whose owner has not yet been given a way to write one.
+    #[default]
+    Anyone,
+    /// Only a connection presenting this exact token in its `hello`.
+    Token(String),
+}
+
+impl Admission {
+    /// Require whatever token this home holds; admit anyone if it holds none.
+    #[must_use]
+    pub fn from_home(home: &std::path::Path) -> Self {
+        botroster_proto::hub_token_in(home).map_or(Self::Anyone, Self::Token)
+    }
+
+    /// Whether this hub admits a peer presenting `presented`.
+    fn admits(&self, presented: Option<&str>) -> bool {
+        let Self::Token(want) = self else {
+            return true;
+        };
+        presented.is_some_and(|got| constant_time_eq(want.as_bytes(), got.as_bytes()))
+    }
+}
+
+/// Compare two secrets without letting the time taken say how much of the first
+/// one the caller guessed right.
+///
+/// `==` on `str` returns at the first differing byte, so a caller that can time
+/// the refusal recovers the token a byte at a time. Over a loopback socket that
+/// is a slow attack and this is a cheap way to not have it; the alternative — a
+/// dependency on `subtle` — buys a `PROVENANCE.md` row for ten lines.
+///
+/// The lengths are folded into the result rather than short-circuited on, and
+/// `got` is read cyclically so the loop's length is a function of `want` alone.
+/// A differing length is caught by the first term whatever the bytes do. The
+/// length of a UUID is not a secret; not branching on a secret-derived value is
+/// the habit worth keeping.
+fn constant_time_eq(want: &[u8], got: &[u8]) -> bool {
+    let mut diff: usize = want.len() ^ got.len();
+    for (i, w) in want.iter().enumerate() {
+        let g = if got.is_empty() {
+            0
+        } else {
+            got[i % got.len()]
+        };
+        diff |= usize::from(w ^ g);
+    }
+    diff == 0
+}
+
 pub struct Hub {
     state: Mutex<State>,
     seq: AtomicU64,
     internal: Option<Arc<dyn InternalTools>>,
+    /// Who this hub admits at the handshake. See [`Admission`].
+    admission: Admission,
     /// Injectable so the fail-closed path is reachable in a test without
     /// waiting two minutes.
     approval_timeout: std::time::Duration,
@@ -218,11 +298,25 @@ impl Hub {
             }),
             seq: AtomicU64::new(1),
             internal: None,
+            admission: Admission::Anyone,
             approval_timeout: DEFAULT_APPROVAL_TIMEOUT,
             call_timeout: DEFAULT_CALL_TIMEOUT,
             hooks: None,
             secrets: None,
         }
+    }
+
+    /// Admit only peers this [`Admission`] accepts.
+    ///
+    /// The default is [`Admission::Anyone`], which is what every hub did before
+    /// this existed and what a test wants. `boot::hub_from_home` is the shipped
+    /// path and it takes the admission as an argument rather than defaulting,
+    /// so that a hub serving a person's home cannot be built without somebody
+    /// having decided this.
+    #[must_use]
+    pub fn admitting(mut self, admission: Admission) -> Self {
+        self.admission = admission;
+        self
     }
 
     /// Serve these tools from the hub itself.
@@ -308,6 +402,27 @@ impl Hub {
         principal: Principal,
         tx: Outbox,
     ) -> Result<(ConnectionId, HelloAck), RpcError> {
+        // First, ahead of every other check. A peer this hub does not admit
+        // learns nothing about it — not the protocol version it speaks, not
+        // whether a `server_id` was expected. The refusal names the file to
+        // read because the common cause is not an attacker: it is a second
+        // terminal addressing a home that is not the one this hub was started
+        // on, and a bare "unauthorised" would send that person looking for a
+        // password that does not exist.
+        if !self.admission.admits(hello.token.as_deref()) {
+            return Err(RpcError {
+                code: codes::UNAUTHENTICATED,
+                message: format!(
+                    "this hub requires the token it wrote into its home. Every client reads \
+                     `{}` from the home it was told to use, so this usually means the home \
+                     this command addressed is not the one the hub was started on. \
+                     `{}` overrides it.",
+                    botroster_proto::HUB_TOKEN_FILE,
+                    botroster_proto::HUB_TOKEN_ENV
+                ),
+                data: None,
+            });
+        }
         if hello.protocol_version != PROTOCOL_VERSION {
             return Err(RpcError {
                 code: codes::INVALID_REQUEST,
@@ -1710,4 +1825,80 @@ fn require_session(req: &Request) -> Result<SessionId, RpcError> {
 /// Development principal, used until OIDC validation is wired.
 pub fn dev_principal() -> Principal {
     Principal::new(UserId::new("dev-user")).with_scope(SCOPE_TOOL_INVOKE)
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::{constant_time_eq, Admission};
+
+    /// The comparison is constant-time, and it is still a comparison.
+    ///
+    /// The reason to write this at all: a hand-rolled equality that is
+    /// beautifully constant-time and wrong in one case is worse than `==`,
+    /// because the case it is wrong in is "admits something it should not".
+    /// Every pair is checked against `==`, which is the definition being
+    /// preserved — the timing property is the only thing that differs.
+    #[test]
+    fn it_agrees_with_ordinary_equality_on_every_pair() {
+        const WORDS: &[&str] = &[
+            "", "a", "b", "ab", "ba", "aab", "aba", "abab", "ababab", "s3cret", "s3cre", "s3crets",
+            "S3CRET",
+        ];
+        let mut all: Vec<String> = WORDS.iter().map(|s| (*s).to_owned()).collect();
+        // The pair a truncating length check gets wrong: every byte the same,
+        // and lengths differing by exactly 256. `262 ^ 6` is 256, which is
+        // zero in a `u8` — so folding the lengths into a byte would call these
+        // two equal, and a 6-character guess would open a hub whose token is
+        // 262 characters long.
+        all.push("x".repeat(262));
+        all.push("x".repeat(6));
+
+        for a in &all {
+            for b in &all {
+                assert_eq!(
+                    constant_time_eq(a.as_bytes(), b.as_bytes()),
+                    a == b,
+                    "constant_time_eq({a:?}, {b:?}) disagrees with =="
+                );
+            }
+        }
+    }
+
+    /// A hub given no token admits whatever arrives, including nothing. Every
+    /// hub built before `Admission` existed behaved this way, and a great many
+    /// still do.
+    #[test]
+    fn admitting_anyone_means_anyone() {
+        assert!(Admission::Anyone.admits(None));
+        assert!(Admission::Anyone.admits(Some("")));
+        assert!(Admission::Anyone.admits(Some("anything at all")));
+    }
+
+    /// A missing token is not an empty token, and neither is admitted.
+    ///
+    /// The distinction matters because `Hello::token` is
+    /// `skip_serializing_if = "Option::is_none"`: a peer that omits the field
+    /// and a peer that sends `""` arrive as different values, and a check
+    /// written as `presented.unwrap_or_default() == want` would treat an empty
+    /// required token as a match.
+    #[test]
+    fn a_required_token_is_matched_and_nothing_else_is() {
+        let a = Admission::Token("s3cret".into());
+        assert!(a.admits(Some("s3cret")));
+        assert!(!a.admits(None));
+        assert!(!a.admits(Some("")));
+        assert!(!a.admits(Some("s3cret ")));
+
+        // And a hub whose token is somehow empty admits nothing rather than
+        // everything. `hub_token_in` never returns one — it treats an empty
+        // file as absent — but `Admission::Token(String::new())` is
+        // constructible and must not be a skeleton key.
+        let empty = Admission::Token(String::new());
+        assert!(!empty.admits(None));
+        assert!(!empty.admits(Some("anything")));
+        // It does match its own value, which is what makes the line above a
+        // statement about `None` and non-empty input rather than about a
+        // comparison that always fails.
+        assert!(empty.admits(Some("")));
+    }
 }

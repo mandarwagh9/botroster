@@ -213,6 +213,14 @@ pub async fn test_run(
         // on the computer the Bots use rather than starting a second stack
         // beside it.
         .env("BOTROSTER_HUB_URL", hub);
+    // This child does carry `--home`, so it could find the token itself. Set
+    // anyway, so that all six of this crate's hub-pointed children answer the
+    // question in one way rather than five explicitly and one by luck — and so
+    // the day `routine run` gains a `--hub` that differs from its home, this
+    // line is already the right one. See `crate::hub::token_at`.
+    if let Some(t) = crate::hub::token_at(home) {
+        cmd.env(botroster_proto::HUB_TOKEN_ENV, t);
+    }
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;

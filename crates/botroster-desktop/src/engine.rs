@@ -502,6 +502,17 @@ impl Engine {
                 .arg(cfg.home.to_str().expect("a utf-8 home path"))
                 .env("BOTROSTER_HUB_URL", &cfg.hub)
                 .env("NO_COLOR", "1")
+                // The agent reaches the hub per turn and must be admitted.
+                // Passed rather than left to the child's own `--home` lookup so
+                // that all four of this crate's hub-touching children answer
+                // the question the same way, through `hub::token_at`. `Option`
+                // is an iterator of at most one pair, so a home with no token
+                // adds nothing and the inherited variable stands — see
+                // `token_at` for why that fallback is deliberate.
+                .envs(
+                    crate::hub::token_at(&cfg.home)
+                        .map(|t| (botroster_proto::HUB_TOKEN_ENV.to_owned(), t)),
+                )
                 // The key, when the window collected one. `Option` is an
                 // iterator of at most one pair, so an absent key adds nothing
                 // rather than an empty variable — which the runtime would read

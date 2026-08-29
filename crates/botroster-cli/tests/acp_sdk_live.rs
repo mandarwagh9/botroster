@@ -56,7 +56,11 @@ async fn the_sdk_client_drives_the_shipped_binary_through_a_whole_turn() {
             .arg("--home")
             .arg(home.path().to_str().expect("a utf-8 home path"))
             .env("BOTROSTER_HUB_URL", &up.hub)
-            .env("NO_COLOR", "1"),
+            .env("NO_COLOR", "1")
+            // The agent's `--home` above is a throwaway, so it holds no token
+            // for `up`'s hub. The window passes the token the same way, from
+            // `botroster_desktop::hub::token_at`.
+            .envs(up.token()),
     );
 
     // What the client heard while the turn was running. Asserted on after

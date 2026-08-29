@@ -90,6 +90,10 @@ struct Viewer {
     _watch: Proc,
     _up: Proc,
     _dir: tempfile::TempDir,
+    /// The home the hub was started on. `botroster watch` and `botroster call`
+    /// declare no `--home`, so neither can find the token the hub requires;
+    /// this is where the tests get it from.
+    home: std::path::PathBuf,
 }
 
 impl Viewer {
@@ -99,6 +103,7 @@ impl Viewer {
             .args(["call", "fs.list", "{}", "--approve", "auto"])
             .env("BOTROSTER_HUB_URL", &self.hub)
             .env("NO_COLOR", "1")
+            .envs(common::up::token_in(&self.home))
             .output()
             .expect("run botroster call");
         if out.status.success() {
@@ -111,11 +116,12 @@ impl Viewer {
 /// Start a hub with a computer, then a viewer onto it.
 fn start() -> Viewer {
     let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("control-plane");
     let up_log = dir.path().join("up.log");
     let up = Proc(
         Command::new(BOTROSTER)
             .args(["up", "--bind", "127.0.0.1:0", "--home"])
-            .arg(dir.path().join("control-plane"))
+            .arg(&home)
             .arg("--workspace")
             .arg(dir.path().join("computer"))
             .env("NO_COLOR", "1")
@@ -140,6 +146,9 @@ fn start() -> Viewer {
             .args(["watch", "--port", "0"])
             .env("BOTROSTER_HUB_URL", &hub)
             .env("NO_COLOR", "1")
+            // Written by `up` before it printed the banner this waited for, so
+            // it is there to read by now.
+            .envs(common::up::token_in(&home))
             .stdout(Stdio::from(std::fs::File::create(&watch_log).unwrap()))
             .stderr(Stdio::null())
             .spawn()
@@ -163,6 +172,7 @@ fn start() -> Viewer {
         _watch: watch,
         _up: up,
         _dir: dir,
+        home,
     }
 }
 

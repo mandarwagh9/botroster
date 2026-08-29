@@ -28,6 +28,18 @@ pub enum Reach {
     /// It did not, for this reason: the binary's own words, which name the
     /// refused connection rather than paraphrasing it.
     Unreachable(String),
+    /// A hub answered and would not have this client.
+    ///
+    /// Held apart from [`Self::Unreachable`] because the two call for opposite
+    /// responses. Nothing listening is a reason to start a computer; a hub that
+    /// said no is a reason to report — it is already there, holding the port,
+    /// and starting a second one on top fails on the bind with "address in
+    /// use", which describes neither the cause nor the fix.
+    ///
+    /// `botroster up` has the same distinction in `hub_or_start`, and it was
+    /// added there first. This variant is the window's half of it; without it,
+    /// the fix was in one of the two places a person meets it.
+    Refused(String),
 }
 
 impl Reach {
@@ -44,7 +56,7 @@ impl Reach {
 /// error here but an answer; the caller needs to tell the two apart, since one
 /// means the installation is broken and the other means the computer is not
 /// running yet.
-pub async fn reach(botroster: &Path, hub: &str) -> anyhow::Result<Reach> {
+pub async fn reach(botroster: &Path, hub: &str, home: &Path) -> anyhow::Result<Reach> {
     let mut cmd = tokio::process::Command::new(botroster);
     cmd.arg("tools")
         .arg("--hub")
@@ -54,6 +66,12 @@ pub async fn reach(botroster: &Path, hub: &str) -> anyhow::Result<Reach> {
         // tools` declares no home argument, so an ambient one has no effect.
         // Held by `the_children_the_window_does_not_scrub_read_no_home`.
         .env_remove("BOTROSTER_HUB_URL");
+    // `botroster tools` has no home argument either, so it cannot find the
+    // token by itself; the window is the only thing here that knows which home
+    // the hub was started on. See `token_at`.
+    if let Some(t) = token_at(home) {
+        cmd.env(botroster_proto::HUB_TOKEN_ENV, t);
+    }
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -75,9 +93,11 @@ pub async fn reach(botroster: &Path, hub: &str) -> anyhow::Result<Reach> {
     };
 
     if !out.status.success() {
-        return Ok(Reach::Unreachable(reason(&String::from_utf8_lossy(
-            &out.stderr,
-        ))));
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if let Some(line) = refusal(&stderr) {
+            return Ok(Reach::Refused(line));
+        }
+        return Ok(Reach::Unreachable(reason(&stderr)));
     }
     // One line per tool. The count is a more informative summary than a bare
     // "ok".
@@ -86,6 +106,34 @@ pub async fn reach(botroster: &Path, hub: &str) -> anyhow::Result<Reach> {
         .filter(|l| !l.trim().is_empty())
         .count();
     Ok(Reach::Serving(listed))
+}
+
+/// The token a child must present to reach the hub whose home is `home`.
+///
+/// Read at the moment of use, never captured earlier. `botroster up` writes
+/// this file as it starts, so a value taken before [`start`] is `None` — and
+/// `start`'s own poll loop would then present that `None` to every probe of
+/// the very hub it is waiting for, and wait out the full patience for a hub
+/// that came up seconds in.
+///
+/// Every site that spawns a `botroster` child which talks to the hub must set
+/// this when the home has one, and must leave the inherited variable alone
+/// when it does not.
+///
+/// The second half is a deliberate exception to this crate's usual discipline,
+/// which is that the window decides its children's environment rather than the
+/// shell that launched it. The window can only decide what it knows, and the
+/// token belongs to whichever home the *hub* was started on — which is
+/// `home` whenever this window started it, and unknowable when somebody points
+/// Connect at a hub on another machine. Scrubbing would close the only channel
+/// that case has. Setting `BOTROSTER_HUB_TOKEN` before launching the window is
+/// therefore how a foreign hub is reached today; that it has no UI is recorded
+/// in `.claude/product-review/BACKLOG.md`, not papered over here.
+///
+/// `tests/environment.rs` sweeps the sites.
+#[must_use]
+pub fn token_at(home: &Path) -> Option<String> {
+    botroster_proto::hub_token_in(home)
 }
 
 /// A computer this process started, and is therefore responsible for.
@@ -178,9 +226,14 @@ pub async fn start(
                 }
             );
         }
-        match reach(botroster, hub).await {
+        match reach(botroster, hub, home).await {
             Ok(Reach::Serving(_)) => return Ok(started),
-            Ok(Reach::Unreachable(why)) => last = why,
+            // Kept in the loop rather than bailed on. `up` writes its token
+            // before it binds, so a refusal here should not happen — but if it
+            // ever did, the child is still coming up and one early probe is a
+            // bad reason to give up. Carried into `last`, so the deadline
+            // message says the hub refused us rather than that it was silent.
+            Ok(Reach::Refused(why) | Reach::Unreachable(why)) => last = why,
             Err(e) => last = e.to_string(),
         }
         if tokio::time::Instant::now() >= deadline {
@@ -229,6 +282,20 @@ async fn drain(child: &mut tokio::process::Child) -> String {
 ///
 /// The first line carries the cause. The rest is a backtrace-shaped tail that
 /// would make a status line unreadable.
+/// The line saying a hub refused us, if the child printed one.
+///
+/// Not [`reason`], which takes the *first* non-empty line: a refusal is
+/// reported as "could not reach the computer at ws://…" and then the sentence
+/// that says what to do about it, so the first line is the least useful part of
+/// three. This finds the informative one by the marker both crates agree on.
+fn refusal(stderr: &str) -> Option<String> {
+    stderr
+        .lines()
+        .map(str::trim)
+        .find(|l| l.contains(botroster_proto::REFUSED_PREFIX))
+        .map(str::to_owned)
+}
+
 fn reason(stderr: &str) -> String {
     let first = stderr
         .lines()

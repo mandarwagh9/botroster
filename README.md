@@ -276,6 +276,13 @@ approvals only for its own input and only while you are driving.
   detectable, and BOTROSTER makes no attempt to hide it.
 - **Prompt injection is a live risk.** A page a Bot visits can issue instructions to it. Approvals
   are the mitigation; keep consequential actions behind them.
+- **The hub asks who you are, and that is not the same as isolation.** `botroster up` generates a
+  token at start and writes it to `<home>/hub.token`; every client reads it from the home it was
+  told to use, so nothing needs configuring. Connections announcing a web origin are refused
+  outright. Together those raise the bar from *anything that can open a socket* to *anything that
+  can read your files* — which stops a page you visit and another account on the machine, and does
+  nothing at all about a program running as you. That program reads `hub.token` exactly as the
+  desktop client does.
 - **`secrets.json` is as private as the directory it is in.** On Unix it is created `0600`. On
   Windows it inherits the parent directory's ACL, so keep the home under your user profile.
 

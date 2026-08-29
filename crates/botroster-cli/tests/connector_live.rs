@@ -163,6 +163,9 @@ fn a_connector_added_from_the_cli_is_callable_and_keeps_its_token() {
         ])
         .env("BOTROSTER_HUB_URL", &hub)
         .env("NO_COLOR", "1")
+        // `botroster call` has no `--home`, so the token is passed here; the
+        // hub above was started on `home`.
+        .envs(common::up::token_in(&home))
         .output()
         .unwrap();
     common::stop(&mut up);

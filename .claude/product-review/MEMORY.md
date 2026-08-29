@@ -503,3 +503,59 @@ providing.**
   alignment from a wrapped line. Build aligned columns with `{:<24}` padding instead.
 - `readme.rs` rejects a documented command with no subcommand. Correct until bare `botroster` became
   one; the test was taught, not weakened.
+
+## T2-1 — the hub requires its token (2026-08-29)
+
+### The rule was applied at four of six sites, and the sweep found the other two
+
+This is the fourth time this project has recorded the same shape. `hub::reach`, `viewer::open`, the
+agent and `settings::test_run` all had to present the hub's token; I wired three by hand, was
+confident, and `attach::put` failed a live test. Then the source sweep found `settings::test_run`
+as well — a site I had already read past twice.
+
+**The instrument is what keeps this true, not the intention.**
+`every_child_pointed_at_a_hub_is_given_the_token_for_it` reads the crate's own source, finds every
+command under construction and asserts that any one naming a hub also names the token variable. It
+is crude — it splits on `Command::new(` — and crude is right: its failure mode is a false alarm a
+person reads, never a silent pass. Its anti-vacuity floor (`checked >= 4`) matters more than the
+assertion; without it, renaming the argument would make the test pass for ever.
+
+### A type can carry a decision that an `Option` only carries a value
+
+`boot::hub_from_home` takes `Admission`, not `Option<String>`. `None` at a boot site reads as
+something nobody supplied; `Admission::Anyone` reads as something somebody chose, and it greps. The
+same reasoning made it a *parameter* rather than something read from `home` inside the function:
+`up` writes the token and then boots, so a hub reading the file itself would depend on the order of
+two statements in another crate — and a later reordering would silently return the hub to admitting
+everyone with every test still green.
+
+### Turning a failure into a distinguishable failure found a second bug
+
+`hub_or_start` had `if let Ok(Ok(_))`, which treats "nothing is listening" and "a hub answered and
+said no" identically. Once the hub could refuse, that swallowed refusal became: silently start a
+*second* stack on top of the first, so the person gets two computers, two homes and the
+double-firing routine `up`'s own documentation warns about. **A catch-all arm is a bug waiting for
+a new error variant**, and the new variant is the thing that reveals it. My own end-to-end test
+failed for exactly this reason, which is what a test written before the walkthrough buys.
+
+### A test whose subject is a credential must not let the machine supply one
+
+`Hello::harness()` fills `token` from `hub_token()`, which reads the developer's own
+`~/.botroster/hub.token`. A no-token test built that way passes or fails depending on whether the
+person running it has `botroster up` going in another terminal. `hello_with(None)` builds the field
+explicitly. Same class as the `nowhere_hub()` fix recorded earlier: **an environment-derived default
+is not a neutral default in a test about that environment.**
+
+### The test harness has the same shape as the product, and needed the same fix
+
+Six live-test files build their own `Command::new(BOTROSTER)` with `BOTROSTER_HUB_URL` and no
+`--home`, so none of them could find the token either: `cli_live`, `connector_live`, `acp_sdk_live`,
+`hooks_live`, `viewer` and `attach_live`. `common::up::token_in(&home)` is the one way to get it now,
+and `Up::token()` wraps it for the common case. **A new live test that drives `botroster` at a hub
+must use one of those**, or it fails at the handshake with a message about a home.
+
+Two of those six were found only by running the *whole* workspace suite. I had run
+`-p botroster-desktop` before changing `engine.rs` and `-p botroster-cli --test cli_live` after, and
+concluded from the pair that both crates were green — they were not, and `engine_live` and `viewer`
+were red for an hour. **A partial suite proves nothing about a change that crosses crates**, which
+is the same mistake as the eleven-commit CI-red stretch recorded earlier, made faster.

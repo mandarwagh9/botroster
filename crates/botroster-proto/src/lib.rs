@@ -494,6 +494,14 @@ pub mod codes {
     /// report the takeover and wait, rather than concluding it lacks permission
     /// and abandoning the task.
     pub const TAKEN_OVER: i32 = -32006;
+    /// The connection did not present the token this hub requires.
+    ///
+    /// A third distinct answer, for the same reason [`TAKEN_OVER`] is one.
+    /// [`FORBIDDEN`] answers a peer the hub already accepted, asking for
+    /// something outside its scope; this one is refused during the handshake,
+    /// where no session exists to be forbidden from and the remedy is a file to
+    /// read rather than a permission to request.
+    pub const UNAUTHENTICATED: i32 = -32007;
 }
 
 impl Request {
@@ -841,28 +849,103 @@ pub const HUB_TOKEN_ENV: &str = "BOTROSTER_HUB_TOKEN";
 /// The token file's name inside a home.
 pub const HUB_TOKEN_FILE: &str = "hub.token";
 
-/// The token to present, from the environment or from the default home.
+/// How a client says, on its standard error, that a hub refused its handshake.
 ///
-/// The environment first, because that is how a hub tells the children it
-/// spawned. The file second, because a person in a second terminal has neither
+/// One definition because two consumers need to agree on it and they are in
+/// different crates: `botroster_agent::HubError::Refused` renders it, and the
+/// desktop window reads it back off a child process's stderr to tell "a hub
+/// answered and said no" from "nothing is listening". Those two must not be
+/// confused — the second is a reason to start a computer and the first is a
+/// reason to report, and starting one on top of a hub that is already there
+/// fails on the port it is holding.
+///
+/// `botroster_agent`'s `Refused` variant carries the literal in a `thiserror`
+/// attribute, which cannot interpolate a constant; a test there asserts the two
+/// agree, so rewording the message fails rather than silently teaching the
+/// window that every refusal is an absence.
+pub const REFUSED_PREFIX: &str = "the hub refused this connection";
+
+/// The home [`hub_token`] reads, once a process has named one.
+static HOME_FOR_TOKENS: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// The token of a hub this process started itself.
+static OUR_OWN_HUB: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Record the token of a hub this process has just started.
+///
+/// Consulted by [`hub_token`] ahead of everything, including the environment,
+/// and this is the only case that may outrank it. An ambient
+/// `BOTROSTER_HUB_TOKEN` describes some *other* hub — it is how a window
+/// reaches one on another machine — while this names a hub this process owns
+/// and minted a token for a moment ago.
+///
+/// Without it, exporting the variable once and then running `botroster run` on
+/// a machine with nothing listening produces: start a hub, generate its token,
+/// present the stale ambient one, be refused by the hub we just started — and
+/// the refusal blames a home the command had right. Measured, not imagined.
+///
+/// Returns whether this call is the one that set it. A process starts at most
+/// one hub; a second call with a different token is a bug this makes visible.
+pub fn started_a_hub(token: &str) -> bool {
+    OUR_OWN_HUB.set(token.to_owned()).is_ok()
+}
+
+/// Point this process's token lookup at a particular home.
+///
+/// `--home` is declared on each subcommand of the CLI with
+/// `env = "BOTROSTER_HOME"`, so the flag and the variable are one knob to a
+/// person and two to this function: passing `--home /elsewhere` on the command
+/// line sets no variable. Without this, such a command would read the *default*
+/// home's token, present it to a hub running on the named one, and be refused —
+/// with a message about a token the person did in fact have, which is the least
+/// diagnosable failure the hub's new admission check could produce.
+///
+/// Called once, from the one place that knows what `--home` said, so that no
+/// individual `HubClient::connect` call site has to remember. There are eleven
+/// of those in the CLI alone, and the lesson recorded three times in this
+/// project's history is that a rule applied at eleven call sites is applied at
+/// ten.
+///
+/// A `OnceLock` rather than a mutable global: a process resolves its home
+/// before it connects to anything and never changes it afterwards. Returns
+/// whether this call is the one that set it, so a second caller with a
+/// different answer is a bug a test can see rather than a race.
+pub fn use_home(home: &std::path::Path) -> bool {
+    HOME_FOR_TOKENS.set(home.to_path_buf()).is_ok()
+}
+
+/// The token to present: a hub we started, the environment, or a home.
+///
+/// A hub this process started first, because nothing else can describe it and
+/// an ambient variable actively misdescribes it. See [`started_a_hub`].
+///
+/// The environment second, because that is how a hub tells the children it
+/// spawned. A home third, because a person in a second terminal has neither
 /// the variable nor any reason to know about it — they have a home, and the
 /// hub they are talking to wrote its token there.
 ///
-/// `$BOTROSTER_HOME` is consulted before the default, because that is the
-/// variable the whole command line already means by "which home". Reading the
-/// default home while the person's commands all address another one would look
-/// exactly like a hub refusing a correct token.
+/// Which home, in order: whatever [`use_home`] was told, then `$BOTROSTER_HOME`,
+/// then the default. The variable is consulted before the default because it is
+/// what the whole command line already means by "which home"; [`use_home`] wins
+/// over it because a `--home` flag on the command line beats a variable in the
+/// environment everywhere else in this product, and the token has no business
+/// being the exception.
 #[must_use]
 pub fn hub_token() -> Option<String> {
+    if let Some(ours) = OUR_OWN_HUB.get() {
+        return Some(ours.clone());
+    }
     if let Some(v) = std::env::var_os(HUB_TOKEN_ENV) {
         let v = v.to_string_lossy().trim().to_owned();
         if !v.is_empty() {
             return Some(v);
         }
     }
-    let home = std::env::var_os("BOTROSTER_HOME")
-        .filter(|v| !v.is_empty())
-        .map_or_else(default_home, std::path::PathBuf::from);
+    let home = HOME_FOR_TOKENS.get().cloned().unwrap_or_else(|| {
+        std::env::var_os("BOTROSTER_HOME")
+            .filter(|v| !v.is_empty())
+            .map_or_else(default_home, std::path::PathBuf::from)
+    });
     hub_token_in(&home)
 }
 

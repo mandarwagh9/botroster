@@ -55,6 +55,14 @@ warnings* describes the confinement that exists and the ways it ends. Reports th
 "the guest can do what a process running as you can do" describe the documented posture, not a
 vulnerability, until the container backend exists.
 
+The hub's token is the same posture, stated once so it is not reported twice. `botroster up`
+generates one at start and writes it to `<home>/hub.token` — `0600` on Unix, the parent
+directory's ACL on Windows — and every client reads it from the home it was told to use. It stops a
+page you visit and another account on the machine from opening a session, which matters because a
+session's owner is who the hub asks before running `shell.exec`. **It stops nothing that runs as
+you**: such a program reads that file exactly as the desktop client does. A report that it can is a
+report about the missing process boundary above, and is answered there.
+
 ## Supported versions
 
 Pre-alpha. Only the tip of `main` is supported.

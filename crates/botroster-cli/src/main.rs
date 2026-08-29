@@ -942,6 +942,31 @@ enum ComputerCmd {
 ///
 /// A spawned thread names its own stack size and does so on every platform,
 /// which a linker argument would not.
+/// The home this invocation names, from the command line only.
+///
+/// Returns `None` when the command line does not say, which leaves
+/// `botroster_proto::hub_token` on its own chain — `$BOTROSTER_HOME`, then the
+/// default. This function deliberately does not consult the environment: doing
+/// so would move that decision into two places, and the one in `proto` is the
+/// one every other crate reads.
+///
+/// Both spellings clap accepts, `--home X` and `--home=X`, because a person who
+/// types the second and gets refused would have no way to tell which half of
+/// the product disagreed with the other.
+fn home_from_argv(args: impl Iterator<Item = std::ffi::OsString>) -> Option<std::path::PathBuf> {
+    let mut args = args.skip(1);
+    while let Some(a) = args.next() {
+        let s = a.to_string_lossy();
+        if let Some(v) = s.strip_prefix("--home=") {
+            return Some(std::path::PathBuf::from(v));
+        }
+        if s == "--home" {
+            return args.next().map(std::path::PathBuf::from);
+        }
+    }
+    None
+}
+
 fn main() -> anyhow::Result<()> {
     std::thread::Builder::new()
         .name("botroster".into())
@@ -964,6 +989,22 @@ async fn run() -> anyhow::Result<()> {
         )
         .with_writer(std::io::stderr)
         .init();
+
+    // Tell the token lookup which home this invocation is about, once, before
+    // anything connects. Every `HubClient::connect` in this binary presents
+    // `hub_token()`, and without this that reads the *default* home — so
+    // `botroster --home /elsewhere bot list` would present the wrong home's
+    // token to a hub started on the named one and be refused, with a message
+    // about a token the person did in fact have.
+    //
+    // Read from argv rather than from the parsed `Cli`, because `--home` is
+    // declared on each subcommand and there are thirty of them: a match over
+    // that enum is a list a new subcommand joins by being remembered, and this
+    // is not. `home_from_argv` is held to clap's answer by
+    // `the_scanned_home_is_the_home_clap_parses`.
+    if let Some(home) = home_from_argv(std::env::args_os()) {
+        botroster_proto::use_home(&home);
+    }
 
     let hub_url = cli.hub.clone();
     let server = cli.server.clone();
@@ -3590,5 +3631,102 @@ mod attachment_tests {
             !w.path().join("attachments").exists(),
             "a failed attach left a directory in the workspace"
         );
+    }
+}
+
+#[cfg(test)]
+mod home_flag_tests {
+    use super::home_from_argv;
+    use clap::CommandFactory;
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    fn argv(args: &[&str]) -> impl Iterator<Item = OsString> + use<> {
+        args.iter()
+            .map(OsString::from)
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    /// What clap would put in the subcommand's `home` field.
+    ///
+    /// Read through `ArgMatches` rather than by matching on `Command`, so this
+    /// cross-check does not itself become a list of thirty subcommands that a
+    /// thirty-first joins by being remembered — which is the failure
+    /// `home_from_argv` exists to avoid.
+    fn clap_says(args: &[&str]) -> Option<PathBuf> {
+        let m = super::Cli::command().try_get_matches_from(args).ok()?;
+        let (_, sub) = m.subcommand()?;
+        sub.get_one::<PathBuf>("home").cloned()
+    }
+
+    /// The scanner reads what clap reads.
+    ///
+    /// The scanner exists because `--home` is declared on each subcommand and
+    /// `run()` needs the answer before dispatching to one. That makes it a
+    /// second parser, and a second parser that disagrees with the first is
+    /// worse than none: the command would act on one home and present the
+    /// other home's token, and be refused with a message about a token the
+    /// person did in fact have.
+    #[test]
+    fn the_scanned_home_is_the_home_clap_parses() {
+        let cases: &[&[&str]] = &[
+            &["botroster", "bot", "ls", "--home", "/tmp/a"],
+            &["botroster", "bot", "ls", "--home=/tmp/a"],
+            &[
+                "botroster",
+                "up",
+                "--home",
+                "/tmp/b",
+                "--bind",
+                "127.0.0.1:0",
+            ],
+            &[
+                "botroster",
+                "run",
+                "--demo",
+                "--home",
+                "/tmp/c",
+                "do a thing",
+            ],
+            &["botroster", "routine", "tick", "--home", "/tmp/d"],
+        ];
+        for args in cases {
+            let clap = clap_says(args);
+            assert!(
+                clap.is_some(),
+                "clap parsed no home out of {args:?}, so this case proves nothing; fix the case"
+            );
+            assert_eq!(
+                home_from_argv(argv(args)),
+                clap,
+                "the scanner and clap disagree about {args:?}"
+            );
+        }
+    }
+
+    /// No `--home` means no answer, which leaves `hub_token` on its own chain:
+    /// `$BOTROSTER_HOME`, then the default. Returning the default here instead
+    /// would move that decision into two places.
+    #[test]
+    fn a_command_line_that_does_not_say_returns_nothing() {
+        assert_eq!(home_from_argv(argv(&["botroster", "bot", "ls"])), None);
+        assert_eq!(home_from_argv(argv(&["botroster"])), None);
+        // `--home` with nothing after it: clap will reject the command line and
+        // print its own error. This must not panic on the way there.
+        assert_eq!(
+            home_from_argv(argv(&["botroster", "bot", "ls", "--home"])),
+            None
+        );
+    }
+
+    /// The program's own name is never mistaken for a value.
+    ///
+    /// It is skipped, and a person whose binary is literally called `--home`
+    /// has stranger problems than this. Written down because the skip is one
+    /// character of code and its absence would be a very confusing bug.
+    #[test]
+    fn the_first_argument_is_the_program_and_not_a_flag() {
+        assert_eq!(home_from_argv(argv(&["--home", "bot", "ls"])), None);
     }
 }

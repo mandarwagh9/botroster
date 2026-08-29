@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::connector::{ConnectorTools, Connectors};
-use crate::hub::{Hub, InternalTools};
+use crate::hub::{Admission, Hub, InternalTools};
 use crate::internal::Composite;
 use crate::secrets::SecretStore;
 
@@ -28,7 +28,18 @@ pub struct Booted {
 /// so a misconfiguration surfaces at startup instead of as a missing tool
 /// later. A connector that is merely unreachable is logged and its tools are
 /// not offered until it answers.
-pub async fn hub_from_home(home: &Path, policy: crate::policy::Policy) -> anyhow::Result<Booted> {
+///
+/// `admission` is a parameter rather than something read from `home` here, and
+/// that is deliberate. `up` writes its token and then boots, so a hub reading
+/// the file itself would depend on the order of two statements in another
+/// crate — and a later reordering would silently return this hub to admitting
+/// everyone, with every test still green. Passing the value makes the decision
+/// visible at the call site and impossible to lose by moving a line.
+pub async fn hub_from_home(
+    home: &Path,
+    policy: crate::policy::Policy,
+    admission: Admission,
+) -> anyhow::Result<Booted> {
     let bots = Arc::new(botroster_bots::BotStore::open(home)?);
     let mut sources: Vec<Arc<dyn InternalTools>> =
         vec![Arc::new(crate::bot_tools::BotTools::new(bots))];
@@ -58,6 +69,7 @@ pub async fn hub_from_home(home: &Path, policy: crate::policy::Policy) -> anyhow
     // the model's context and in the log on disk. Always attached, not only
     // when a connector exists: a new connector's first need is a token.
     let mut hub = Hub::with_policy(policy)
+        .admitting(admission)
         .with_internal_tools(Arc::new(Composite::new(sources)))
         .with_secrets(secrets);
 
@@ -85,9 +97,13 @@ mod tests {
     #[tokio::test]
     async fn a_bare_home_still_serves_the_bot_tools() {
         let d = tempfile::tempdir().unwrap();
-        let b = hub_from_home(d.path(), crate::policy::Policy::default())
-            .await
-            .unwrap();
+        let b = hub_from_home(
+            d.path(),
+            crate::policy::Policy::default(),
+            Admission::Anyone,
+        )
+        .await
+        .unwrap();
         assert!(b.connector_tools.is_empty());
         // The hub is usable with no configuration at all.
         assert_eq!(b.hub.inflight_calls().await, 0);
@@ -99,9 +115,13 @@ mod tests {
         // empty at boot; otherwise a skill written later is invisible until
         // restart.
         let d = tempfile::tempdir().unwrap();
-        let b = hub_from_home(d.path(), crate::policy::Policy::default())
-            .await
-            .unwrap();
+        let b = hub_from_home(
+            d.path(),
+            crate::policy::Policy::default(),
+            Admission::Anyone,
+        )
+        .await
+        .unwrap();
 
         let skill_tools = |b: &Booted| {
             b.hub
@@ -148,9 +168,13 @@ Ask first.
     #[tokio::test]
     async fn a_bare_boot_can_ask_a_person_for_a_credential() {
         let d = tempfile::tempdir().unwrap();
-        let b = hub_from_home(d.path(), crate::policy::Policy::default())
-            .await
-            .unwrap();
+        let b = hub_from_home(
+            d.path(),
+            crate::policy::Policy::default(),
+            Admission::Anyone,
+        )
+        .await
+        .unwrap();
         let offered: Vec<_> = b
             .hub
             .internal_catalog()
@@ -173,8 +197,12 @@ Ask first.
         )
         .unwrap();
         // Failing at startup beats a tool that silently does not exist later.
-        assert!(hub_from_home(d.path(), crate::policy::Policy::default())
-            .await
-            .is_err());
+        assert!(hub_from_home(
+            d.path(),
+            crate::policy::Policy::default(),
+            Admission::Anyone
+        )
+        .await
+        .is_err());
     }
 }

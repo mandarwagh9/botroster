@@ -181,3 +181,79 @@ fn every_environment_variable_the_agent_can_read_is_recorded() {
         "the environment a Bot's agent can read is not the one recorded here"
     );
 }
+
+/// Every `botroster` child the window points at a hub is given the token.
+///
+/// This test exists because the rule was applied at four call sites and there
+/// were five. `hub::reach`, `viewer::open` and the agent were wired by hand;
+/// `attach::put` was missed, and the failure was a live test refusing to attach
+/// a file — one screen away from being a shipped defect that only appears once
+/// a hub requires a token.
+///
+/// The lesson recorded three times in this project's history is that a rule
+/// stated in one place and applied by hand everywhere else is applied at n-1
+/// places. So the rule is checked rather than remembered: any command built in
+/// this crate that names `--hub` must also name the token variable.
+///
+/// Read from source rather than by running the binaries, because the property
+/// is about construction, not behaviour. A behavioural version could only see
+/// the sites a test happens to drive, which is exactly how the fifth one was
+/// missed. `botrosterd/src/hub.rs` does the same for a different rule and
+/// `messages.rs` for another; a source sweep is how this repository checks the
+/// shape of code it cannot reach at runtime.
+#[test]
+fn every_child_pointed_at_a_hub_is_given_the_token_for_it() {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut checked = 0usize;
+
+    for entry in std::fs::read_dir(&src).expect("the crate has a src directory") {
+        let path = entry.expect("a readable entry").path();
+        if path.extension().is_none_or(|e| e != "rs") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).expect("a readable source file");
+        let file = path.file_name().expect("a file name").to_string_lossy();
+
+        // One chunk per command under construction: everything from the
+        // constructor to the next one. Crude on purpose — a parser would be a
+        // second thing to maintain, and the failure mode of the crude version
+        // is a false alarm that a person reads, not a silent pass.
+        let mut chunks: Vec<&str> = Vec::new();
+        for marker in ["Command::new(", "AcpAgentConfig::new("] {
+            let mut rest = text.as_str();
+            while let Some(at) = rest.find(marker) {
+                rest = &rest[at + marker.len()..];
+                let end = rest.find(marker).unwrap_or(rest.len());
+                chunks.push(&rest[..end]);
+            }
+        }
+
+        for chunk in chunks {
+            // Two ways this crate points a child at a hub: the flag, and the
+            // variable the agent is given instead because the ACP SDK builds
+            // its own argument list. `env_remove` of the same name is the
+            // opposite and must not count. `up` is excluded because it *starts*
+            // a hub and mints the token the others then present.
+            let points_at_a_hub =
+                chunk.contains(r#".arg("--hub")"#) || chunk.contains(r#".env("BOTROSTER_HUB_URL""#);
+            if !points_at_a_hub || chunk.contains(r#".arg("up")"#) {
+                continue;
+            }
+            checked += 1;
+            assert!(
+                chunk.contains("HUB_TOKEN_ENV"),
+                "{file} builds a `botroster` child with --hub and never gives it \
+                 HUB_TOKEN_ENV. A hub that requires a token will refuse it, and the person \
+                 sees the window fail at whatever that child was for. See `hub::token_at`."
+            );
+        }
+    }
+
+    // Anti-vacuity. A pattern that matched nothing would pass this test for
+    // ever, including on the day somebody renames the argument.
+    assert!(
+        checked >= 4,
+        "only {checked} hub-pointed children were found in this crate's source; the scan \
+         has stopped matching how commands are built and is no longer checking anything"
+    );
+}

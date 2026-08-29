@@ -32,8 +32,8 @@ use std::path::Path;
 ///
 /// # Errors
 /// If the binary cannot be run, or the file cannot be read.
-pub async fn put(botroster: &Path, hub: &str, file: &Path) -> anyhow::Result<String> {
-    let out = base(botroster, hub)
+pub async fn put(botroster: &Path, hub: &str, home: &Path, file: &Path) -> anyhow::Result<String> {
+    let out = base(botroster, hub, home)
         .arg(file)
         .arg("--json")
         .output()
@@ -54,7 +54,7 @@ pub async fn put(botroster: &Path, hub: &str, file: &Path) -> anyhow::Result<Str
         .ok_or_else(|| anyhow::anyhow!("`botroster attach` did not say where it landed"))
 }
 
-fn base(botroster: &Path, hub: &str) -> tokio::process::Command {
+fn base(botroster: &Path, hub: &str, home: &Path) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new(botroster);
     // Resolved through the hub so the destination is the workspace the guest
     // is actually serving. A home-derived path is correct only when `botroster up`
@@ -65,6 +65,15 @@ fn base(botroster: &Path, hub: &str) -> tokio::process::Command {
         .env("NO_COLOR", "1")
         .env_remove("BOTROSTER_HOME")
         .env_remove("BOTROSTER_HUB_URL");
+    // `botroster attach` opens a session on the hub, and declares no home
+    // argument, so it cannot find the token by itself. The scrubbed
+    // `BOTROSTER_HOME` above is what makes that so: passing the home here
+    // rather than in the environment keeps the two decisions separate — where
+    // the file goes is the hub's business, and which hub may be talked to is
+    // this one. See `crate::hub::token_at`.
+    if let Some(t) = crate::hub::token_at(home) {
+        cmd.env(botroster_proto::HUB_TOKEN_ENV, t);
+    }
     #[cfg(windows)]
     {
         // Otherwise attaching a file flashes a console window.

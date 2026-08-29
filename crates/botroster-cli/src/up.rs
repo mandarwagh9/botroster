@@ -436,10 +436,25 @@ pub async fn hub_or_start(
     // common answer on a fresh machine is "nothing is there". Long enough that
     // a loaded machine does not get a second stack started underneath it.
     const PROBE: std::time::Duration = std::time::Duration::from_millis(1500);
-    if let Ok(Ok(_)) =
-        tokio::time::timeout(PROBE, botroster_agent::HubClient::connect(hub_url)).await
-    {
-        return Ok((hub_url.to_owned(), None));
+    match tokio::time::timeout(PROBE, botroster_agent::HubClient::connect(hub_url)).await {
+        Ok(Ok(_)) => return Ok((hub_url.to_owned(), None)),
+        // A hub answered and said no. That is emphatically not "nothing is
+        // there", and starting a second stack on top of it is the worst
+        // available answer: the person ends up with two computers, two homes
+        // and a routine that can fire twice — the exact state `up`'s own
+        // documentation warns about — while the first hub, the one holding
+        // their work, sits there refusing them.
+        //
+        // Before this, `if let Ok(Ok(_))` swallowed every failure alike, and a
+        // wrong `--home` silently produced that second stack instead of the
+        // one sentence that says what to fix. Held by
+        // `a_home_that_holds_no_token_is_refused_and_told_why`.
+        Ok(Err(botroster_agent::HubError::Refused(why))) => {
+            anyhow::bail!("{}", unreachable(hub_url, &why))
+        }
+        // Nothing answered, or it answered something unintelligible. Both are
+        // reasons to start one.
+        Ok(Err(_)) | Err(_) => {}
     }
 
     // Said out loud, because it takes a moment and silence during it reads as a
@@ -472,13 +487,6 @@ impl Up {
     pub async fn start(self) -> anyhow::Result<Running> {
         self.paths.check()?;
 
-        // The policy this home configures, not a hardcoded default; this is
-        // how `[permission]` in config.toml reaches the engine.
-        let booted = botrosterd::boot::hub_from_home(
-            &self.paths.home,
-            crate::config::policy(&self.paths.home)?,
-        )
-        .await?;
         // A secret for this home, written before anything can connect.
         //
         // Generated fresh on every start rather than kept: a token that
@@ -491,6 +499,28 @@ impl Up {
         // See `Hello::token` for what this defends and what it does not.
         let token = uuid::Uuid::new_v4().to_string();
         botroster_proto::write_hub_token(&self.paths.home, &token)?;
+        // And tell this process, so that a client in it presents *this* hub's
+        // token rather than an ambient `BOTROSTER_HUB_TOKEN` describing some
+        // other one. `run` starts a hub here and connects to it from the same
+        // process a moment later; without this, a person who had exported that
+        // variable got "the hub refused this connection" from a hub this
+        // command had just created, blaming a home the command had right.
+        botroster_proto::started_a_hub(&token);
+
+        // The policy this home configures, not a hardcoded default; this is
+        // how `[permission]` in config.toml reaches the engine.
+        //
+        // The token is handed over rather than left for the hub to read out of
+        // the home: this is the one path that generates one, and passing it
+        // means the two statements cannot be reordered into a hub that admits
+        // everyone. `up` never admits anyone — unlike `botrosterd`, it has just
+        // written a token, so there is no older deployment to keep working.
+        let booted = botrosterd::boot::hub_from_home(
+            &self.paths.home,
+            crate::config::policy(&self.paths.home)?,
+            botrosterd::hub::Admission::Token(token.clone()),
+        )
+        .await?;
 
         let (listener, addr) = Server::bind(&self.bind).await?;
         let server = Arc::new(Server::new(Arc::clone(&booted.hub)));

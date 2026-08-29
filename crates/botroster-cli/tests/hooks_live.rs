@@ -104,6 +104,10 @@ fn a_hook_someone_wrote_refuses_a_real_tool_call() {
             .args(["call", tool, args, "--approve", "auto"])
             .env("BOTROSTER_HUB_URL", &hub)
             .env("NO_COLOR", "1")
+            // `botroster call` declares no `--home`, so it cannot find the
+            // token the hub above requires. The window's children are given it
+            // by `botroster_desktop::hub::token_at`; this one is given it here.
+            .envs(common::up::token_in(&home))
             .output()
             .unwrap()
     };

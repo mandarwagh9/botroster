@@ -438,3 +438,23 @@ fn id_key(id: &RpcId) -> String {
         RpcId::Str(s) => s.clone(),
     }
 }
+
+#[cfg(test)]
+mod refusal_wording_tests {
+    use super::HubError;
+
+    /// The window reads this sentence back off a child's stderr to tell a
+    /// refusal from an absence, and it cannot import a `thiserror` attribute.
+    /// Reword the attribute and this fails, rather than the window quietly
+    /// deciding every refused hub is a missing one and starting a second
+    /// computer on the port the first is holding.
+    #[test]
+    fn a_refusal_still_says_what_the_window_looks_for() {
+        let said = HubError::Refused("because".into()).to_string();
+        assert!(
+            said.starts_with(botroster_proto::REFUSED_PREFIX),
+            "`{said}` no longer starts with `{}`",
+            botroster_proto::REFUSED_PREFIX
+        );
+    }
+}

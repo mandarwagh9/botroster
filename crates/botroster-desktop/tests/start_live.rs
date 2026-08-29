@@ -40,7 +40,7 @@ async fn a_started_computer_is_serving_when_the_call_returns() {
     .expect("a computer starts");
 
     // Asked, not assumed: the point of waiting is that this answers.
-    let reach = hub::reach(&common::up::botroster(), &hub_url)
+    let reach = hub::reach(&common::up::botroster(), &hub_url, &dir.path().join("home"))
         .await
         .expect("the binary runs");
     assert!(
@@ -74,7 +74,7 @@ async fn dropping_the_handle_stops_the_computer() {
     // than sleeping an interval that is either flaky or slow.
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     loop {
-        let reach = hub::reach(&common::up::botroster(), &hub_url)
+        let reach = hub::reach(&common::up::botroster(), &hub_url, &dir.path().join("home"))
             .await
             .expect("the binary runs");
         if !reach.is_serving() {
@@ -134,9 +134,13 @@ async fn a_port_that_accepts_and_never_answers_is_not_waited_on_forever() {
     let port = black_hole.local_addr().expect("its address").port();
 
     let began = std::time::Instant::now();
+    // No hub was ever started, so there is no home holding a token; any path
+    // does, and an empty one is the honest shape of "nothing here".
+    let nowhere = tempfile::tempdir().expect("a temp dir");
     let reach = hub::reach(
         &common::up::botroster(),
         &format!("ws://127.0.0.1:{port}/v1/tools"),
+        nowhere.path(),
     )
     .await
     .expect("the binary runs");
@@ -149,5 +153,59 @@ async fn a_port_that_accepts_and_never_answers_is_not_waited_on_forever() {
         began.elapsed() < Duration::from_secs(40),
         "waited {:?} on a port that was never going to answer",
         began.elapsed()
+    );
+}
+
+/// A hub that refuses this window is reported, not started over.
+///
+/// The window takes a hub URL and a home as independent inputs — `Config` has
+/// both, and Connect accepts both — so pointing it at a hub started on someone
+/// else's home is a shape the product supports. The token lives in the *hub's*
+/// home, so that window is refused.
+///
+/// What must not then happen is the window deciding nothing is there and
+/// starting its own: the first hub is holding the port, so the second fails on
+/// the bind, and the person is shown "address in use" about a computer that is
+/// running perfectly well and simply does not accept them. `botroster up`'s
+/// `hub_or_start` had exactly this bug and it was fixed there first; this test
+/// exists because the fix was in one of the two places a person meets it.
+#[tokio::test]
+async fn a_hub_that_refuses_this_window_is_reported_rather_than_started_over() {
+    let Some(up) = common::up::Up::start() else {
+        return;
+    };
+    let elsewhere = tempfile::tempdir().expect("a home holding no token for that hub");
+
+    let reach = hub::reach(&common::up::botroster(), &up.hub, elsewhere.path())
+        .await
+        .expect("the binary runs");
+
+    let hub::Reach::Refused(why) = reach else {
+        panic!(
+            "a hub that refused this window came back as {reach:?}. `Unreachable` sends the \
+             caller to `hub::start`, which binds the port this hub is already holding — so the \
+             person is told \"address in use\" about a computer that is running."
+        );
+    };
+    assert!(
+        why.contains(botroster_proto::HUB_TOKEN_FILE),
+        "the refusal reached the window without the sentence that says what to fix: {why}"
+    );
+}
+
+/// The anti-vacuity half: the same call, with the home the hub was started on,
+/// is serving. Without it, a `reach` that answered `Refused` to everything
+/// would satisfy the test above and break every real window.
+#[tokio::test]
+async fn the_home_the_hub_was_started_on_reaches_it() {
+    let Some(up) = common::up::Up::start() else {
+        return;
+    };
+    let reach = hub::reach(&common::up::botroster(), &up.hub, &up.home)
+        .await
+        .expect("the binary runs");
+    assert!(
+        reach.is_serving(),
+        "the window could not reach a hub started on the home it was given: {reach:?}"
     );
 }

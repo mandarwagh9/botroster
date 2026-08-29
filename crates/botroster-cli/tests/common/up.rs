@@ -35,6 +35,17 @@ pub fn wait_for_hub_url(log: &std::path::Path, child: &mut Child) -> String {
     );
 }
 
+/// The token a hub started on `home` requires, as an environment pair.
+///
+/// For the tests that start their own `botroster up` rather than using [`Up`],
+/// and for any child driven straight at a hub with no `--home` of its own to
+/// find the token in. `Option` is an iterator of at most one pair, so
+/// `.envs(token_in(&home))` adds nothing when there is no token — which is what
+/// a hub admitting anyone wants.
+pub fn token_in(home: &std::path::Path) -> Option<(String, String)> {
+    botroster_proto::hub_token_in(home).map(|t| (botroster_proto::HUB_TOKEN_ENV.to_owned(), t))
+}
+
 /// A running `botroster up`, killed when this drops.
 pub struct Up {
     pub child: Child,
@@ -53,6 +64,16 @@ impl Drop for Up {
 }
 
 impl Up {
+    /// The token this hub requires.
+    ///
+    /// A test that drives `botroster` directly against `hub` — rather than
+    /// through the window, which passes it — has no home to find this in and
+    /// would be refused at the handshake. `botroster up` writes it into the
+    /// home it was started on, which is the one this struct is holding.
+    pub fn token(&self) -> Option<(String, String)> {
+        token_in(&self.home)
+    }
+
     /// Start it, and wait for the banner rather than sleeping a guessed amount.
     ///
     /// The banner is printed only after the guest has registered, so seeing it

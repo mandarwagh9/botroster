@@ -211,6 +211,10 @@ fn the_browser_works_when_up_is_run_from_a_relative_directory() {
         ])
         .env("BOTROSTER_HUB_URL", &hub)
         .env("NO_COLOR", "1")
+        // No `--home` on `botroster call`, so it has nowhere of its own to
+        // find the token this hub requires. The home is the one `up` was given
+        // above, relative to the same directory.
+        .envs(common::up::token_in(&dir.path().join("cp")))
         .output()
         .unwrap();
 
@@ -267,6 +271,7 @@ fn the_computers_files_are_on_the_durable_volume() {
         ])
         .env("BOTROSTER_HUB_URL", &hub)
         .env("NO_COLOR", "1")
+        .envs(common::up::token_in(&home))
         .output()
         .unwrap();
     assert!(
@@ -335,7 +340,10 @@ impl Drop for AcpClient {
 }
 
 impl AcpClient {
-    fn start(hub: &str) -> Self {
+    /// `home` is the *hub's* home, not the agent's: the agent gets a throwaway
+    /// one below so its Bots do not land in the hub's store, and a throwaway
+    /// home holds no token for the hub this client is being pointed at.
+    fn start(hub: &str, home: &std::path::Path) -> Self {
         use std::io::BufRead;
         let dir = tempfile::tempdir().unwrap();
         let mut child = Command::new(BOTROSTER)
@@ -344,6 +352,7 @@ impl AcpClient {
             .env("BOTROSTER_HUB_URL", hub)
             .env("NO_COLOR", "1")
             .env_remove("BOTROSTER_HOME")
+            .envs(common::up::token_in(home))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -420,7 +429,7 @@ impl AcpClient {
 #[test]
 fn an_acp_client_can_drive_a_whole_turn() {
     let up = Up::start().expect("botroster up");
-    let mut acp = AcpClient::start(&up.hub);
+    let mut acp = AcpClient::start(&up.hub, &up.home);
 
     acp.send(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{}}}"#);
     let (init, _) = acp.pump_until(1);

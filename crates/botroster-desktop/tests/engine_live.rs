@@ -19,11 +19,15 @@ const DEMO_REPLY: &str = "Done.";
 #[tokio::test(flavor = "multi_thread")]
 async fn the_engine_opens_a_session_and_hears_a_whole_turn() {
     let up = Up::start().expect("botroster up");
-    let agent_home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home. `hub::start` passes one path to `botroster up` and
+    // the engine passes the same one to the agent, so a test giving each a
+    // different home drives a shape the window never produces — and a hub's
+    // token lives in the home it was started on.
+    let agent_home = &up.home;
 
     let mut engine = Engine::connect(Config {
         botroster: common::up::botroster(),
-        home: agent_home.path().to_path_buf(),
+        home: agent_home.clone(),
         hub: up.hub.clone(),
         demo: true,
         demo_tools: false,
@@ -71,11 +75,15 @@ async fn the_engine_opens_a_session_and_hears_a_whole_turn() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_created_through_the_engine_lands_on_a_bot() {
     let up = Up::start().expect("botroster up");
-    let agent_home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home. `hub::start` passes one path to `botroster up` and
+    // the engine passes the same one to the agent, so a test giving each a
+    // different home drives a shape the window never produces — and a hub's
+    // token lives in the home it was started on.
+    let agent_home = &up.home;
 
     let engine = Engine::connect(Config {
         botroster: common::up::botroster(),
-        home: agent_home.path().to_path_buf(),
+        home: agent_home.clone(),
         hub: up.hub.clone(),
         demo: true,
         demo_tools: false,
@@ -91,7 +99,7 @@ async fn a_session_created_through_the_engine_lands_on_a_bot() {
         .await
         .expect("session/new");
 
-    let bots = botroster_bots::BotStore::open(agent_home.path()).unwrap();
+    let bots = botroster_bots::BotStore::open(agent_home).unwrap();
     let names: Vec<String> = bots
         .list(true)
         .unwrap()
@@ -111,11 +119,15 @@ async fn a_session_created_through_the_engine_lands_on_a_bot() {
 #[tokio::test(flavor = "multi_thread")]
 async fn cancel_reaches_the_agent_without_error() {
     let up = Up::start().expect("botroster up");
-    let agent_home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home. `hub::start` passes one path to `botroster up` and
+    // the engine passes the same one to the agent, so a test giving each a
+    // different home drives a shape the window never produces — and a hub's
+    // token lives in the home it was started on.
+    let agent_home = &up.home;
 
     let mut engine = Engine::connect(Config {
         botroster: common::up::botroster(),
-        home: agent_home.path().to_path_buf(),
+        home: agent_home.clone(),
         hub: up.hub.clone(),
         demo: true,
         demo_tools: false,
@@ -145,11 +157,15 @@ async fn cancel_reaches_the_agent_without_error() {
 #[tokio::test(flavor = "multi_thread")]
 async fn approvals_reach_the_engine_and_answers_land() {
     let up = Up::start().expect("botroster up");
-    let agent_home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home. `hub::start` passes one path to `botroster up` and
+    // the engine passes the same one to the agent, so a test giving each a
+    // different home drives a shape the window never produces — and a hub's
+    // token lives in the home it was started on.
+    let agent_home = &up.home;
 
     let mut engine = Engine::connect(Config {
         botroster: common::up::botroster(),
-        home: agent_home.path().to_path_buf(),
+        home: agent_home.clone(),
         hub: up.hub.clone(),
         demo: false,
         demo_tools: true,
@@ -250,11 +266,15 @@ async fn approvals_reach_the_engine_and_answers_land() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_approval_answers_cancelled_and_the_turn_still_ends() {
     let up = Up::start().expect("botroster up");
-    let agent_home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home. `hub::start` passes one path to `botroster up` and
+    // the engine passes the same one to the agent, so a test giving each a
+    // different home drives a shape the window never produces — and a hub's
+    // token lives in the home it was started on.
+    let agent_home = &up.home;
 
     let mut engine = Engine::connect(Config {
         botroster: common::up::botroster(),
-        home: agent_home.path().to_path_buf(),
+        home: agent_home.clone(),
         hub: up.hub.clone(),
         demo: false,
         demo_tools: true,
@@ -320,14 +340,18 @@ async fn a_refused_approval_answers_cancelled_and_the_turn_still_ends() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_reconnecting_client_is_shown_the_conversation_it_missed() {
     let up = Up::start().expect("botroster up");
-    let agent_home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home. `hub::start` passes one path to `botroster up` and
+    // the engine passes the same one to the agent, so a test giving each a
+    // different home drives a shape the window never produces — and a hub's
+    // token lives in the home it was started on.
+    let agent_home = &up.home;
     let cwd = "/tmp/botroster-remembers";
 
     // One conversation, had and finished.
     {
         let mut engine = Engine::connect(Config {
             botroster: common::up::botroster(),
-            home: agent_home.path().to_path_buf(),
+            home: agent_home.clone(),
             hub: up.hub.clone(),
             demo: true,
             demo_tools: false,
@@ -350,7 +374,7 @@ async fn a_reconnecting_client_is_shown_the_conversation_it_missed() {
     // A different process entirely, as far as the agent is concerned.
     let mut engine = Engine::connect(Config {
         botroster: common::up::botroster(),
-        home: agent_home.path().to_path_buf(),
+        home: agent_home.clone(),
         hub: up.hub.clone(),
         demo: true,
         demo_tools: false,
@@ -408,11 +432,15 @@ async fn a_reconnecting_client_is_shown_the_conversation_it_missed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn loading_a_conversation_that_never_happened_is_not_an_error() {
     let up = Up::start().expect("botroster up");
-    let agent_home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home. `hub::start` passes one path to `botroster up` and
+    // the engine passes the same one to the agent, so a test giving each a
+    // different home drives a shape the window never produces — and a hub's
+    // token lives in the home it was started on.
+    let agent_home = &up.home;
 
     let mut engine = Engine::connect(Config {
         botroster: common::up::botroster(),
-        home: agent_home.path().to_path_buf(),
+        home: agent_home.clone(),
         hub: up.hub.clone(),
         demo: true,
         demo_tools: false,
@@ -449,14 +477,18 @@ async fn loading_a_conversation_that_never_happened_is_not_an_error() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_client_can_open_a_bot_by_name_and_come_back_to_it() {
     let up = Up::start().expect("botroster up");
-    let agent_home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home. `hub::start` passes one path to `botroster up` and
+    // the engine passes the same one to the agent, so a test giving each a
+    // different home drives a shape the window never produces — and a hub's
+    // token lives in the home it was started on.
+    let agent_home = &up.home;
     // Intentionally unrelated to the Bot's name: if the directory leaked into
     // the naming, this is where it would show.
     let cwd = "/tmp/some-unrelated-folder";
 
     let engine = Engine::connect(Config {
         botroster: common::up::botroster(),
-        home: agent_home.path().to_path_buf(),
+        home: agent_home.clone(),
         hub: up.hub.clone(),
         demo: true,
         demo_tools: false,
@@ -472,7 +504,7 @@ async fn a_client_can_open_a_bot_by_name_and_come_back_to_it() {
         .await
         .expect("session/new for a named Bot");
 
-    let bots = botroster_bots::BotStore::open(agent_home.path()).unwrap();
+    let bots = botroster_bots::BotStore::open(agent_home).unwrap();
     let names: Vec<String> = bots
         .list(true)
         .unwrap()
@@ -520,11 +552,15 @@ async fn a_client_can_open_a_bot_by_name_and_come_back_to_it() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_pinned_agent_ignores_a_client_asking_for_someone_else() {
     let up = Up::start().expect("botroster up");
-    let agent_home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home. `hub::start` passes one path to `botroster up` and
+    // the engine passes the same one to the agent, so a test giving each a
+    // different home drives a shape the window never produces — and a hub's
+    // token lives in the home it was started on.
+    let agent_home = &up.home;
 
     let engine = Engine::connect(Config {
         botroster: common::up::botroster(),
-        home: agent_home.path().to_path_buf(),
+        home: agent_home.clone(),
         hub: up.hub.clone(),
         demo: true,
         demo_tools: false,
@@ -540,7 +576,7 @@ async fn a_pinned_agent_ignores_a_client_asking_for_someone_else() {
         .await
         .expect("session/new");
 
-    let bots = botroster_bots::BotStore::open(agent_home.path()).unwrap();
+    let bots = botroster_bots::BotStore::open(agent_home).unwrap();
     let names: Vec<String> = bots
         .list(true)
         .unwrap()
@@ -561,8 +597,12 @@ async fn a_pinned_agent_ignores_a_client_asking_for_someone_else() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_client_can_open_a_group_and_the_turn_lands_in_its_thread() {
     let up = Up::start().expect("botroster up");
-    let agent_home = tempfile::tempdir().expect("a home for the agent's bots");
-    let home = agent_home.path();
+    // The hub's own home. `hub::start` passes one path to `botroster up` and
+    // the engine passes the same one to the agent, so a test giving each a
+    // different home drives a shape the window never produces — and a hub's
+    // token lives in the home it was started on.
+    let agent_home = &up.home;
+    let home = agent_home.as_path();
 
     let botroster = common::up::botroster();
     let run = |args: Vec<String>| {
@@ -653,10 +693,10 @@ async fn a_client_can_open_a_group_and_the_turn_lands_in_its_thread() {
 #[tokio::test(flavor = "multi_thread")]
 async fn opening_a_group_that_does_not_exist_is_refused() {
     let up = Up::start().expect("botroster up");
-    let agent_home = tempfile::tempdir().expect("a home");
+    let agent_home = &up.home;
     let engine = Engine::connect(Config {
         botroster: common::up::botroster(),
-        home: agent_home.path().to_path_buf(),
+        home: agent_home.clone(),
         hub: up.hub.clone(),
         demo: true,
         demo_tools: false,
@@ -723,11 +763,15 @@ fn carries(maybe: &SessionUpdate, text: &str) -> bool {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_credential_request_reaches_the_client_and_the_value_is_stored() {
     let up = Up::start().expect("botroster up");
-    let agent_home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home. `hub::start` passes one path to `botroster up` and
+    // the engine passes the same one to the agent, so a test giving each a
+    // different home drives a shape the window never produces — and a hub's
+    // token lives in the home it was started on.
+    let agent_home = &up.home;
 
     let mut engine = Engine::connect(Config {
         botroster: common::up::botroster(),
-        home: agent_home.path().to_path_buf(),
+        home: agent_home.clone(),
         hub: up.hub.clone(),
         demo: false,
         demo_tools: false,
@@ -1163,11 +1207,15 @@ fn spawned_agent_pid() -> Option<u32> {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_agent_that_was_killed_stops_reporting_itself_alive() {
     let up = Up::start().expect("botroster up");
-    let agent_home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home. `hub::start` passes one path to `botroster up` and
+    // the engine passes the same one to the agent, so a test giving each a
+    // different home drives a shape the window never produces — and a hub's
+    // token lives in the home it was started on.
+    let agent_home = &up.home;
 
     let engine = Engine::connect(Config {
         botroster: common::up::botroster(),
-        home: agent_home.path().to_path_buf(),
+        home: agent_home.clone(),
         hub: up.hub.clone(),
         demo: true,
         demo_tools: false,

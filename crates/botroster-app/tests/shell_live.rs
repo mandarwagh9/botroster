@@ -177,9 +177,14 @@ fn wait_for<T>(mut f: impl FnMut() -> Option<T>, within: Duration) -> Option<T> 
 }
 
 /// Connect a shell to a live stack and open a session on it.
-fn connected(mode: Mode, cwd: &str) -> (Up, tempfile::TempDir, Shell, String) {
+fn connected(mode: Mode, cwd: &str) -> (Up, Shell, String) {
     let up = Up::start().expect("botroster up");
-    let home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home, not a separate one. The window passes a single path
+    // to `botroster up` and to the agent it spawns, so a test giving each a
+    // different home was driving a shape the product never produces — and,
+    // since a hub's token lives in the home it was started on, one that a hub
+    // requiring a token refuses.
+    let home = &up.home;
     let shell = Shell::build(mode);
 
     shell
@@ -187,7 +192,7 @@ fn connected(mode: Mode, cwd: &str) -> (Up, tempfile::TempDir, Shell, String) {
             "connect",
             json!({
                 "botroster": common::up::botroster().to_str().unwrap(),
-                "home": home.path().to_str().unwrap(),
+                "home": home.to_str().unwrap(),
                 "hub": up.hub,
             }),
         )
@@ -197,7 +202,7 @@ fn connected(mode: Mode, cwd: &str) -> (Up, tempfile::TempDir, Shell, String) {
         .call("new_session", json!({ "cwd": cwd }))
         .expect("new_session");
     let session = session.as_str().expect("a session id").to_owned();
-    (up, home, shell, session)
+    (up, shell, session)
 }
 
 /// The streaming test.
@@ -214,7 +219,7 @@ fn connected(mode: Mode, cwd: &str) -> (Up, tempfile::TempDir, Shell, String) {
 /// true whether the words arrived during the turn or all at once after it.
 #[test]
 fn the_words_reach_the_window_while_the_turn_is_still_running() {
-    let (_up, _home, shell, session) = connected(Mode::Tools, "/tmp/botroster-stream");
+    let (_up, shell, session) = connected(Mode::Tools, "/tmp/botroster-stream");
 
     let turn = std::thread::spawn({
         let webview = shell.webview.clone();
@@ -363,7 +368,7 @@ fn the_words_reach_the_window_while_the_turn_is_still_running() {
 /// kind, so both are load-bearing.
 #[test]
 fn chunks_are_labelled_for_the_page() {
-    let (_up, _home, shell, session) = connected(Mode::Reply, "/tmp/botroster-labels");
+    let (_up, shell, session) = connected(Mode::Reply, "/tmp/botroster-labels");
 
     shell
         .call("prompt", json!({ "session": session, "text": "go" }))
@@ -396,7 +401,7 @@ fn chunks_are_labelled_for_the_page() {
 /// again.
 #[test]
 fn refusing_every_approval_still_ends_the_turn() {
-    let (_up, _home, shell, session) = connected(Mode::Tools, "/tmp/botroster-refuse");
+    let (_up, shell, session) = connected(Mode::Tools, "/tmp/botroster-refuse");
 
     let turn = std::thread::spawn({
         let webview = shell.webview.clone();
@@ -434,7 +439,7 @@ fn refusing_every_approval_still_ends_the_turn() {
 /// the id belongs to nothing.
 #[test]
 fn an_approval_cannot_be_answered_twice() {
-    let (_up, _home, shell, session) = connected(Mode::Tools, "/tmp/botroster-twice");
+    let (_up, shell, session) = connected(Mode::Tools, "/tmp/botroster-twice");
 
     let turn = std::thread::spawn({
         let webview = shell.webview.clone();
@@ -488,7 +493,7 @@ fn an_approval_cannot_be_answered_twice() {
 /// agent stopped waiting is a button that does nothing.
 #[test]
 fn stopping_withdraws_the_approvals_it_was_waiting_on() {
-    let (_up, _home, shell, session) = connected(Mode::Tools, "/tmp/botroster-stop");
+    let (_up, shell, session) = connected(Mode::Tools, "/tmp/botroster-stop");
 
     let turn = std::thread::spawn({
         let webview = shell.webview.clone();
@@ -564,7 +569,7 @@ fn stopping_withdraws_the_approvals_it_was_waiting_on() {
 /// entire window.
 #[test]
 fn a_session_can_be_opened_while_a_turn_is_waiting_on_an_approval() {
-    let (_up, _home, shell, session) = connected(Mode::Tools, "/tmp/botroster-alpha");
+    let (_up, shell, session) = connected(Mode::Tools, "/tmp/botroster-alpha");
 
     let turn = std::thread::spawn({
         let webview = shell.webview.clone();
@@ -650,14 +655,19 @@ struct GotOpened {
 #[test]
 fn opening_a_bot_brings_its_conversation_with_it() {
     let up = Up::start().expect("botroster up");
-    let home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home, not a separate one. The window passes a single path
+    // to `botroster up` and to the agent it spawns, so a test giving each a
+    // different home was driving a shape the product never produces — and,
+    // since a hub's token lives in the home it was started on, one that a hub
+    // requiring a token refuses.
+    let home = &up.home;
     let shell = Shell::build(Mode::Reply);
     shell
         .call(
             "connect",
             json!({
                 "botroster": common::up::botroster().to_str().unwrap(),
-                "home": home.path().to_str().unwrap(),
+                "home": home.to_str().unwrap(),
                 "hub": up.hub,
             }),
         )
@@ -734,7 +744,12 @@ fn opening_a_bot_brings_its_conversation_with_it() {
 #[test]
 fn the_roster_reaches_the_window() {
     let up = Up::start().expect("botroster up");
-    let home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home, not a separate one. The window passes a single path
+    // to `botroster up` and to the agent it spawns, so a test giving each a
+    // different home was driving a shape the product never produces — and,
+    // since a hub's token lives in the home it was started on, one that a hub
+    // requiring a token refuses.
+    let home = &up.home;
     let shell = Shell::build(Mode::Reply);
 
     let before = shell.call("roster", json!({ "hidden": false }));
@@ -748,7 +763,7 @@ fn the_roster_reaches_the_window() {
             "connect",
             json!({
                 "botroster": common::up::botroster().to_str().unwrap(),
-                "home": home.path().to_str().unwrap(),
+                "home": home.to_str().unwrap(),
                 "hub": up.hub,
             }),
         )
@@ -787,14 +802,19 @@ fn the_roster_reaches_the_window() {
 #[test]
 fn a_bot_needs_a_name() {
     let up = Up::start().expect("botroster up");
-    let home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home, not a separate one. The window passes a single path
+    // to `botroster up` and to the agent it spawns, so a test giving each a
+    // different home was driving a shape the product never produces — and,
+    // since a hub's token lives in the home it was started on, one that a hub
+    // requiring a token refuses.
+    let home = &up.home;
     let shell = Shell::build(Mode::Reply);
     shell
         .call(
             "connect",
             json!({
                 "botroster": common::up::botroster().to_str().unwrap(),
-                "home": home.path().to_str().unwrap(),
+                "home": home.to_str().unwrap(),
                 "hub": up.hub,
             }),
         )
@@ -814,7 +834,12 @@ fn a_bot_needs_a_name() {
 #[test]
 fn the_window_can_open_and_close_the_agent_computer() {
     let up = Up::start().expect("botroster up");
-    let home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home, not a separate one. The window passes a single path
+    // to `botroster up` and to the agent it spawns, so a test giving each a
+    // different home was driving a shape the product never produces — and,
+    // since a hub's token lives in the home it was started on, one that a hub
+    // requiring a token refuses.
+    let home = &up.home;
     let shell = Shell::build(Mode::Reply);
 
     let before = shell.call("open_computer", json!({}));
@@ -828,7 +853,7 @@ fn the_window_can_open_and_close_the_agent_computer() {
             "connect",
             json!({
                 "botroster": common::up::botroster().to_str().unwrap(),
-                "home": home.path().to_str().unwrap(),
+                "home": home.to_str().unwrap(),
                 "hub": up.hub,
             }),
         )
@@ -904,7 +929,12 @@ fn the_window_can_open_and_close_the_agent_computer() {
 fn a_credential_supplied_in_the_window_never_comes_back_out_of_it() {
     const VALUE: &str = "sk-live-NEVER-SHOW-THIS-4f2a9c";
     let up = Up::start().expect("botroster up");
-    let home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home, not a separate one. The window passes a single path
+    // to `botroster up` and to the agent it spawns, so a test giving each a
+    // different home was driving a shape the product never produces — and,
+    // since a hub's token lives in the home it was started on, one that a hub
+    // requiring a token refuses.
+    let home = &up.home;
     let shell = Shell::build(Mode::Reply);
 
     let before = shell.call("secret_list", json!({}));
@@ -918,7 +948,7 @@ fn a_credential_supplied_in_the_window_never_comes_back_out_of_it() {
             "connect",
             json!({
                 "botroster": common::up::botroster().to_str().unwrap(),
-                "home": home.path().to_str().unwrap(),
+                "home": home.to_str().unwrap(),
                 "hub": up.hub,
             }),
         )
@@ -982,7 +1012,12 @@ fn a_credential_supplied_in_the_window_never_comes_back_out_of_it() {
 #[test]
 fn a_rule_written_in_the_window_is_the_rule_the_hub_will_enforce() {
     let up = Up::start().expect("botroster up");
-    let home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home, not a separate one. The window passes a single path
+    // to `botroster up` and to the agent it spawns, so a test giving each a
+    // different home was driving a shape the product never produces — and,
+    // since a hub's token lives in the home it was started on, one that a hub
+    // requiring a token refuses.
+    let home = &up.home;
     let shell = Shell::build(Mode::Reply);
 
     let before = shell.call("policy_list", json!({}));
@@ -996,7 +1031,7 @@ fn a_rule_written_in_the_window_is_the_rule_the_hub_will_enforce() {
             "connect",
             json!({
                 "botroster": common::up::botroster().to_str().unwrap(),
-                "home": home.path().to_str().unwrap(),
+                "home": home.to_str().unwrap(),
                 "hub": up.hub,
             }),
         )
@@ -1032,7 +1067,7 @@ fn a_rule_written_in_the_window_is_the_rule_the_hub_will_enforce() {
 
     // It is the rule the hub loads. Checked against the same loader the
     // hub boots with, so the window and the enforcement cannot disagree.
-    let text = std::fs::read_to_string(home.path().join("config.toml")).expect("config");
+    let text = std::fs::read_to_string(home.join("config.toml")).expect("config");
     assert!(
         text.contains("shell.exec") && text.contains("read-only account"),
         "the rule did not reach the file the hub reads: {text}"
@@ -1068,7 +1103,12 @@ fn a_rule_written_in_the_window_is_the_rule_the_hub_will_enforce() {
 #[test]
 fn connecting_says_whether_there_is_a_computer_behind_the_hub() {
     let up = Up::start().expect("botroster up");
-    let home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home, not a separate one. The window passes a single path
+    // to `botroster up` and to the agent it spawns, so a test giving each a
+    // different home was driving a shape the product never produces — and,
+    // since a hub's token lives in the home it was started on, one that a hub
+    // requiring a token refuses.
+    let home = &up.home;
 
     // A real hub: connected, and it says what it serves.
     let shell = Shell::build(Mode::Reply);
@@ -1077,7 +1117,7 @@ fn connecting_says_whether_there_is_a_computer_behind_the_hub() {
             "connect",
             json!({
                 "botroster": common::up::botroster().to_str().unwrap(),
-                "home": home.path().to_str().unwrap(),
+                "home": home.to_str().unwrap(),
                 "hub": up.hub,
             }),
         )
@@ -1136,7 +1176,7 @@ fn connecting_says_whether_there_is_a_computer_behind_the_hub() {
             "connect",
             json!({
                 "botroster": common::up::botroster().to_str().unwrap(),
-                "home": home.path().to_str().unwrap(),
+                "home": home.to_str().unwrap(),
                 "hub": format!("ws://127.0.0.1:{held}/v1/tools"),
             }),
         )
@@ -1167,7 +1207,12 @@ fn connecting_says_whether_there_is_a_computer_behind_the_hub() {
 #[test]
 fn the_shell_says_whether_it_is_connected() {
     let up = Up::start().expect("botroster up");
-    let home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home, not a separate one. The window passes a single path
+    // to `botroster up` and to the agent it spawns, so a test giving each a
+    // different home was driving a shape the product never produces — and,
+    // since a hub's token lives in the home it was started on, one that a hub
+    // requiring a token refuses.
+    let home = &up.home;
     let shell = Shell::build(Mode::Reply);
 
     let before = shell.call("connected", json!({})).expect("connected");
@@ -1182,7 +1227,7 @@ fn the_shell_says_whether_it_is_connected() {
 
     let args = json!({
         "botroster": common::up::botroster().to_str().unwrap(),
-        "home": home.path().to_str().unwrap(),
+        "home": home.to_str().unwrap(),
         "hub": up.hub,
     });
     shell.call("connect", args.clone()).expect("connect");
@@ -1234,7 +1279,7 @@ fn the_shell_says_whether_it_is_connected() {
             "connect",
             json!({
                 "botroster": common::up::botroster().to_str().unwrap(),
-                "home": home.path().to_str().unwrap(),
+                "home": home.to_str().unwrap(),
                 "hub": up.hub,
             }),
         )
@@ -1271,7 +1316,12 @@ fn commands_that_need_an_engine_say_so_when_there_is_none() {
 #[test]
 fn the_skills_a_bot_can_use_reach_the_window() {
     let up = Up::start().expect("botroster up");
-    let home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home, not a separate one. The window passes a single path
+    // to `botroster up` and to the agent it spawns, so a test giving each a
+    // different home was driving a shape the product never produces — and,
+    // since a hub's token lives in the home it was started on, one that a hub
+    // requiring a token refuses.
+    let home = &up.home;
     let shell = Shell::build(Mode::Reply);
 
     let before = shell.call("skills", json!({}));
@@ -1285,7 +1335,7 @@ fn the_skills_a_bot_can_use_reach_the_window() {
             "connect",
             json!({
                 "botroster": common::up::botroster().to_str().unwrap(),
-                "home": home.path().to_str().unwrap(),
+                "home": home.to_str().unwrap(),
                 "hub": up.hub,
             }),
         )
@@ -1304,7 +1354,7 @@ fn the_skills_a_bot_can_use_reach_the_window() {
         .args(["skill", "new", "refund-a-customer", "--description"])
         .arg("How to issue a refund")
         .arg("--home")
-        .arg(home.path())
+        .arg(home.as_path())
         .env("NO_COLOR", "1")
         .env_remove("BOTROSTER_HOME")
         .output()
@@ -1333,7 +1383,12 @@ fn the_skills_a_bot_can_use_reach_the_window() {
 #[test]
 fn editing_a_bot_from_the_window_renames_it_without_losing_it() {
     let up = Up::start().expect("botroster up");
-    let home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home, not a separate one. The window passes a single path
+    // to `botroster up` and to the agent it spawns, so a test giving each a
+    // different home was driving a shape the product never produces — and,
+    // since a hub's token lives in the home it was started on, one that a hub
+    // requiring a token refuses.
+    let home = &up.home;
     let shell = Shell::build(Mode::Reply);
 
     let before = shell.call("bot_describe", json!({ "bot": "nobody" }));
@@ -1347,7 +1402,7 @@ fn editing_a_bot_from_the_window_renames_it_without_losing_it() {
             "connect",
             json!({
                 "botroster": common::up::botroster().to_str().unwrap(),
-                "home": home.path().to_str().unwrap(),
+                "home": home.to_str().unwrap(),
                 "hub": up.hub,
             }),
         )
@@ -1413,7 +1468,12 @@ fn editing_a_bot_from_the_window_renames_it_without_losing_it() {
 #[test]
 fn duplicating_a_bot_copies_the_brief_and_not_the_conversation() {
     let up = Up::start().expect("botroster up");
-    let home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home, not a separate one. The window passes a single path
+    // to `botroster up` and to the agent it spawns, so a test giving each a
+    // different home was driving a shape the product never produces — and,
+    // since a hub's token lives in the home it was started on, one that a hub
+    // requiring a token refuses.
+    let home = &up.home;
     let shell = Shell::build(Mode::Reply);
 
     shell
@@ -1421,7 +1481,7 @@ fn duplicating_a_bot_copies_the_brief_and_not_the_conversation() {
             "connect",
             json!({
                 "botroster": common::up::botroster().to_str().unwrap(),
-                "home": home.path().to_str().unwrap(),
+                "home": home.to_str().unwrap(),
                 "hub": up.hub,
             }),
         )
@@ -1495,7 +1555,12 @@ fn duplicating_a_bot_copies_the_brief_and_not_the_conversation() {
 #[test]
 fn deleting_a_bot_from_the_window_leaves_its_group_working() {
     let up = Up::start().expect("botroster up");
-    let home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home, not a separate one. The window passes a single path
+    // to `botroster up` and to the agent it spawns, so a test giving each a
+    // different home was driving a shape the product never produces — and,
+    // since a hub's token lives in the home it was started on, one that a hub
+    // requiring a token refuses.
+    let home = &up.home;
     let shell = Shell::build(Mode::Reply);
 
     shell
@@ -1503,7 +1568,7 @@ fn deleting_a_bot_from_the_window_leaves_its_group_working() {
             "connect",
             json!({
                 "botroster": common::up::botroster().to_str().unwrap(),
-                "home": home.path().to_str().unwrap(),
+                "home": home.to_str().unwrap(),
                 "hub": up.hub,
             }),
         )
@@ -1517,7 +1582,7 @@ fn deleting_a_bot_from_the_window_leaves_its_group_working() {
     let out = std::process::Command::new(common::up::botroster())
         .args(["group", "new", "Launch", "--members", "talent-scout,writer"])
         .arg("--home")
-        .arg(home.path())
+        .arg(home.as_path())
         .env("NO_COLOR", "1")
         .env_remove("BOTROSTER_HOME")
         .output()
@@ -1625,7 +1690,7 @@ fn the_default_home_is_a_path_and_not_a_tilde() {
 /// pins that, because the sweep depends on it.
 #[test]
 fn a_second_prompt_does_not_withdraw_the_first_turns_question() {
-    let (_up, _home, shell, session) = connected(Mode::Tools, "/tmp/botroster-join");
+    let (_up, shell, session) = connected(Mode::Tools, "/tmp/botroster-join");
 
     let first = std::thread::spawn({
         let webview = shell.webview.clone();
@@ -1699,7 +1764,12 @@ fn a_second_prompt_does_not_withdraw_the_first_turns_question() {
 #[test]
 fn hiding_a_bot_from_the_window_keeps_its_work() {
     let up = Up::start().expect("botroster up");
-    let home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home, not a separate one. The window passes a single path
+    // to `botroster up` and to the agent it spawns, so a test giving each a
+    // different home was driving a shape the product never produces — and,
+    // since a hub's token lives in the home it was started on, one that a hub
+    // requiring a token refuses.
+    let home = &up.home;
     let shell = Shell::build(Mode::Reply);
 
     shell
@@ -1707,7 +1777,7 @@ fn hiding_a_bot_from_the_window_keeps_its_work() {
             "connect",
             json!({
                 "botroster": common::up::botroster().to_str().unwrap(),
-                "home": home.path().to_str().unwrap(),
+                "home": home.to_str().unwrap(),
                 "hub": up.hub,
             }),
         )
@@ -1761,7 +1831,12 @@ fn hiding_a_bot_from_the_window_keeps_its_work() {
 #[test]
 fn a_routine_paused_from_the_window_stops_without_being_lost() {
     let up = Up::start().expect("botroster up");
-    let home = tempfile::tempdir().expect("a home for the agent's bots");
+    // The hub's own home, not a separate one. The window passes a single path
+    // to `botroster up` and to the agent it spawns, so a test giving each a
+    // different home was driving a shape the product never produces — and,
+    // since a hub's token lives in the home it was started on, one that a hub
+    // requiring a token refuses.
+    let home = &up.home;
     let shell = Shell::build(Mode::Reply);
 
     shell
@@ -1769,7 +1844,7 @@ fn a_routine_paused_from_the_window_stops_without_being_lost() {
             "connect",
             json!({
                 "botroster": common::up::botroster().to_str().unwrap(),
-                "home": home.path().to_str().unwrap(),
+                "home": home.to_str().unwrap(),
                 "hub": up.hub,
             }),
         )
@@ -1790,7 +1865,7 @@ fn a_routine_paused_from_the_window_stops_without_being_lost() {
             "check the pipeline",
         ])
         .arg("--home")
-        .arg(home.path())
+        .arg(home.as_path())
         .env("NO_COLOR", "1")
         .env_remove("BOTROSTER_HOME")
         .output()

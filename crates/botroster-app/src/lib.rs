@@ -519,7 +519,7 @@ async fn connect(
     // Not fatal: the roster reads without a hub, and a mistyped URL has to be
     // fixable from inside the window. The reported state just has to be
     // accurate.
-    let reach = hub::reach(&here.botroster, &here.hub)
+    let reach = hub::reach(&here.botroster, &here.hub, &here.home)
         .await
         .unwrap_or_else(|e| hub::Reach::Unreachable(e.to_string()));
 
@@ -532,11 +532,17 @@ async fn connect(
     // disconnecting leaves it running.
     let reach = match reach {
         serving @ hub::Reach::Serving(_) => serving,
+        // A hub answered and would not have us. Reported, never started over:
+        // it is already there and holding the port, so starting a second one
+        // fails on the bind and the person is shown "address in use" about a
+        // computer that is running perfectly well and simply does not accept
+        // this window. The refusal itself names what to fix.
+        refused @ hub::Reach::Refused(_) => refused,
         hub::Reach::Unreachable(first) => {
             match hub::start(&here.botroster, &here.home, &here.hub, STARTUP_PATIENCE).await {
                 Ok(child) => {
                     *state.started.lock().await = Some(child);
-                    hub::reach(&here.botroster, &here.hub)
+                    hub::reach(&here.botroster, &here.hub, &here.home)
                         .await
                         .unwrap_or_else(|e| hub::Reach::Unreachable(e.to_string()))
                 }
@@ -557,7 +563,7 @@ async fn connect(
             tools,
             why: None,
         },
-        hub::Reach::Unreachable(why) => Connected {
+        hub::Reach::Refused(why) | hub::Reach::Unreachable(why) => Connected {
             computer: false,
             tools: 0,
             why: Some(why),
@@ -1180,7 +1186,7 @@ async fn open_computer(state: State<'_, AppState>) -> Result<String, String> {
         // nothing, indistinguishable from a frozen computer.
         *computer = None;
     }
-    let view = viewer::open(&here.botroster, &here.hub)
+    let view = viewer::open(&here.botroster, &here.hub, &here.home)
         .await
         .map_err(|e| e.to_string())?;
     let url = view.url().to_owned();
@@ -1511,12 +1517,12 @@ async fn attach_file(state: State<'_, AppState>) -> Result<Attached, String> {
         // Cancelled the picker. Not an error, and not an attachment.
         return Err(CANCELLED.to_owned());
     };
-    let (botroster, hub) = {
+    let (botroster, hub, home) = {
         let w = state.where_.lock().await;
         let w = w.as_ref().ok_or("not connected")?;
-        (w.botroster.clone(), w.hub.clone())
+        (w.botroster.clone(), w.hub.clone(), w.home.clone())
     };
-    let path = botroster_desktop::attach::put(&botroster, &hub, &file)
+    let path = botroster_desktop::attach::put(&botroster, &hub, &home, &file)
         .await
         .map_err(|e| e.to_string())?;
     Ok(Attached {

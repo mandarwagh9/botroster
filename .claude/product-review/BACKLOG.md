@@ -83,7 +83,7 @@ No timeout on a forwarded `tool.call`, no cancel path, no disconnect propagation
 
 ## Tier 2 — the security story is not yet what the README implies
 
-### T2-1 — the hub authenticates nobody. `doing` (Origin half done; the per-home token still `open` — it is what defends against a local process)
+### T2-1 — the hub authenticates nobody. `done`
 `P0` · reach: all users · `crates/botrosterd/src/server.rs:62`
 
 `let principal = dev_principal()` — no token, no `Origin` check, on a fixed `127.0.0.1:8443`. Any
@@ -96,6 +96,52 @@ correctly — but a rogue connection opens *its own* session, so it is the owner
 sends one, so this closes the browser vector at zero cost to every real client. Then a token
 generated at start, written `0600` beside the home, presented in `hello`. The gate is perfectly
 built and then asked to trust whoever knocks.
+
+**Closed 2026-08-29.** Both halves are in. `Hub::admitting(Admission)` is checked first in `register`,
+ahead of the protocol-version check, so an unadmitted peer learns nothing about the hub; the compare
+is constant-time. `boot::hub_from_home` takes the admission as an argument rather than reading the
+home, so the decision is visible at the call site and cannot be lost by reordering two statements.
+`up` always requires the token it just generated; `botrosterd` requires whatever its home holds and
+warns loudly when that is nothing, because refusing to start would break deployments to defend a
+home whose owner has not been given a way to write one.
+
+Three things this turned up that were not in the finding:
+
+- **`--home` did not reach the token lookup.** The flag is declared per subcommand with
+  `env = "BOTROSTER_HOME"`, so passing it sets no variable and `hub_token` read the *default* home —
+  presenting the wrong token and being refused with a message about a token the person had.
+  `proto::use_home`, set once from `home_from_argv`, fixes it for all eleven `connect` call sites at
+  once; `the_scanned_home_is_the_home_clap_parses` holds the scanner to clap's answer.
+- **A refused handshake read as "no hub is running", in two places.** `hub_or_start`'s
+  `if let Ok(Ok(_))` swallowed every failure alike, so a wrong home silently started a *second*
+  stack on top of the first — two computers, two homes, and the double-firing routine `up`'s own
+  docs warn about. Fixed there, and then found again in the window: `hub::reach` had no `Refused`
+  variant, so `botroster-app` called `hub::start` on a hub that was already holding the port, and
+  the person saw "address in use" about a computer that was running. Both now distinguish it, by one
+  marker (`botroster_proto::REFUSED_PREFIX`) that a test in `botroster-agent` holds the wording to.
+  The second half was found by review, not by the suite, which is the finding under T2-1a below.
+- **The rule was applied at four of six sites.** `attach::put` and `settings::test_run` were missed
+  by hand. `every_child_pointed_at_a_hub_is_given_the_token_for_it` sweeps the crate's source and
+  found both; it is the instrument, not the memory, that keeps this true.
+
+### T2-1a — what T2-1 left, all small
+`P2` · reach: some users
+
+- **No UI for a foreign hub's token.** A window pointed at a hub on *another machine* cannot be
+  given its token from inside the window. `BOTROSTER_HUB_TOKEN` in the environment before launch
+  works and is documented in `hub::token_at`; a field beside the hub URL in Connect is the finished
+  version. Until then the window at least *reports* the refusal rather than starting a second
+  computer, which is the half that mattered.
+- **`botrosterd` warns where its neighbour fails.** `boot.rs` says of a malformed hooks file:
+  *"starting anyway would run unguarded while the operator believes otherwise."* A `botrosterd`
+  bound to a non-loopback address on a home with no `hub.token` is that sentence exactly, and it
+  gets a `warn!`. Refusing to start for **non-loopback + `Admission::Anyone`** cannot break a
+  deployment that was ever safe; the warning is right for loopback and only there. Left out of T2-1
+  to keep that change one thing.
+- **The split-home configuration is supported and barely tested.** `Config` takes `home` and `hub`
+  independently and `connect` accepts both, but every live test now uses the production shape where
+  they are one path. `start_live`'s two new tests cover `reach`; the engine and the shell commands
+  are not covered for it.
 
 ### T2-2 — `shell.exec` hands over the credential the crate graph protects. `done` (environment half; the filesystem half needs a real isolation boundary and is recorded as such in isolation.rs)
 `P0` · reach: all users · `reports/guest-tools.md` F-GT1
@@ -207,3 +253,64 @@ Per `CHARTER.md` §0 and the explicit instruction not to spend effort on what 1%
   calls it. Delete the advertisement when next in that file.
 - **`main.js` at 2,632 flat lines** (F-DC12). Real, and restructuring it competes with T4-2 through
   T4-6 for the same file. Do it *as* those land, not as its own commit.
+
+
+---
+
+## Tier 6 — the thing that puts BOTROSTER ahead rather than level
+
+Added 2026-08-29 from `PROPOSAL-run-records.md`, which is the reasoning, the competitive analysis
+and the explicit list of what must never be claimed about it. Read that before starting any of
+these; the short version is that every product in this category competes on *prevention* and nobody
+competes on *what happened, and what of it can be taken back*.
+
+Ordered so each step ships something usable and none of it is wasted if the next is dropped.
+Steps T6-1 to T6-3 need no change to `botroster-store` at all.
+
+### T6-1 — a run is not an artefact. `open`
+`P1` · reach: all users · `PROPOSAL-run-records.md` §3.1
+
+Nothing durable records what a run did. `conversation.jsonl` holds the messages; the tool calls,
+their results, their `elapsed_ms` and — the part nobody else has — **the approval decisions** pass
+through `hub.rs:1046` and are not written anywhere. The hub is the only correct writer: a record the
+recorded thing can edit is not a record, for the same reason the policy gate is not in the agent.
+
+*Durable fix:* `<home>/bots/<id>/runs/<run-id>.jsonl`, append-only, beside the conversation log that
+already works this way. Must not be able to contain a credential; that gets its own failing test.
+
+### T6-2 — a past run cannot be re-run. `open`
+`P1` · reach: most users · `PROPOSAL-run-records.md` §3.2
+
+*Durable fix:* a stub at the hub's forwarding point that answers every `tool.call` from the
+recording instead of forwarding it. Enforced by the same code path that enforces policy, so replay
+touches nothing — no file written, no page opened, no outbound call — which is what makes it safe to
+run on the machine a person actually works on. A call the recording does not contain is a
+**divergence**, not an error, and naming the step where it happened is the output.
+
+### T6-3 — changing a Bot's brief is unfalsifiable. `open`
+`P0` · reach: everyone who chose an open product in order to change something
+
+`botroster bot test <bot>`: replay the golden runs, report divergences. This is the surface that
+pays for T6-1 and T6-2, and it **unblocks T5-2 and T5-3 rather than competing with them** — the
+reason it is frightening to expose an editable persona and a `context_budget` is that nobody can
+tell whether turning one broke the Bot. Shipping those knobs without this ships the contradiction
+`reports/parity.md` already names.
+
+### T6-4 — the run log does not say what can be taken back. `open`
+`P1` · reach: all users · `PROPOSAL-run-records.md` §3.4
+
+Per-step checkpoints, and a badge per row derived from the tool name, which the hub already knows:
+`fs.write` can be undone, `shell.exec` only partly (it may `cd` anywhere the user can reach),
+`browser.click` not at all (and `Volume::browser_profile` is deliberately outside the snapshot, so a
+rewind never restores a login). No competitor tells you which of its actions it can take back.
+
+*Blocked on:* a cheap checkpoint. `Volume::ingest` copies **every** file on every snapshot, so
+per-step is O(whole workspace). Needs a separate function using git's racily-clean rule; the durable
+path and its two tests must not change.
+
+### T6-5 — branch a run from any step. `NEEDS REVIEW`
+`P2` · reach: unknown · `PROPOSAL-run-records.md` §5.4
+
+Fork the world and the transcript at step N, change one thing, run forward, diff the branches. The
+most exciting item here and deliberately not scoped: it needs a new volume seeded from a manifest,
+which is well past `CHARTER.md` §5's ~200-line rule. Strictly easier once T6-1 to T6-4 exist.
