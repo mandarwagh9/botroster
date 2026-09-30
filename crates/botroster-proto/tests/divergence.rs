@@ -8,18 +8,33 @@
 //! either end reads. A reader who believed any of the three would build against
 //! a peer that cannot work.
 //!
-//! Two things can rot independently, so both are checked:
+//! Two things can rot independently, and what is checked here is not symmetric:
 //!
-//! 1. a divergence stops being real — someone renames `call_id` to
-//!    `tool_call_id` and the table is now describing a difference that is gone;
-//! 2. a real divergence stops being recorded — someone adds a field the table
-//!    never mentions, and the corrected claim goes back to being an assertion
-//!    rather than a list.
+//! 1. **A divergence stops being real** — someone renames `call_id` to
+//!    `tool_call_id` and the table is now describing a difference that is gone.
+//!    This is fully checked: the table's BOTROSTER column is read out of the
+//!    live types, and a mismatch fails.
+//! 2. **A real divergence stops being recorded** — someone adds a field the
+//!    table never mentions. This is **not** checked, and cannot be under the
+//!    project's decision to stay independent (D1 = A): with no upstream crate
+//!    in this tree there is nothing to diff against, so "a divergence appeared"
+//!    is not an event any test can observe. It is a reading task, and it is
+//!    done by re-reading both trees when the pinned `SOURCE_REV` moves.
 //!
-//! Nothing here proves *upstream*'s spelling. Under the project's decision to
-//! stay independent there is no upstream crate in this tree to check against,
-//! so that column is a recorded fact about a pinned external revision. What
-//! this file holds both sides to is our own half, read out of the live types.
+//! One exception to (2) is checked, because it is a closed set rather than an
+//! open one: the error numbers are enumerated on both sides, so the collisions
+//! among them are computed by set difference and cannot be forgotten. That
+//! asymmetry is deliberate and is the reason the error rows get their own tests.
+//!
+//! The same limit applies to the upstream column generally: it is a recorded
+//! fact about a pinned external revision, not something a test can read. If
+//! upstream syncs and moves a field, only a human re-reading its tree will find
+//! out — which is why [`the_divergences_are_pinned_to_a_source_revision`] exists
+//! as a reminder that a revision, not a version string, is what the table rests
+//! on.
+//!
+//! Nothing here proves *upstream*'s spelling. What this file holds both sides to
+//! is our own half, read out of the live types.
 
 use botroster_proto::codes;
 use botroster_proto::frames::ToolCallRequestParams;
@@ -122,6 +137,138 @@ fn the_divergences_the_table_records_are_real() {
     );
 }
 
+/// Numbers `xai-tool-protocol::error_codes::ERROR_CODES` occupies, with the
+/// meaning it gives each, read from that file at the pinned `SOURCE_REV`.
+///
+/// Recorded here rather than derived, because the project's decision to stay
+/// independent (D1 = A) means there is no upstream crate in this tree to read at
+/// test time. The consequence is real and stated in the file header: this list is
+/// a snapshot that a future upstream sync can invalidate silently.
+const UPSTREAM_APPLICATION_CODES: &[(i32, &str)] = &[
+    (-32001, "timeout"),
+    (-32002, "unauthorized"),
+    (-32003, "forbidden"),
+    (-32004, "connection_lost"),
+    (-32005, "tool_server_gone"),
+    (-32006, "session_not_found"),
+    (-32008, "session_draining"),
+];
+
+/// Every code this crate defines in the application range, paired with the name
+/// it goes by in `botroster_proto::codes`.
+fn our_application_codes() -> Vec<(i32, &'static str)> {
+    vec![
+        (
+            botroster_proto::WORKSPACE_UNAVAILABLE_CODE,
+            "WORKSPACE_UNAVAILABLE",
+        ),
+        (codes::SESSION_NOT_FOUND, "SESSION_NOT_FOUND"),
+        (codes::NO_SERVER_BOUND, "NO_SERVER_BOUND"),
+        (codes::FORBIDDEN, "FORBIDDEN"),
+        (codes::APPROVAL_DENIED, "APPROVAL_DENIED"),
+        (codes::TAKEN_OVER, "TAKEN_OVER"),
+        (codes::UNAUTHENTICATED, "UNAUTHENTICATED"),
+        (codes::DIVERGED, "DIVERGED"),
+        (codes::NOT_REPLAYABLE, "NOT_REPLAYABLE"),
+        (codes::TOOL_FAILED, "TOOL_FAILED"),
+    ]
+}
+
+/// Every error number we share with upstream is recorded, with both meanings.
+///
+/// The collision is the dangerous kind, not the mismatch. A peer that maps
+/// numbers reads our `FORBIDDEN` as "the connection dropped" and our
+/// `APPROVAL_DENIED` as "the tool server went away", and both invite a retry of a
+/// call that was deliberately refused. So completeness matters more here than
+/// anywhere else in this file, which is why it is checked by set difference rather
+/// than left to a human reading the table.
+#[test]
+fn every_error_number_we_share_with_upstream_is_recorded_with_both_meanings() {
+    let md = provenance();
+    let mut unrecorded = Vec::new();
+
+    for (n, ours) in our_application_codes() {
+        let Some((_, theirs)) = UPSTREAM_APPLICATION_CODES.iter().find(|(m, _)| *m == n) else {
+            continue;
+        };
+        let number = n.to_string();
+        if !recorded(&md, &number, ours) || !recorded(&md, &number, theirs) {
+            unrecorded.push(format!("{number}: ours {ours}, theirs {theirs}"));
+        }
+    }
+
+    assert!(
+        unrecorded.is_empty(),
+        "these error numbers are shared with upstream and PROVENANCE.md does not \
+         record the collision with both meanings. A peer that maps numbers would read \
+         our code as something else entirely:\n  {}",
+        unrecorded.join("\n  ")
+    );
+}
+
+/// Every number the error-number table lists is one upstream actually occupies.
+///
+/// The other direction, and the one that produced a false row. `-32007` appears
+/// nowhere in the upstream tree at the pinned revision — upstream's table jumps
+/// from `-32006` to `-32008` — but an earlier draft of `PROVENANCE.md` listed it
+/// as upstream's, with a note in our column rather than a code name. In a
+/// provenance document one fabricated row discredits the accurate ones beside
+/// it.
+///
+/// Scoped to the table rather than to a pairing of names, because the first
+/// version of this test looked for our code name beside the number and so
+/// missed exactly the row it was written for: that row's BOTROSTER column read
+/// "refused, naming the token file to read", which names no code at all. Reading
+/// the numbers out of the table is what actually catches it.
+#[test]
+fn the_error_number_table_lists_no_number_upstream_leaves_free() {
+    let md = provenance();
+    let mut listed = Vec::new();
+    let mut in_error_table = false;
+
+    for line in md.lines() {
+        if !line.trim_start().starts_with('|') {
+            // A blank line ends a table; prose between tables is not one.
+            if line.trim().is_empty() {
+                in_error_table = false;
+            }
+            continue;
+        }
+        if line.contains("error number") {
+            in_error_table = true;
+            continue;
+        }
+        if !in_error_table {
+            continue;
+        }
+        for tok in line.split(|c: char| !(c.is_ascii_digit() || c == '-')) {
+            if tok.len() == 6 && tok.starts_with("-320") {
+                let Ok(n) = tok.parse::<i32>() else { continue };
+                listed.push(n);
+            }
+        }
+    }
+
+    assert!(
+        !listed.is_empty(),
+        "found no error-number table in PROVENANCE.md, so this test is not looking at \
+         anything. A gate that passes because it found nothing is the failure mode \
+         this repository's own review.sh warns about."
+    );
+
+    let fabricated: Vec<_> = listed
+        .iter()
+        .filter(|n| !UPSTREAM_APPLICATION_CODES.iter().any(|(m, _)| m == *n))
+        .collect();
+
+    assert!(
+        fabricated.is_empty(),
+        "the error-number table lists {fabricated:?}, which upstream defines no code at \
+         the pinned SOURCE_REV — so there is nothing there to collide with. Upstream's \
+         table goes -32006, then -32008.",
+    );
+}
+
 /// The divergences are written down. This half is what stops a corrected claim
 /// decaying back into a bare assertion nobody can check.
 #[test]
@@ -149,13 +296,6 @@ fn every_divergence_is_written_down_in_provenance() {
         "the approval reply mechanism",
         "ApprovalDecision",
         "hook_reply",
-    );
-    assert_recorded(&md, "the shared error numbers", "-32004", "connection_lost");
-    assert_recorded(
-        &md,
-        "the shared error numbers",
-        "-32005",
-        "tool_server_gone",
     );
     assert_recorded(&md, "the tool id charset", "fs.read", "[a-zA-Z0-9_-]+");
 }

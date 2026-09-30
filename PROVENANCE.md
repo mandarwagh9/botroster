@@ -44,22 +44,42 @@ both trees at the pinned `SOURCE_REV`; the left column is a recorded fact about 
 right column is checked against the live types by `crates/botroster-proto/tests/divergence.rs`.
 
 | Divergence | Upstream `xai-tool-protocol` | BOTROSTER `botroster-proto` |
-|---|---|---|
+|---|:---:|:---:|
 | hello ack version field | `computer_hub_version` | `hub_version` |
 | tool call id field | `tool_call_id` | `call_id` |
 | tool call arguments field | `arguments` | `args` |
-| approval request method | `permission_request` | `approval.request` |
+| approval request method | `permission_request` (in `xai-computer-hub-sdk`) | `approval.request` |
 | approval reply | `hook_reply`, a second frame | `ApprovalDecision`, the JSON-RPC result of the request |
-| error number `-32004` | `connection_lost` | `FORBIDDEN` |
-| error number `-32005` | `tool_server_gone` | `APPROVAL_DENIED` |
 | tool id character set | `[a-zA-Z0-9_-]+` per segment, at most one `:` | unvalidated; `fs.read`, `shell.exec` and `browser.*` are dotted and do not parse upstream |
-| tokenless hello when the hub has a token | `-32007` | refused, naming the token file to read |
 
-Two consequences worth stating rather than leaving in the table. An upstream peer's `fs.read` cannot
-be represented here, and ours cannot be sent there — the tool-id difference is a naming difference, not
-a spelling one. And the two shared error numbers are worse than a mismatch: a peer that maps numbers
-would read our `FORBIDDEN` as "the connection dropped" and our `APPROVAL_DENIED` as "the tool server
-went away", both of which invite a retry of a call that was deliberately refused.
+**Every application error number we share with upstream, and what it means on each side.** These are
+the rows that matter most in the table, because a collision is not a mismatch: a peer that maps numbers
+reads our code as something else entirely, and three of these invite a retry of a call that was
+deliberately refused. Upstream's own file notes that receivers *should* switch on the string
+`data.code` rather than the number, which is good practice and does not help a peer that does not.
+
+| error number | Upstream `xai-tool-protocol` | BOTROSTER `botroster-proto` |
+|---|:---:|:---:|
+| `-32001` | `timeout` | `WORKSPACE_UNAVAILABLE` |
+| `-32002` | `unauthorized` | `SESSION_NOT_FOUND` |
+| `-32003` | `forbidden` | `NO_SERVER_BOUND` |
+| `-32004` | `connection_lost` | `FORBIDDEN` |
+| `-32005` | `tool_server_gone` | `APPROVAL_DENIED` |
+| `-32006` | `session_not_found` | `TAKEN_OVER` |
+| `-32008` | `session_draining` | `DIVERGED` |
+
+Upstream's table jumps from `-32006` to `-32008`, so the three numbers BOTROSTER uses at `-32007`,
+`-32009` and `-32010` are ones it leaves free. Those are genuinely *not* collisions, and an earlier
+draft of this file listed one of them as a shared number — a row that was simply false, and worse for
+the provenance of this document than the row it displaced. `divergence.rs` now checks both directions:
+every shared number must be recorded with both meanings, and no number upstream leaves free may be
+recorded as one.
+
+Two more consequences worth stating rather than leaving in the tables. An upstream peer's `fs.read`
+cannot be represented here, and ours cannot be sent there — the tool-id difference is a naming
+difference, not a spelling one. And the collisions are worst exactly where a retry is the natural
+response: read our `APPROVAL_DENIED` as `tool_server_gone` and a caller re-issues a call a person
+refused; read our `DIVERGED` as `session_draining` and it waits for a session that will never drain.
 
 **The version string is not a compatibility claim.** `botroster-proto` announces `botroster-1`, not
 `1.0.0`. Upstream has published `1.0.0` continuously without ever bumping it, so a shared string would
