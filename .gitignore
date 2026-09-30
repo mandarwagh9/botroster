@@ -1,6 +1,10 @@
 /target
 **/*.rs.bk
 
+# Isolated checkouts for feature work (git worktrees). Git records these in
+# .git/worktrees; the checkout itself must never be committed.
+/.worktrees/
+
 # Cargo.lock is committed: this workspace ships binaries, and a lockfile is
 # what makes a clone build the same dependency graph as CI.
 
