@@ -4,10 +4,20 @@
 //! bridges) each hold one socket to the hub. The hub routes `tool.call` from a
 //! harness to the tool server bound to that session, as `tool_call_request`.
 //!
-//! Reimplemented for wire compatibility with the protocol published in
-//! `xai-org/grok-build` (`crates/common/xai-tool-protocol`, Apache-2.0).
-//! See `../../PROVENANCE.md`. The structure derives from that published
-//! interface; the implementation is independent.
+//! Reimplemented from the protocol published in `xai-org/grok-build`
+//! (`crates/common/xai-tool-protocol`, Apache-2.0), which is where the shapes
+//! come from. See `../../PROVENANCE.md`.
+//!
+//! **This is not wire-compatible with it, and an unmodified upstream harness
+//! cannot talk to `botrosterd`.** The two disagree on the first field either end
+//! reads — `computer_hub_version` against our `hub_version` — and then on tool
+//! call field names, on the tool-id character set, on two shared error numbers,
+//! and on the whole approval exchange. Every one of those is listed, with both
+//! spellings, in `PROVENANCE.md` §1; `tests/divergence.rs` checks that list
+//! against the types in this crate so it cannot quietly stop being true.
+//!
+//! The structure derives from that published interface under Apache-2.0 §4; the
+//! implementation is independent, and so is the divergence.
 
 #![forbid(unsafe_code)]
 
@@ -24,7 +34,18 @@ use serde_json::Value;
 /// Bumped only for an incompatible schema change. Additive methods go through
 /// capability negotiation ([`HelloAck::capabilities`]) instead: clients gate
 /// per-call fallbacks on membership rather than probing.
-pub const PROTOCOL_VERSION: &str = "1.0.0";
+///
+/// **This is not a claim of compatibility with anything.** `xai-tool-protocol`
+/// has published `"1.0.0"` continuously and never bumped it, including across
+/// every upstream sync, so a shared version string would let an incompatible
+/// peer pass the hub's only version gate — a string equality check — and then
+/// fail on the first field it read. Naming the protocol after its owner instead
+/// turns that late, confusing failure into an early, legible one: the peer is
+/// told at the handshake that it is talking to a different implementation.
+///
+/// The field-level differences are listed in `PROVENANCE.md` §1 and kept honest
+/// by `crates/botroster-proto/tests/divergence.rs`.
+pub const PROTOCOL_VERSION: &str = "botroster-1";
 
 // ─────────────────────────── identifiers ───────────────────────────
 
@@ -666,6 +687,31 @@ pub mod limits {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The version string must not be the one upstream also publishes.
+    ///
+    /// The hub's only version gate is string equality against
+    /// [`PROTOCOL_VERSION`], and `xai-tool-protocol` has published `"1.0.0"`
+    /// continuously — it never bumped it across 24 upstream syncs. So a
+    /// shared `"1.0.0"` lets an upstream harness walk straight through the gate
+    /// and then fail on the first field it reads: `computer_hub_version`
+    /// against our `hub_version`, `tool_call_id` against our `call_id`. A peer
+    /// that gets a clear refusal at the handshake can read the message and go
+    /// and look; a peer that is admitted and then misparsed spends its
+    /// timeout before it learns anything.
+    ///
+    /// This is the cheap half of the fix and it is the half that holds today.
+    /// Field-level compatibility is a separate, larger question tracked in
+    /// `PROVENANCE.md` §1 and the superplan's phase 2, and matching it is not
+    /// something this constant asserts either way.
+    #[test]
+    fn the_version_string_is_not_the_one_upstream_also_publishes() {
+        assert_ne!(
+            PROTOCOL_VERSION, "1.0.0",
+            "sharing upstream's version string lets an incompatible peer pass the \
+             handshake and fail obscurely on the first field it reads"
+        );
+    }
 
     #[test]
     fn every_method_round_trips_through_its_wire_string() {

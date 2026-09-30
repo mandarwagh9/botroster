@@ -344,10 +344,11 @@ identity, which is a decision for whoever ships it.
 
 ## Provenance
 
-BOTROSTER is not a fork. `botroster-proto` is wire-compatible with the published Grok Build protocol and
-was reimplemented from the public types. [`PROVENANCE.md`](PROVENANCE.md) maps every adopted
-component to its upstream and licence, and nothing enters the repository without a row in that
-table.
+BOTROSTER is not a fork, and it contains no xAI code. `botroster-proto` was reimplemented from the
+published Grok Build types and is **modelled on** them, not wire-compatible: an unmodified upstream
+harness cannot talk to `botrosterd`, and the field-level differences are listed in
+[`PROVENANCE.md`](PROVENANCE.md) §1. That file maps every adopted component to its upstream and
+licence, and nothing enters the repository without a row in that table.
 
 ## Contributing
 

@@ -14,14 +14,14 @@ that share one durable cloud computer.**
 
 ## 1. The one-paragraph thesis
 
-Six iterations of verification established that **the hard technical core is already open source**.
-`github.com/xai-org/grok-build` publishes, under Apache-2.0, the entire agent runtime *and* the
-Computer Hub: the WebSocket tool-routing fabric with a live production endpoint at
-`wss://computer-hub.grok.com/v1/tools`: *and* the guest-side daemon (`xai-workspace-server`) that
-runs inside the sandboxed VM. What is **not** published is everything that turns a coding CLI into
-Grok Bot: VM provisioning and lifecycle, the multi-Bot layer, routines, approvals policy, the
-credential broker, and the clients. **That gap is `botroster`.** We are not rebuilding an agent; we are
-building the cloud and teammate layer on top of one that already exists.
+Six iterations of verification established that **a great deal of the technical core is open source**,
+and that the remainder is larger than the first six passes believed. `github.com/xai-org/grok-build`
+publishes, under Apache-2.0, the agent runtime, the guest-side daemon and the protocol's type
+definitions. It does **not** publish the hub server, the multi-Bot layer, routines, VM lifecycle, the
+credential broker, or any client — and the runtime turns out not to be separable from its hosted
+services, so it is a reference rather than a foundation (see §2). What is genuinely still closed, and
+is what `botroster` exists to build, is the layer that turns a coding CLI into a product: the hub, the
+teammates, the policy and the clients.
 
 ## 2. Scope
 
@@ -36,12 +36,25 @@ building the cloud and teammate layer on top of one that already exists.
 5. **Credential broker**: MCP/OAuth tokens held **outside** the VM.
 6. **Clients**: desktop and web. (Mobile: later.)
 
-### Adopted, not rebuilt (Apache-2.0, with attribution)
-- The agent runtime (`xai-grok-shell`) and tools (`xai-grok-tools`)
-- The Computer Hub (`xai-computer-hub-{core,sdk,mcp-adapter}`) and its protocol
-  (`xai-tool-protocol`)
-- Skills / plugins / hooks / permissions / sandbox formats: which are **Claude Code compatible**,
-  so the entire existing skill and plugin ecosystem works unchanged
+### Not adopted, and why
+This list used to sit under "Adopted, not rebuilt". Both entries were wrong, in the same direction:
+they named things that are not available to adopt.
+
+- **The agent runtime (`xai-grok-shell`) and tools (`xai-grok-tools`).** Not adoptable on their own.
+  Measured at `SOURCE_REV` `559751fd` in [`PROVENANCE.md`](../PROVENANCE.md) §1: `xai-grok-shell` is
+  430k lines of its own across an 81-crate closure (~1.23M lines), and the `grok` binary's closure is
+  101 crates and ~1.93M lines. Upstream moved +855k/-401k lines in 24 syncs over seven weeks, so a
+  fork is not a snapshot but a subscription. We build our own loop instead.
+- **The Computer Hub.** There is no hub server in that tree. The `xai-computer-hub-*` crates outside
+  tests contain the SDK client, core traits and protocol types — no listener and no router. A
+  production endpoint exists at `wss://computer-hub.grok.com/v1/tools` and is configurable, but its
+  implementation is not published, so there is nothing to adopt. **We build the hub**; that is
+  `botrosterd`, and it is in scope above for the same reason the closed set is.
+
+What genuinely is adopted is narrower and is listed in [`PROVENANCE.md`](../PROVENANCE.md) §1:
+published **file formats** (skills, plugins, hooks, permissions, sandbox), which are interfaces rather
+than expression, and the structural shape of the protocol — which we implement independently and are
+**not** wire-compatible with. See that file's divergence table before assuming a peer will interoperate.
 
 ### Explicitly out of scope for v0
 WebAuthn/CTAP forwarding, teach-by-demonstration, iOS, Windows guests, static egress IP pools.
@@ -66,7 +79,7 @@ Each is a real feature; none is on the critical path to a working system.
              │               │
 ┌────────────▼───────┐  ┌────▼──────────────────────────────┐
 │  COMPUTER HUB      │  │  HYPERVISOR / RUNTIME             │
-│  (adopted)         │  │  one guest per user               │
+│  (ours)            │  │  one guest per user               │
 │  WS · JSON-RPC 2.0 │  │  ┌──────────────────────────────┐ │
 │  routes harness    │  │  │ guest: botroster-workspace-server│ │
 │  ⇄ tool servers    │◄─┼──┤  browser · shell · fs        │ │

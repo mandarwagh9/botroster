@@ -12,16 +12,61 @@ it is what makes `botroster` safe for other people to adopt and redistribute.
 
 ### `xai-org/grok-build`: Apache-2.0
 SpaceXAI's coding agent harness and TUI. Published 2026-07-14 as a periodic export from a private
-monorepo (`SOURCE_REV` records the internal SHA). External contributions are not accepted; the tree
-is published for source transparency and local builds.
+monorepo. External contributions are not accepted; the tree is published for source transparency and
+local builds.
+
+**Everything in this section was read at `SOURCE_REV` `559751fdcec02d413e4c57c8832ab275e4f44980`**
+(mirror commit `2bdd1d6`, 2026-09-29). The revision is pinned because upstream publishes a sync every
+few days **and never bumps its own `PROTOCOL_VERSION`**, so the version string cannot identify a set
+of types — the SHA is the only thing that can. Re-verify this section against a new revision before
+relying on it; a sync that touches `xai-tool-protocol` invalidates the table below.
 
 | What we take | From | How |
 |---|---|---|
-| Computer Hub wire protocol (frames, methods, handshake, error codes) | `crates/common/xai-tool-protocol` | **Reimplemented** in `botroster-proto` from the published types, to stay wire-compatible. Structural derivation: attributed under Apache-2.0 §4. |
+| Computer Hub wire protocol (frames, methods, handshake, error codes) | `crates/common/xai-tool-protocol` | **Reimplemented** in `botroster-proto` from the published types. **Not wire-compatible** — see the divergence table below. Structural derivation: attributed under Apache-2.0 §4. |
 | Hub transport / registry / resolver concepts (local-shadows-remote) | `crates/common/xai-computer-hub-core` | Design adopted; our own implementation |
 | Guest tool-server shape (`--capabilities` probe, in-guest `/ready` + `/statusz`, daemonize, hub-connect dwell) | `crates/codegen/xai-grok-workspace/src/bin/workspace_server.rs` | Design adopted; our own implementation |
 | Skills / plugins / hooks / permissions / sandbox **file formats** | `/build/features/*` docs + config crates | Format adopted verbatim for compatibility. Formats are interfaces, not expression. |
-| Agent runtime, tools, TUI | `xai-grok-shell`, `xai-grok-tools`, `xai-grok-pager` | **Planned: vendored or depended on directly.** Not yet integrated. Will carry full LICENSE + NOTICE when it lands. |
+| Bot relay method shapes and bot tool contracts | `bot_relay.rs`, `bot_tools.rs` | **Read for design only. Nothing borrowed.** No code, no identifier, no string and no file layout was copied from either; the 12 `bot_*` tool ids and 110 gateway commands that exist there are contracts with no implementation behind them, so there was nothing to take. Recorded because §5 says a component is recorded before it is merged, and "we read it and took nothing" is a fact a reader cannot otherwise check. |
+| Agent runtime, tools, TUI | `xai-grok-shell`, `xai-grok-tools`, `xai-grok-pager` | **Not taken, and not planned.** Measured at `SOURCE_REV` above: the `grok` binary's dependency closure is 101 crates and ~1.93M lines, `xai-grok-shell` alone is 430k own lines across an 81-crate closure, and upstream moved +855k/-401k lines in 24 syncs in seven weeks. A fork is a moving two-million-line target. Revisit only with a measurement, not a preference. |
+
+#### `botroster-proto` is not wire-compatible with `xai-tool-protocol`
+
+This section corrects a claim it used to make, and the claim was false when written. The row above now
+records the reimplementation as *not* wire-compatible, where it previously promised compatibility in
+order to justify reimplementing rather than vendoring. The promise failed on the first field either
+end reads, and it failed before any of the newer upstream features came into it. The reasoning that
+produced the old wording was sound — a reimplementation should not silently fork the protocol — but
+"compatible" was asserted rather than checked, and nobody checked it. The table below is the check.
+
+An unmodified upstream harness **cannot** talk to `botrosterd`. Every difference below was read from
+both trees at the pinned `SOURCE_REV`; the left column is a recorded fact about that revision, and the
+right column is checked against the live types by `crates/botroster-proto/tests/divergence.rs`.
+
+| Divergence | Upstream `xai-tool-protocol` | BOTROSTER `botroster-proto` |
+|---|---|---|
+| hello ack version field | `computer_hub_version` | `hub_version` |
+| tool call id field | `tool_call_id` | `call_id` |
+| tool call arguments field | `arguments` | `args` |
+| approval request method | `permission_request` | `approval.request` |
+| approval reply | `hook_reply`, a second frame | `ApprovalDecision`, the JSON-RPC result of the request |
+| error number `-32004` | `connection_lost` | `FORBIDDEN` |
+| error number `-32005` | `tool_server_gone` | `APPROVAL_DENIED` |
+| tool id character set | `[a-zA-Z0-9_-]+` per segment, at most one `:` | unvalidated; `fs.read`, `shell.exec` and `browser.*` are dotted and do not parse upstream |
+| tokenless hello when the hub has a token | `-32007` | refused, naming the token file to read |
+
+Two consequences worth stating rather than leaving in the table. An upstream peer's `fs.read` cannot
+be represented here, and ours cannot be sent there — the tool-id difference is a naming difference, not
+a spelling one. And the two shared error numbers are worse than a mismatch: a peer that maps numbers
+would read our `FORBIDDEN` as "the connection dropped" and our `APPROVAL_DENIED` as "the tool server
+went away", both of which invite a retry of a call that was deliberately refused.
+
+**The version string is not a compatibility claim.** `botroster-proto` announces `botroster-1`, not
+`1.0.0`. Upstream has published `1.0.0` continuously without ever bumping it, so a shared string would
+let an incompatible peer clear the hub's only version check — a string equality test — and then fail
+obscely on its first field read. Naming the protocol after its owner turns that into an early, legible
+refusal instead. Matching upstream field-for-field is a separate and much larger piece of work, tracked
+in the superplan's phase 2; nothing in this file asserts it has happened.
 
 **Obligations when we vendor or copy any of it (Apache-2.0 §4):**
 1. Ship the Apache-2.0 `LICENSE` with the distribution.

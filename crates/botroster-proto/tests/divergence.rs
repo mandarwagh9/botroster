@@ -1,0 +1,202 @@
+//! `PROVENANCE.md` claims this crate is not wire-compatible with upstream, and
+//! then says exactly where. Those two halves have to stay true together.
+//!
+//! The false claim this file exists to prevent is not hypothetical and it is
+//! not subtle: `botroster-proto` carried "wire-compatible with the published
+//! Grok Build protocol" in the README, in this crate's module docs, and in the
+//! provenance table, while disagreeing with that protocol on the first field
+//! either end reads. A reader who believed any of the three would build against
+//! a peer that cannot work.
+//!
+//! Two things can rot independently, so both are checked:
+//!
+//! 1. a divergence stops being real — someone renames `call_id` to
+//!    `tool_call_id` and the table is now describing a difference that is gone;
+//! 2. a real divergence stops being recorded — someone adds a field the table
+//!    never mentions, and the corrected claim goes back to being an assertion
+//!    rather than a list.
+//!
+//! Nothing here proves *upstream*'s spelling. Under the project's decision to
+//! stay independent there is no upstream crate in this tree to check against,
+//! so that column is a recorded fact about a pinned external revision. What
+//! this file holds both sides to is our own half, read out of the live types.
+
+use botroster_proto::codes;
+use botroster_proto::frames::ToolCallRequestParams;
+use botroster_proto::{ConnectionId, HelloAck, Method, ToolCallId, ToolId, UserId};
+use serde_json::json;
+
+fn provenance() -> String {
+    // CARGO_MANIFEST_DIR is crates/botroster-proto.
+    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("PROVENANCE.md");
+    std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("cannot read {}: {e}", p.display()))
+}
+
+/// Rows of the divergence table, as `(whole_line, cell_text)` pairs.
+///
+/// Deliberately dumb: a row is a line starting with `|`, and a cell is its text
+/// between backticks. A cleverer parser would be a second thing to keep correct,
+/// and the only property that matters here is "does some row mention both
+/// spellings".
+fn rows(md: &str) -> Vec<String> {
+    md.lines()
+        .filter(|l| l.trim_start().starts_with('|'))
+        .map(str::to_owned)
+        .collect()
+}
+
+fn recorded(md: &str, ours: &str, theirs: &str) -> bool {
+    rows(md)
+        .iter()
+        .any(|r| r.contains(&format!("`{ours}`")) && r.contains(&format!("`{theirs}`")))
+}
+
+/// A table row that names both spellings, or the test says which pair is
+/// missing — the failure has to name the divergence, or fixing it means
+/// re-deriving the whole list from the error message.
+fn assert_recorded(md: &str, what: &str, ours: &str, theirs: &str) {
+    assert!(
+        recorded(md, ours, theirs),
+        "PROVENANCE.md records no divergence row naming both `{ours}` (ours) and \
+         `{theirs}` (upstream's) for {what}. Either the divergence is gone — then \
+         this row should be deleted — or it is real and undocumented, which is the \
+         false claim this file exists to prevent."
+    );
+}
+
+fn ack_json() -> serde_json::Value {
+    serde_json::to_value(HelloAck {
+        connection_id: ConnectionId::new("conn-1"),
+        user_id: UserId::new("user-1"),
+        hub_version: "0.0.0".to_owned(),
+        supported_protocol_versions: vec![],
+        capabilities: vec![],
+    })
+    .unwrap()
+}
+
+fn call_json() -> serde_json::Value {
+    serde_json::to_value(ToolCallRequestParams {
+        tool_id: ToolId::new("fs.read"),
+        call_id: ToolCallId::new("call-1"),
+        args: json!({}),
+    })
+    .unwrap()
+}
+
+/// The recorded divergences are real: our types use our spelling, and the
+/// spelling they replaced is genuinely absent rather than merely unused.
+///
+/// This half is what stops the table from outliving the code.
+#[test]
+fn the_divergences_the_table_records_are_real() {
+    let ack = ack_json();
+    assert!(
+        ack.get("hub_version").is_some() && ack.get("computer_hub_version").is_none(),
+        "the hello ack version field moved; PROVENANCE.md's divergence table is stale"
+    );
+
+    let call = call_json();
+    assert!(
+        call.get("call_id").is_some() && call.get("tool_call_id").is_none(),
+        "the tool call id field moved; PROVENANCE.md's divergence table is stale"
+    );
+    assert!(
+        call.get("args").is_some() && call.get("arguments").is_none(),
+        "the tool call arguments field moved; PROVENANCE.md's divergence table is stale"
+    );
+
+    assert_eq!(
+        (codes::FORBIDDEN, codes::APPROVAL_DENIED),
+        (-32004, -32005),
+        "the error numbers moved; PROVENANCE.md's divergence table is stale"
+    );
+
+    assert_eq!(
+        Method::ApprovalRequest.as_wire_str(),
+        "approval.request",
+        "the approval method name moved; PROVENANCE.md's divergence table is stale"
+    );
+}
+
+/// The divergences are written down. This half is what stops a corrected claim
+/// decaying back into a bare assertion nobody can check.
+#[test]
+fn every_divergence_is_written_down_in_provenance() {
+    let md = provenance();
+    assert_recorded(
+        &md,
+        "the hello ack version field",
+        "hub_version",
+        "computer_hub_version",
+    );
+    assert_recorded(&md, "the tool call id field", "call_id", "tool_call_id");
+    assert_recorded(&md, "the tool call arguments field", "args", "arguments");
+    assert_recorded(
+        &md,
+        "the approval request method",
+        "approval.request",
+        "permission_request",
+    );
+    // Our side has no reply *method*: the decision comes back as the JSON-RPC
+    // result of `approval.request`, carrying `ApprovalDecision`. Upstream sends a
+    // second frame instead, so the divergence is in the shape, not a name.
+    assert_recorded(
+        &md,
+        "the approval reply mechanism",
+        "ApprovalDecision",
+        "hook_reply",
+    );
+    assert_recorded(&md, "the shared error numbers", "-32004", "connection_lost");
+    assert_recorded(
+        &md,
+        "the shared error numbers",
+        "-32005",
+        "tool_server_gone",
+    );
+    assert_recorded(&md, "the tool id charset", "fs.read", "[a-zA-Z0-9_-]+");
+}
+
+/// The revision the table was measured against is pinned, so "check the current
+/// upstream" is not a scavenger hunt through a moving target.
+///
+/// Upstream syncs every few days and did not bump its own protocol version
+/// across any of it, so the revision is the only thing that makes a row in this
+/// table mean a specific set of types.
+#[test]
+fn the_divergences_are_pinned_to_a_source_revision() {
+    let md = provenance();
+    assert!(
+        md.contains("559751fdcec02d413e4c57c8832ab275e4f44980"),
+        "PROVENANCE.md does not pin the SOURCE_REV the divergence table was measured \
+         against. Without it the table silently rots: upstream publishes a sync every \
+         few days and never bumps PROTOCOL_VERSION, so the version string cannot \
+         stand in for the revision."
+    );
+}
+
+/// The table exists and says what it is.
+///
+/// Separate from the row checks because "no table" and "a table missing a row"
+/// are different failures with different fixes, and a reader hitting this needs
+/// to be told which one they have.
+#[test]
+fn provenance_says_plainly_that_it_is_not_wire_compatible() {
+    let md = provenance();
+    assert!(
+        md.contains("559751fdcec02d413e4c57c8832ab275e4f44980")
+            && md.to_lowercase().contains("not wire-compatible"),
+        "PROVENANCE.md must state the divergence in one plain sentence, not only in a \
+         table. The table is the evidence; the sentence is the claim a skimming reader \
+         actually takes away."
+    );
+    assert!(
+        !md.contains("to stay wire-compatible"),
+        "PROVENANCE.md still claims the reimplementation stays wire-compatible. That \
+         sentence is the false claim: it fails on `computer_hub_version` vs \
+         `hub_version`, before any newer upstream feature is considered."
+    );
+}

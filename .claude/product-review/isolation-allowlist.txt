@@ -18,11 +18,10 @@
 a VM or a container. `fs.*` resolves against the workspace root	README.md states plainly that the guest is neither, then names what actually does the refusing. This is the sentence the gate exists to protect, not a violation of it.
 
 # --- Descriptions of the REFERENCE product, not of BOTROSTER. -------------------------------------
-runs inside the sandboxed VM. What is **not** published	Describes xai-workspace-server inside Grok Bot's VM. Accurate about them, and the same sentence goes on to say the gap is what BOTROSTER is.
 the `devbox` sandbox	Describes a published Grok Bot profile, and the line itself opens "Status: design decision, not observed fact".
 
 # --- The word naming something other than process containment. ----------------------------------
-permissions / sandbox formats: which are **Claude Code compatible**	Names a configuration file format. PROVENANCE.md 1 records formats as interfaces adopted for compatibility.
+permissions, sandbox), which are interfaces rather	Names a configuration file format, in SPEC.md §2's list of what genuinely is adopted. PROVENANCE.md §1 records formats as interfaces adopted for compatibility. Supersedes the row that matched "permissions / sandbox formats: which are **Claude Code compatible**", which was this same sentence before SPEC.md §2 was corrected.
 Put a Bot's coat on a container	A DOM element in main.js. Nothing to do with process isolation.
 
 # --- Properties BOTROSTER genuinely has, or states as unbuilt future work. -------------------------

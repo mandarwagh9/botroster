@@ -1,7 +1,15 @@
 //! Method payloads: the `params` and `result` bodies for each wire method.
 //!
-//! Shapes track `xai-tool-protocol::frames` (Apache-2.0) so an unmodified
-//! upstream harness can talk to `botrosterd`. See `../../../PROVENANCE.md`.
+//! These shapes track `xai-tool-protocol::frames` (Apache-2.0) closely enough
+//! that the difference is worth stating precisely: **they are not the same, and
+//! an unmodified upstream harness cannot talk to `botrosterd`.** A tool call
+//! here is `{tool_id, call_id, args}`; upstream's is
+//! `{tool_id, tool_call_id, arguments}`. Field renames are the whole of the
+//! difference in this file — nothing here is a different concept wearing a
+//! similar name.
+//!
+//! See `../../../PROVENANCE.md` §1 for the full divergence table, which
+//! `../tests/divergence.rs` keeps honest against these types.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
