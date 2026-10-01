@@ -45,7 +45,6 @@ right column is checked against the live types by `crates/botroster-proto/tests/
 
 | Divergence | Upstream `xai-tool-protocol` | BOTROSTER `botroster-proto` |
 |---|:---:|:---:|
-| hello ack version field | `computer_hub_version` | `hub_version` |
 | tool call id field | `tool_call_id` | `call_id` |
 | tool call arguments field | `arguments` | `args` |
 | approval request method | `permission_request` (in `xai-computer-hub-sdk`) | `approval.request` |
@@ -81,12 +80,36 @@ difference, not a spelling one. And the collisions are worst exactly where a ret
 response: read our `APPROVAL_DENIED` as `tool_server_gone` and a caller re-issues a call a person
 refused; read our `DIVERGED` as `session_draining` and it waits for a session that will never drain.
 
+**Three places this hub is deliberately a superset of the published shapes.** None is a divergence,
+because none of them stops a peer that speaks the published protocol — the list above is the list of
+things that do. They are recorded because a superset is still a difference, and the next person
+reading this file will want to know which differences are deliberate.
+
+- `botroster-proto`'s `Hello` carries a `token` field that upstream's `HelloMsg` does not have
+  (`xai-tool-protocol/src/handshake.rs:31-37`). A client of this project's protocol has always
+  authenticated in the frame; a client of the published one sends `Authorization: Bearer` and has
+  nowhere to put a token. The hub reads the header and falls back to the frame.
+- `session_open` accepts the session id from `params` **or** from the envelope. The published params
+  have no session field at all, so an upstream client's session rides on the envelope; this project's
+  clients name it in params. Params win where both are present.
+- `ServerInfo` gained `status`, which the published protocol requires
+  (`xai-tool-protocol/src/frames.rs:328-356`) and this hub previously omitted, so a client built
+  against it could not parse a `servers.list` result at all. The variant names match upstream's.
+
 **The version string is not a compatibility claim.** `botroster-proto` announces `botroster-1`, not
 `1.0.0`. Upstream has published `1.0.0` continuously without ever bumping it, so a shared string would
 let an incompatible peer clear the hub's only version check — a string equality test — and then fail
 obscely on its first field read. Naming the protocol after its owner turns that into an early, legible
-refusal instead. Matching upstream field-for-field is a separate and much larger piece of work, tracked
-in the superplan's phase 2; nothing in this file asserts it has happened.
+refusal instead.
+
+A hub started with `BOTROSTER_INTEROP=1` answers `"1.0.0"` as well, and says so in
+`supported_protocol_versions`. It is off by default, and turning it on only ever widens: the same hub
+still speaks `botroster-1`, so no client this project already had changes behaviour. The switch exists
+because the table above is still non-empty — the shapes behind `"1.0.0"` are not all in place, and the
+alternative to a switch is claiming compatibility this project has not finished proving, which is the
+claim this section was corrected to remove. **Nothing in this file asserts the two protocols
+interoperate**; what has been demonstrated is listed in `interop/baseline.tsv` and the slice table in
+the superplan's phase 2, measured against a client built from this pinned revision and no other.
 
 **Obligations when we vendor or copy any of it (Apache-2.0 §4):**
 1. Ship the Apache-2.0 `LICENSE` with the distribution.
