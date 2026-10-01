@@ -108,11 +108,27 @@ fn call_json() -> serde_json::Value {
 /// This half is what stops the table from outliving the code.
 #[test]
 fn the_divergences_the_table_records_are_real() {
+    // Slice B1 matched this one: the ack now serialises the field under the name
+    // the published protocol uses, so it is no longer a divergence and the table
+    // row for it is gone. This assertion exists to notice if it ever moves back,
+    // in which case the table needs the row again.
     let ack = ack_json();
     assert!(
-        ack.get("hub_version").is_some() && ack.get("computer_hub_version").is_none(),
-        "the hello ack version field moved; PROVENANCE.md's divergence table is stale"
+        ack.get("computer_hub_version").is_some() && ack.get("hub_version").is_none(),
+        "the hello ack version field moved; if this is a divergence again, \
+         PROVENANCE.md §1 needs its row back"
     );
+    // The old spelling still parses, so a stored ack or fixture written before
+    // B1 keeps reading.
+    let legacy: serde_json::Value = serde_json::json!({
+        "connection_id": "conn-1",
+        "user_id": "user-1",
+        "hub_version": "0.5.1",
+        "supported_protocol_versions": ["botroster-1"],
+    });
+    let back: botroster_proto::HelloAck =
+        serde_json::from_value(legacy).expect("the pre-B1 spelling must still parse");
+    assert_eq!(back.hub_version, "0.5.1");
 
     let call = call_json();
     assert!(
@@ -129,7 +145,6 @@ fn the_divergences_the_table_records_are_real() {
         (-32004, -32005),
         "the error numbers moved; PROVENANCE.md's divergence table is stale"
     );
-
     assert_eq!(
         Method::ApprovalRequest.as_wire_str(),
         "approval.request",
@@ -274,12 +289,6 @@ fn the_error_number_table_lists_no_number_upstream_leaves_free() {
 #[test]
 fn every_divergence_is_written_down_in_provenance() {
     let md = provenance();
-    assert_recorded(
-        &md,
-        "the hello ack version field",
-        "hub_version",
-        "computer_hub_version",
-    );
     assert_recorded(&md, "the tool call id field", "call_id", "tool_call_id");
     assert_recorded(&md, "the tool call arguments field", "args", "arguments");
     assert_recorded(

@@ -86,6 +86,30 @@ id_newtype! {
     ToolCallId,
 }
 
+/// What a tool server is doing, as `servers.list` reports it.
+///
+/// The published protocol requires this field on every `ServerInfo`
+/// (`xai-tool-protocol/src/frames.rs:328-356`), so a client built against it
+/// cannot parse a `servers.list` result without one. It carries a `ready`
+/// variant and four others this hub never reports, because this hub has exactly
+/// one state for a tool server: it is connected or it is not in the table.
+///
+/// The wire names match upstream's exactly, so the values mean the same thing
+/// on both sides — a divergence table entry that claimed otherwise would be a
+/// bug in the table.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolServerLifecycleStatus {
+    Starting,
+    /// Connected and serving. Every server this hub lists is in this state.
+    #[default]
+    Ready,
+    Busy,
+    Draining,
+    ShuttingDown,
+    Disconnected,
+}
+
 // ─────────────────────────── connection roles ───────────────────────────
 
 /// Role of a WebSocket connection. The hub uses this to decide which methods
@@ -213,6 +237,16 @@ pub struct HelloAck {
     /// Resolved by the hub from the upgrade credential (JWT `sub`, dev hash, …).
     /// The client never announces its own identity.
     pub user_id: UserId,
+    /// Serialised as `computer_hub_version`, which is the name the published
+    /// protocol gives it (`xai-tool-protocol/src/handshake.rs:44`) and therefore
+    /// the only name a client built against that protocol will look for. The
+    /// alias reads the old spelling back, so a record or fixture written before
+    /// this still parses.
+    ///
+    /// The field is named for what it is, not for who reads it, and the
+    /// divergence table in `PROVENANCE.md` §1 is where the remaining differences
+    /// are listed.
+    #[serde(rename = "computer_hub_version", alias = "hub_version")]
     pub hub_version: String,
     pub supported_protocol_versions: Vec<String>,
     /// Methods this hub supports beyond the base protocol. Additive; gate

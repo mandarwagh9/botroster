@@ -40,6 +40,34 @@ pub async fn hub_from_home(
     policy: crate::policy::Policy,
     admission: Admission,
 ) -> anyhow::Result<Booted> {
+    hub_from_home_with(home, policy, admission, interop_requested()).await
+}
+
+/// Whether `BOTROSTER_INTEROP` asks this hub to answer an upstream client's
+/// `"1.0.0"` hello.
+///
+/// Read here, once, rather than at each hub construction, so there is one
+/// definition of what the variable means. Off unless it is exactly `1` or
+/// `true`: a variable that turns a protocol claim on by being *set* is a
+/// variable that gets set by accident, and this one widens who may connect.
+pub fn interop_requested() -> bool {
+    matches!(
+        std::env::var("BOTROSTER_INTEROP").as_deref(),
+        Ok("1") | Ok("true")
+    )
+}
+
+/// `hub_from_home` with the interop switch supplied rather than read.
+///
+/// A parameter so a test can ask for one behaviour or the other without setting
+/// a process-wide environment variable, which is the same reason `admission` is
+/// a parameter and not something read from `home`.
+pub async fn hub_from_home_with(
+    home: &Path,
+    policy: crate::policy::Policy,
+    admission: Admission,
+    interop: bool,
+) -> anyhow::Result<Booted> {
     let bots = Arc::new(botroster_bots::BotStore::open(home)?);
     // The record of what each session did, written beside the Bot it belongs
     // to. Shared with the tool provider rather than opened twice: `BotStore`
@@ -75,6 +103,7 @@ pub async fn hub_from_home(
     // when a connector exists: a new connector's first need is a token.
     let mut hub = Hub::with_policy(policy)
         .admitting(admission)
+        .accepting_upstream_protocol(interop)
         .recording_to(sessions)
         .with_internal_tools(Arc::new(Composite::new(sources)))
         .with_secrets(secrets);

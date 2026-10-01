@@ -53,6 +53,24 @@ fn browser_origin(req: &UpgradeRequest) -> Option<String> {
         .map(|v| v.to_str().unwrap_or("<unreadable>").to_owned())
 }
 
+/// The token from an `Authorization: Bearer` header, if that is what it is.
+///
+/// Scheme-checked rather than searched for. `Basic <token>` and a bare token
+/// with no scheme both contain the right bytes, and accepting either would mean
+/// the hub admits a credential it never issued in a form it never agreed to.
+/// The scheme is compared case-insensitively because HTTP auth schemes are
+/// defined that way, and the token is trimmed because a client that appends a
+/// space has still presented the right credential.
+fn bearer_token(req: &UpgradeRequest) -> Option<String> {
+    let raw = req.headers().get("authorization")?.to_str().ok()?;
+    let (scheme, token) = raw.split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+    let token = token.trim();
+    (!token.is_empty()).then(|| token.to_owned())
+}
+
 /// The upgrade callback: refuse anything that announces itself as a web page.
 // The signature is tungstenite's callback contract, not ours, and its error
 // type is an `http::Response`. Boxing it to satisfy the lint would mean a
@@ -120,9 +138,37 @@ impl Server {
         // Nagle hurts here: frames are small and latency-sensitive.
         stream.set_nodelay(true).ok();
 
-        // Refused at the upgrade, before a `Conn` exists and before `register`
-        // is reached. See `browser_origin` for what this is defending.
-        let ws = tokio_tungstenite::accept_hdr_async(stream, refuse_browsers).await?;
+        // The upgrade is the only place the `Authorization` header exists. A
+        // client built against the published protocol carries its credential
+        // there and has no token field on its hello at all
+        // (`xai-tool-protocol/src/handshake.rs:31-37`), so a hub that reads the
+        // token from nowhere else cannot admit it however right the hello is.
+        //
+        // Captured rather than parsed here so the refusal path stays exactly as
+        // it was: `refuse_browsers` still runs first and still decides, and this
+        // only records what a connection that got that far presented.
+        let bearer: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
+        let seen = Arc::clone(&bearer);
+        let ws = tokio_tungstenite::accept_hdr_async(
+            stream,
+            // The parameter types are spelled out because tungstenite's
+            // `Callback` is `FnOnce(&Request, Response)` — the request by
+            // reference, the response by value. Left to inference the closure
+            // is inferred as taking both by value and the trait bound is not
+            // satisfied, with an error that points at the callback rather than
+            // at the signature.
+            //
+            // The lint is suppressed for the reason given on `refuse_browsers`,
+            // which this closure only wraps: the error type is tungstenite's,
+            // not ours, and boxing it would add a conversion to the success path
+            // for a value built once per refused connection.
+            #[allow(clippy::result_large_err)]
+            move |req: &UpgradeRequest, resp: UpgradeResponse| {
+                *seen.lock().expect("the bearer slot is not poisoned") = bearer_token(req);
+                refuse_browsers(req, resp)
+            },
+        )
+        .await?;
         let (mut sink, mut source) = ws.split();
 
         // The client never announces who it is; identity is derived from the
@@ -139,7 +185,17 @@ impl Server {
         };
 
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-        let (conn_id, ack) = match self.hub.register(&hello, principal, tx).await {
+        // Read the slot once, here: the callback runs on the accept path and
+        // nothing else should be reaching into it.
+        let bearer = bearer
+            .lock()
+            .expect("the bearer slot is not poisoned")
+            .clone();
+        let (conn_id, ack) = match self
+            .hub
+            .register(&hello, principal, tx, bearer.as_deref())
+            .await
+        {
             Ok(v) => v,
             Err(e) => {
                 // Report the refusal on the wire before closing, so the client

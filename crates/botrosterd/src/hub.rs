@@ -43,6 +43,26 @@ use crate::policy::{Policy, Verdict};
 
 const HUB_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The protocol version string the published `xai-tool-protocol` uses.
+///
+/// Not a claim that this hub implements that protocol — it does not yet, and the
+/// divergence table in `PROVENANCE.md` §1 is the honest list of what differs.
+/// It is the string a client built against that protocol will send, because
+/// upstream has published `"1.0.0"` continuously and never bumped it, so a
+/// client has no other version to offer. This hub answers it only when
+/// [`Hub::accepting_upstream_protocol`] is set, which is why the constant can
+/// exist here without the string being spoken by default.
+const UPSTREAM_PROTOCOL_VERSION: &str = "1.0.0";
+
+/// The code for a hello this hub will not answer, matching upstream's
+/// `unsupported_protocol_version` (`xai-tool-protocol/src/error_codes.rs:22`).
+///
+/// Upstream's own number rather than this project's previous `-32602`
+/// `INVALID_REQUEST`, because a client that maps codes maps this one to "wrong
+/// version, try another" rather than to "your request was malformed", and the
+/// first is the actionable reading.
+const UNSUPPORTED_PROTOCOL_VERSION: i32 = -32605;
+
 /// How long a person has to answer before the hub gives up.
 ///
 /// Expiry denies. An approval that times out because nobody was watching
@@ -331,6 +351,9 @@ pub struct Hub {
     internal: Option<Arc<dyn InternalTools>>,
     /// Who this hub admits at the handshake. See [`Admission`].
     admission: Admission,
+    /// Whether an upstream `"1.0.0"` hello is answered. See
+    /// [`Hub::accepting_upstream_protocol`].
+    interop_protocol: bool,
     /// Where what a session did is written, if anywhere. See
     /// [`crate::record`].
     sessions: Option<Arc<dyn crate::record::SessionLog>>,
@@ -370,12 +393,33 @@ impl Hub {
             seq: AtomicU64::new(1),
             internal: None,
             admission: Admission::Anyone,
+            interop_protocol: false,
             sessions: None,
             approval_timeout: DEFAULT_APPROVAL_TIMEOUT,
             call_timeout: DEFAULT_CALL_TIMEOUT,
             hooks: None,
             secrets: None,
         }
+    }
+
+    /// Also answer an upstream client's `"1.0.0"` hello, and say so in
+    /// `supported_protocol_versions`.
+    ///
+    /// Off unless somebody asks for it, and it only ever *widens*: a hub with
+    /// this on speaks `botroster-1` exactly as before and additionally answers
+    /// `1.0.0`. Turning it on can therefore never break a client this project
+    /// already has, which is the property that makes it safe to exist at all.
+    ///
+    /// It exists because the shapes behind `"1.0.0"` are not all in place yet,
+    /// and this project removed a false compatibility claim rather than
+    /// replacing it with a different one. What has been implemented — the
+    /// credential in the `Authorization` header, the `computer_hub_version`
+    /// ack — is unconditional and no switch guards it, because it is a superset
+    /// of what was already accepted. The switch guards only the version claim.
+    #[must_use]
+    pub fn accepting_upstream_protocol(mut self, on: bool) -> Self {
+        self.interop_protocol = on;
+        self
     }
 
     /// Admit only peers this [`Admission`] accepts.
@@ -503,12 +547,44 @@ impl Hub {
 
     // ── connection lifecycle ──────────────────────────────────────────
 
+    /// Every protocol version this hub will answer, in the order a client
+    /// should try them.
+    ///
+    /// `botroster-1` first, always. A client that understands this project
+    /// should never be offered a choice that could route it somewhere else.
+    fn accepted_protocol_versions(&self) -> Vec<String> {
+        let mut v = vec![PROTOCOL_VERSION.to_owned()];
+        if self.interop_protocol {
+            v.push(UPSTREAM_PROTOCOL_VERSION.to_owned());
+        }
+        v
+    }
+
+    /// Whether a hello asking for `version` will be answered.
+    ///
+    /// Exact match, and only against the list this hub advertises, so the gate
+    /// and the advertised list cannot disagree — a client that reads
+    /// `supported_protocol_versions` and is then refused has been told a
+    /// falsehood by the same message that carried its connection id.
+    fn speaks(&self, version: &str) -> bool {
+        self.accepted_protocol_versions()
+            .iter()
+            .any(|v| v == version)
+    }
+
     /// Complete the handshake and register the connection.
+    ///
+    /// `bearer` is the token from the `Authorization` header, captured at the
+    /// upgrade because that is the only place it exists. It is an *additional*
+    /// place to present the credential, never a substitute: a peer with neither
+    /// a header nor `Hello.token` is still refused, and `Hello.token` alone
+    /// still works, so no client this project already had changes behaviour.
     pub async fn register(
         self: &Arc<Self>,
         hello: &Hello,
         principal: Principal,
         tx: Outbox,
+        bearer: Option<&str>,
     ) -> Result<(ConnectionId, HelloAck), RpcError> {
         // First, ahead of every other check. A peer this hub does not admit
         // learns nothing about it — not the protocol version it speaks, not
@@ -517,7 +593,11 @@ impl Hub {
         // terminal addressing a home that is not the one this hub was started
         // on, and a bare "unauthorised" would send that person looking for a
         // password that does not exist.
-        if !self.admission.admits(hello.token.as_deref()) {
+        //
+        // The header wins over the frame when both are present. It is the one
+        // the transport authenticates, and a frame field is data a peer chose.
+        let presented = bearer.or(hello.token.as_deref());
+        if !self.admission.admits(presented) {
             return Err(RpcError {
                 code: codes::UNAUTHENTICATED,
                 message: format!(
@@ -531,12 +611,18 @@ impl Hub {
                 data: None,
             });
         }
-        if hello.protocol_version != PROTOCOL_VERSION {
+        if !self.speaks(&hello.protocol_version) {
             return Err(RpcError {
-                code: codes::INVALID_REQUEST,
+                code: UNSUPPORTED_PROTOCOL_VERSION,
                 message: format!(
-                    "unsupported protocol_version {:?}; this hub speaks {PROTOCOL_VERSION}",
-                    hello.protocol_version
+                    "unsupported protocol_version {:?}; this hub speaks {}{}",
+                    hello.protocol_version,
+                    PROTOCOL_VERSION,
+                    if self.interop_protocol {
+                        format!(" and {UPSTREAM_PROTOCOL_VERSION}")
+                    } else {
+                        String::new()
+                    }
                 ),
                 data: None,
             });
@@ -554,7 +640,11 @@ impl Hub {
             connection_id: id.clone(),
             user_id: principal.user_id.clone(),
             hub_version: HUB_VERSION.to_owned(),
-            supported_protocol_versions: vec![PROTOCOL_VERSION.to_owned()],
+            // What this hub will actually accept, which is the only honest list:
+            // offering `1.0.0` from a hub that refuses it would be a client
+            // that connects and is then dropped, and a client that reads this
+            // list is entitled to rely on it.
+            supported_protocol_versions: self.accepted_protocol_versions(),
             capabilities: EXTRA_CAPABILITIES.iter().map(|s| (*s).to_owned()).collect(),
         };
 
@@ -1193,8 +1283,20 @@ impl Hub {
         req: &Request,
     ) -> Result<serde_json::Value, RpcError> {
         let p: SessionOpenParams = parse_params(req)?;
+        // The session can arrive two ways, and this method is the only one that
+        // has to accept both. A client of this project's protocol names it in
+        // `params`; the published protocol has no session field there at all
+        // (`xai-tool-protocol/src/frames.rs:620-628`) and rides it on the
+        // envelope, as every other session-scoped method does. Reading params
+        // only meant an upstream client was silently given a different session
+        // than the one it asked for, and then spent the rest of its life naming
+        // a session this hub had never heard of.
+        //
+        // Params win, so nothing that works today changes. The envelope is only
+        // consulted where params said nothing.
         let sid = p
             .session_id
+            .or_else(|| req.session_id.clone())
             .unwrap_or_else(|| SessionId::new(self.next("sess")));
 
         // Read before the lock: this touches a file, and holding the hub's
@@ -1896,6 +1998,11 @@ impl Hub {
                 server_id: id.clone(),
                 description: r.description.clone(),
                 metadata: r.metadata.clone(),
+                // A server is in this table because it is connected, and `serve`
+                // replaces the entry on every reconnect, so `ready` is the only
+                // state reachable here. Reporting any other would be a claim
+                // this hub has no evidence for.
+                status: botroster_proto::ToolServerLifecycleStatus::Ready,
             })
             .collect();
         Ok(serde_json::to_value(ServersListResult { servers }).unwrap())

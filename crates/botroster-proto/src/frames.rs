@@ -204,6 +204,15 @@ pub struct ServerInfo {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Value>,
+    /// Required by the published protocol
+    /// (`xai-tool-protocol/src/frames.rs:328-356`) and absent here until slice
+    /// B1, which is why a client built against it could not parse this result.
+    ///
+    /// `default` on the read side only: this hub always writes it, and a
+    /// `default` on write would make a missing status indistinguishable from a
+    /// ready one, which is the one value a client must not have to guess.
+    #[serde(default)]
+    pub status: crate::ToolServerLifecycleStatus,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
