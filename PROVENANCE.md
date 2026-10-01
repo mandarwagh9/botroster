@@ -46,10 +46,45 @@ and the right column is checked against the live types by
 
 | Divergence | Upstream `xai-tool-protocol` | BOTROSTER `botroster-proto` |
 |---|:---:|:---:|
-| approval request method | `permission_request` (in `xai-computer-hub-sdk`) | `approval.request` |
-| approval reply | `hook_reply`, a second frame | `ApprovalDecision`, the JSON-RPC result of the request |
 | tool id character set | `[a-zA-Z0-9_-]+` per segment, at most one `:` | unvalidated; `fs.read`, `shell.exec` and `browser.*` are dotted and do not parse upstream |
 | `serve` tool list shape | `Vec<ToolDescriptionWithSchema>`, each item nested as `{description: {…}, input_schema}` with the tool id **derived** from `description.{namespace, name}` | flat `Vec<ToolDescription>`, id stated explicitly as `name` |
+
+#### Approvals are matched, per connection, and both dialects are still supported
+
+The two approval rows that used to sit in the table above — the request method and the reply
+mechanism — are gone because a published client is now answered in the dialect it understands. The
+dialect is chosen **per connection**, at `register`, from the protocol version the client announced:
+`1.0.0` gets the hook, `botroster-1` gets `approval.request` and the JSON-RPC result of the request.
+
+| | a published client | a BOTROSTER client |
+|---|---|---|
+| asked with | `hook`, params `HookFrame`, `hook_id` = the hub's request id | `approval.request`, params `ApprovalRequestParams` |
+| answered by | a `hook_reply` **notification**, correlated on `hook_id` | the JSON-RPC result of the request |
+| session rides | `HookFrame.session_id` **and** the request envelope | the request envelope only |
+
+Two things about that table are load-bearing and neither is obvious:
+
+- **The hook's request id is never answered.** The SDK hands the frame to its handler and sends no
+  response (`harness.rs:1682`, `dispatch_inbound_hook_request`), so a hub that waits for a response
+  waits out its full approval timeout and then denies a call a person had already approved.
+- **The hook must carry the session on the envelope.** `subscribe_notifications` is what registers
+  the session inbox the handler is called from, and `demux.route` feeds that inbox only for a frame
+  with an envelope `session_id` (`demux.rs:387`). Without it the hook arrives nowhere and the
+  approval times out looking exactly like a hub that never asked.
+
+The reply is read fail-closed, and that is the whole of the mapping: `approve` and `always_approve`
+allow, and **everything else denies**, including an unknown outcome, a non-string outcome, a missing
+one, and `cancelled`. Upstream's own reader has the same fallthrough
+(`hub_permission.rs:197-245`). `always_approve` and `always_reject` count as one answer and remember
+nothing, because upstream would honour `scope: {kind: "bash_command", value: "git status"}` as a
+standing grant and this hub has nowhere to keep a scoped one; the payload therefore always says
+`tool_approval_policy: "always_prompt"`, which is upstream's own way of telling a renderer not to
+offer an "always" that would be ignored. Numeric outcomes (`1` to `4`) are accepted, because upstream
+accepts them.
+
+A credential request is the one thing still unanswered: `secret.request` is a BOTROSTER extension
+with no published equivalent, so for a published-dialect connection the hub refuses at once and logs
+why, rather than waiting out a timeout for an answer that cannot exist.
 
 The `serve` row is benign today and is recorded because a row that is currently
 harmless is exactly the one nobody writes down. Upstream's own comment calls it

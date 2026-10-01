@@ -160,6 +160,17 @@ fn the_divergences_the_table_records_are_real() {
         "approval.request",
         "the approval method name moved; PROVENANCE.md's divergence table is stale"
     );
+    // Both hook methods already existed before this work, with their wire strings
+    // pinned below by `every_method_wire_string_is_pinned`. Asserted here anyway
+    // because this is the test that fails when a *behavioural* assumption about
+    // them moves, and because the plan for this work assumed they had to be
+    // added: they had not.
+    assert_eq!(
+        (Method::Hook.as_wire_str(), Method::HookReply.as_wire_str()),
+        ("hook", "hook_reply"),
+        "a published client is asked with `hook` and answers with `hook_reply`; if \
+         either moved, the dialect this hub speaks to an upstream client moved with it"
+    );
 }
 
 /// Numbers `xai-tool-protocol::error_codes::ERROR_CODES` occupies, with the
@@ -302,22 +313,44 @@ fn every_divergence_is_written_down_in_provenance() {
     // No assertion for the tool call id or arguments fields: both are matched
     // now, so there is no divergence to record and a row naming both spellings
     // would be describing a difference that is gone.
-    assert_recorded(
-        &md,
-        "the approval request method",
-        "approval.request",
-        "permission_request",
-    );
-    // Our side has no reply *method*: the decision comes back as the JSON-RPC
-    // result of `approval.request`, carrying `ApprovalDecision`. Upstream sends a
-    // second frame instead, so the divergence is in the shape, not a name.
-    assert_recorded(
-        &md,
-        "the approval reply mechanism",
-        "ApprovalDecision",
-        "hook_reply",
-    );
+    //
+    // Nor for the two approval rows, for a subtler reason. A published client is
+    // answered in its own dialect now, so there is no divergence between this hub
+    // and the published protocol; what remains is a difference between the two
+    // *clients* this hub serves, which is not a divergence from upstream and does
+    // not belong in a table about upstream. The dialect is recorded in prose
+    // instead, and `the_approval_dialect_is_recorded_in_provenance` holds that
+    // prose to the four facts a reader needs.
     assert_recorded(&md, "the tool id charset", "fs.read", "[a-zA-Z0-9_-]+");
+}
+
+/// The per-connection approval dialect is written down, in all four parts.
+///
+/// The table this file guards is about differences from the published protocol,
+/// and the dialect is not one: it is a choice this hub makes about which of two
+/// clients to speak to. That makes it exactly the kind of fact that goes
+/// unrecorded, because no test fails when it is missing — the code keeps working
+/// and the next reader has to rediscover it from a `Dialect` enum. So the four
+/// load-bearing parts are asserted here rather than left to a reader.
+#[test]
+fn the_approval_dialect_is_recorded_in_provenance() {
+    let md = provenance();
+    for (what, needle) in [
+        ("the hook method a published client is asked with", "hook"),
+        ("the notification it answers with", "hook_reply"),
+        ("the version that selects the dialect", "1.0.0"),
+        (
+            "the policy value that tells a renderer not to offer an always",
+            "always_prompt",
+        ),
+    ] {
+        assert!(
+            md.contains(needle),
+            "PROVENANCE.md does not record {what} (`{needle}`). The per-connection \
+             approval dialect is a choice rather than a divergence from upstream, so \
+             nothing else in this file would notice it going missing."
+        );
+    }
 }
 
 /// The revision the table was measured against is pinned, so "check the current

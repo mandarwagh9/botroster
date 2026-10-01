@@ -131,7 +131,29 @@ struct Conn {
     kind: ConnectionKind,
     principal: Principal,
     server_id: Option<ServerId>,
+    /// Which approval dialect this connection answers in, decided once at
+    /// `register` from the version it announced and never revisited.
+    ///
+    /// Per connection rather than per hub on purpose: the point of the work is
+    /// that an upstream client can be answered *and* BOTROSTER's own clients are
+    /// untouched, on the same hub, in the same session. A hub-wide switch would
+    /// make those two requirements exclusive. Removed at the same time as the
+    /// legacy dialect is retired, and not before: if that slips, this flag
+    /// becomes permanent, which is the failure the per-connection shape is
+    /// supposed to make impossible to forget.
+    dialect: Dialect,
     tx: Outbox,
+}
+
+/// How a connection is asked for approval.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Dialect {
+    /// BOTROSTER's own: `approval.request`, answered by the JSON-RPC result of
+    /// the request. Unchanged since before any of this.
+    Botroster,
+    /// A published client: a `hook` frame carrying a permission request,
+    /// answered by a `hook_reply` notification keyed on `hook_id`.
+    Upstream,
 }
 
 #[derive(Debug, Default)]
@@ -689,6 +711,15 @@ impl Hub {
                 kind: hello.kind,
                 principal,
                 server_id: hello.server_id.clone(),
+                // The version the client announced is the whole of the decision.
+                // `speaks` has already refused anything else, and `"1.0.0"` is
+                // only reachable while the interop switch is on, so this cannot
+                // be reached by a client that did not mean to be one.
+                dialect: if hello.protocol_version == UPSTREAM_PROTOCOL_VERSION {
+                    Dialect::Upstream
+                } else {
+                    Dialect::Botroster
+                },
                 tx,
             },
         );
@@ -819,6 +850,28 @@ impl Hub {
         params: serde_json::Value,
     ) -> Option<Outcome> {
         let req_id = self.next("hub");
+        self.ask_owner_as(owner, session, &req_id, method, params)
+            .await
+    }
+
+    /// [`ask_owner`](Self::ask_owner) with the request id supplied.
+    ///
+    /// Split rather than branched inside `ask_owner` because that function
+    /// carries a written contract: it must not branch on `method`, so that the
+    /// credential path keeps the coverage it gets by sharing this code. The
+    /// permission hook needs the id it minted to also appear in the payload as
+    /// `hook_id`, which is what the reply is correlated by, and minting it here
+    /// would mean the caller could not name it. Splitting keeps both properties:
+    /// one body, no method branch, and the id is the caller's to choose.
+    async fn ask_owner_as(
+        self: &Arc<Self>,
+        owner: &ConnectionId,
+        session: &SessionId,
+        req_id: &str,
+        method: Method,
+        params: serde_json::Value,
+    ) -> Option<Outcome> {
+        let req_id = req_id.to_owned();
         let (tx, rx) = oneshot::channel();
         {
             let mut st = self.state.lock().await;
@@ -849,6 +902,31 @@ impl Hub {
     /// the connection went away, or the person declined. A Bot is told the
     /// same thing in all of them, because distinguishing them would say
     /// something about the person rather than about the task.
+    /// Whether this connection is answered in the published dialect.
+    async fn speaks_upstream(&self, conn: &ConnectionId) -> bool {
+        let st = self.state.lock().await;
+        st.conns.get(conn).map(|c| c.dialect) == Some(Dialect::Upstream)
+    }
+
+    /// Put a `secret.request` to a client that cannot answer it.
+    ///
+    /// `secret.request` is a BOTROSTER extension with no upstream equivalent, so
+    /// a published client will never reply to it. Asking anyway would cost the
+    /// full approval timeout on every call needing a credential and would look
+    /// like a hung hub rather than a declined one, so the answer is "no
+    /// credential" at once and the log says why.
+    async fn no_credential_for_upstream(&self, conn: &ConnectionId, name: &str) -> bool {
+        if !self.speaks_upstream(conn).await {
+            return false;
+        }
+        tracing::warn!(
+            %name, %conn,
+            "a credential was asked for from a client on the published protocol, which has \
+             no `secret.request`; refusing now instead of waiting out the approval timeout"
+        );
+        true
+    }
+
     async fn ask_for_secret(
         self: &Arc<Self>,
         owner: &ConnectionId,
@@ -856,6 +934,9 @@ impl Hub {
         name: &str,
         why: &str,
     ) -> Option<String> {
+        if self.no_credential_for_upstream(owner, name).await {
+            return None;
+        }
         let params = SecretRequestParams {
             name: name.to_owned(),
             why: why.to_owned(),
@@ -917,13 +998,22 @@ impl Hub {
             reason: reason.to_owned(),
             timeout_secs: self.approval_timeout.as_secs(),
         };
-        let outcome = match self
-            .ask_owner(
-                owner,
-                session,
+        let upstream = self.speaks_upstream(owner).await;
+        let req_id = self.next("hub");
+        let (method, params) = if upstream {
+            (
+                Method::Hook,
+                serde_json::to_value(permission_hook(session, &req_id, &params, tool.as_str()))
+                    .expect("permission hook serialises"),
+            )
+        } else {
+            (
                 Method::ApprovalRequest,
                 serde_json::to_value(&params).expect("approval params serialise"),
             )
+        };
+        let outcome = match self
+            .ask_owner_as(owner, session, &req_id, method, params)
             .await
         {
             Some(outcome) => outcome,
@@ -1018,6 +1108,10 @@ impl Hub {
         let Some(method) = n.parsed_method() else {
             return;
         };
+        if method == Method::HookReply {
+            self.on_hook_reply(from, n).await;
+            return;
+        }
         if method != Method::ToolCallProgress {
             return;
         }
@@ -1050,6 +1144,64 @@ impl Hub {
         } else {
             tracing::debug!(call_id = %frame.call_id, from = %from, "progress for an unknown call");
         }
+    }
+
+    /// A `hook_reply` notification, which is how a published client answers a
+    /// permission request.
+    ///
+    /// Three properties, each of which is a security property rather than a
+    /// detail:
+    ///
+    /// 1. **The sender is checked here, by hand.** `required_role` is consulted
+    ///    only in `on_request`, so listing `HookReply` there enforces nothing on
+    ///    a notification. Only a connection this hub actually asked may answer.
+    /// 2. **Resolved against `hub_calls` only, never through `on_response`.**
+    ///    `on_response` also consults the `relays` table, and a tool server is
+    ///    the target of its own relays, so routing a notification through it
+    ///    would consult the wrong table and skip the check that matters.
+    /// 3. **Anything unrecognised is dropped, not guessed at.** An unknown
+    ///    `hook_id`, a stranger, or a reply that arrives after the timeout has
+    ///    already removed the entry: all three are logged and ignored. A late
+    ///    answer must not resurrect a decision nobody is waiting for.
+    async fn on_hook_reply(self: &Arc<Self>, from: &ConnectionId, n: Notification) {
+        let Some(params) = n.params.clone() else {
+            return;
+        };
+        let Ok(reply) = serde_json::from_value::<HookReplyFrame>(params) else {
+            tracing::warn!(%from, "a hook_reply could not be read; ignored");
+            return;
+        };
+
+        let waiter = {
+            let mut st = self.state.lock().await;
+            match st.hub_calls.get(&reply.hook_id) {
+                Some((owner, _)) if owner == from => {
+                    st.hub_calls.remove(&reply.hook_id).map(|(_, tx)| tx)
+                }
+                Some((owner, _)) => {
+                    tracing::warn!(
+                        hook_id = %reply.hook_id, %from, expected = %owner,
+                        "a connection answered a permission request it was not asked; ignored"
+                    );
+                    None
+                }
+                // No entry: either the id was never the hub's, or the timeout
+                // already took it. Either way there is nobody left to tell.
+                None => {
+                    tracing::debug!(
+                        hook_id = %reply.hook_id, %from,
+                        "a hook_reply arrived for a request that is not pending; ignored"
+                    );
+                    None
+                }
+            }
+        };
+
+        let Some(tx) = waiter else { return };
+        // Resolved into this crate's own decision type, so the caller above sees
+        // exactly what it has always seen and the legacy path is untouched.
+        let decision = hook_reply_decision(&reply.result);
+        let _ = tx.send(Outcome::Result(serde_json::to_value(decision).unwrap()));
     }
 
     /// A reply to something the hub sent out: either a relayed harness request
@@ -2276,6 +2428,162 @@ const SECRET_REQUEST: &str = "secret.request";
 /// to be clear that asking is the only way to get one, or a model that cannot
 /// find a token will try to talk somebody through pasting it into the chat,
 /// which is the failure the broker exists to prevent.
+/// Build the `hook` frame that asks a published client for permission.
+///
+/// Written by hand from `hub_permission.rs:157-189`
+/// (`build_permission_payload`) at SOURCE_REV. The three fields that are not
+/// mechanical are the ones a renderer actually reads:
+///
+/// * `tool_approval_policy` is always `always_prompt`. Upstream's own comment
+///   says that under it "an 'always' answer is recorded nowhere, so the card must
+///   not offer it", which is exactly what this hub does with one. Sending
+///   `grants_allowed` would advertise a standing grant this hub does not keep.
+/// * `bash_command` and `edit_file_paths` are filled from the tool's own
+///   arguments (`command` and `path` in `botroster-guest/src/tools.rs`) because a
+///   card that shows only "Run shell.exec" for `rm -rf build` is not an
+///   approval, it is a click.
+/// * `description` carries the full arguments for every other tool, because
+///   there is no other field to put them in.
+///
+/// BOTROSTER's own fields ride alongside in the same payload, which is safe
+/// because upstream's payload is an open `serde_json::Value` and its renderer
+/// reads the keys it knows.
+fn permission_hook(
+    session: &SessionId,
+    req_id: &str,
+    params: &ApprovalRequestParams,
+    tool: &str,
+) -> HookFrame {
+    let mut payload = serde_json::json!({
+        "tool_call_id": params.call_id.as_str(),
+        "tool_name": params.tool_id.as_str(),
+        "description": describe_for_a_person(tool, &params.args),
+        // Everything this hub asks about is a mutation, so it reads as a write.
+        "scope": "write",
+        "tool_approval_policy": "always_prompt",
+        // Ours, carried because the payload is open and a BOTROSTER client
+        // reading the same frame still needs them.
+        "approval_id": params.approval_id.as_str(),
+        "args": params.args,
+        "reason": params.reason,
+        "timeout_secs": params.timeout_secs,
+    });
+    if let Some(map) = payload.as_object_mut() {
+        match tool {
+            "shell.exec" => {
+                if let Some(cmd) = params.args.get("command").and_then(|v| v.as_str()) {
+                    map.insert("bash_command".to_owned(), serde_json::json!(cmd));
+                }
+            }
+            "fs.write" => {
+                if let Some(path) = params.args.get("path").and_then(|v| v.as_str()) {
+                    map.insert("edit_file_paths".to_owned(), serde_json::json!([path]));
+                }
+            }
+            _ => {}
+        }
+    }
+    HookFrame {
+        session_id: session.clone(),
+        tool_id: None,
+        call_id: None,
+        hook_id: Some(req_id.to_owned()),
+        event: HookEvent::Custom {
+            kind: "permission_request".to_owned(),
+            payload,
+        },
+        trace_context: None,
+    }
+}
+
+/// The one line of text a person reads before deciding.
+///
+/// Falls back to the tool name and the reason when there are no arguments worth
+/// showing, because a card with an empty description is worse than a dull one:
+/// it reads as a rendering failure and people approve through those.
+fn describe_for_a_person(tool: &str, args: &serde_json::Value) -> String {
+    let shown = match tool {
+        "shell.exec" => args
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
+        "fs.write" => args.get("path").and_then(|v| v.as_str()).map(str::to_owned),
+        _ => None,
+    };
+    match shown {
+        Some(s) => s,
+        None => match args.as_object() {
+            // Sorted, so the same call always renders the same way. A person
+            // comparing two prompts should not see them reordered at random.
+            Some(map) if !map.is_empty() => {
+                let mut keys: Vec<&String> = map.keys().collect();
+                keys.sort();
+                let body: Vec<String> = keys.iter().map(|k| format!("{k}={}", map[*k])).collect();
+                format!("{tool}: {}", body.join(" "))
+            }
+            _ => tool.to_owned(),
+        },
+    }
+}
+
+/// Read a `hook_reply` result into a decision.
+///
+/// Fail-closed throughout, and that is the whole design: `approve` and
+/// `always_approve` allow, and **everything else denies**, including an outcome
+/// this hub has never heard of, an outcome that is not a string, and a result
+/// with no outcome at all. Upstream's own reader is the same
+/// (`hub_permission.rs:197-245`: its fallthrough arm is a rejection), so a hub
+/// that guessed "probably meant approve" would be the only thing in the pair
+/// that turns a broken renderer into a silent bypass.
+///
+/// `always_approve` and `always_reject` count as one answer and remember
+/// nothing. Upstream would honour
+/// `scope: {kind: "bash_command", value: "git status"}` as a standing grant for
+/// that command; this hub has nowhere to keep a scoped grant, and widening it to
+/// a session grant for the whole tool is precisely what `always_prompt` told the
+/// renderer not to offer. `Decision::AllowAlways` is therefore never produced
+/// here, and the note says so where someone will look for it.
+///
+/// Numeric outcomes are accepted because upstream accepts them
+/// (`reply_to_outcome` maps `1 | 2 | 3 | 4`), and a renderer that sends the
+/// number would otherwise be read as "unknown" and denied.
+fn hook_reply_decision(result: &serde_json::Value) -> ApprovalDecision {
+    let outcome = match result.get("outcome") {
+        Some(serde_json::Value::String(s)) => s.as_str(),
+        Some(serde_json::Value::Number(n)) => match n.as_i64() {
+            Some(1) => "approve",
+            Some(2) => "reject",
+            Some(3) => "always_approve",
+            Some(4) => "always_reject",
+            _ => "",
+        },
+        _ => "",
+    };
+    let note = result
+        .get("followup_message")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+    match outcome {
+        "approve" | "always_approve" => ApprovalDecision {
+            decision: Decision::AllowOnce,
+            note: note.or_else(|| {
+                (outcome == "always_approve").then(|| {
+                    "always was treated as once: this hub keeps no scoped grants".to_owned()
+                })
+            }),
+        },
+        // `reject`, `always_reject`, `cancelled`, an unknown string, a
+        // non-string outcome and a missing one all land here. One arm, because
+        // every one of them denies and the distinction is the renderer's, not
+        // the caller's.
+        _ => ApprovalDecision {
+            decision: Decision::Deny,
+            note,
+        },
+    }
+}
+
 fn secret_request_tool() -> ToolDescription {
     ToolDescription::new(
         SECRET_REQUEST,
