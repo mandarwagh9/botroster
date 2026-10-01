@@ -1,6 +1,6 @@
 //! An upstream client's hello, answered or refused, on a real hub.
 //!
-//! Slice B1. The interop peers in `grokbot-recon\interop` are built from
+//! Slice B1. The interop peers are built outside this repository from
 //! `xai-org/grok-build` at SOURCE_REV `559751f` and exist to be a peer this
 //! project did not write. Against the hub as it stood at `5ef932c` they stopped
 //! at the handshake with `-32007`, and the raw frame said why: the SDK carries
