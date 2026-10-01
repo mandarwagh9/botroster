@@ -1317,10 +1317,14 @@ impl Hub {
         //
         // Params win, so nothing that works today changes. The envelope is only
         // consulted where params said nothing.
-        let sid = p
-            .session_id
-            .or_else(|| req.session_id.clone())
-            .unwrap_or_else(|| SessionId::new(self.next("sess")));
+        // A client may name its own session id, and a published client has no
+        // choice: the published `session_open` params carry no session field at
+        // all, so the id rides the envelope either way. Kept apart from the id
+        // itself because only a *supplied* one can collide with someone else's,
+        // and because deciding a minted id needs the session table, which is
+        // only locked further down. Nothing between here and there reads an id.
+        let supplied = p.session_id.or_else(|| req.session_id.clone());
+        let client_named_it = supplied.is_some();
 
         // Read before the lock: this touches a file, and holding the hub's
         // state mutex across a disk read would stall every other session for
@@ -1359,6 +1363,68 @@ impl Hub {
 
         let mut st = self.state.lock().await;
         let policy = st.default_policy.clone();
+
+        // A session id belongs to the connection that opened it. `session_close`
+        // has always checked that; this method, the one that *creates* the
+        // session, did not, and so was the one place a second connection could
+        // take a running session over.
+        //
+        // What the takeover cost, since it never raised an error and so nobody
+        // would have gone looking: the insert below replaces the whole `Session`,
+        // so a thief arrived with the bound tool server gone, the catalogue
+        // empty, the session's policy grants reset to the hub default, and any
+        // replay in flight discarded. `next("sess")` mints sequential ids, so the
+        // ids were guessable by construction, and `disconnect` retains sessions
+        // away by owner — which a thief also defeats, because the departing
+        // owner's cleanup then matches nothing and the session outlives both
+        // connections.
+        //
+        // **Where the reconnect exception goes.** N5.3 wants a `resume: true`
+        // open from the same user to supersede the old connection and *keep* the
+        // server, tools and grants, which is the case this check refuses. It is
+        // deliberately not handled here: the reconnect design is a spike that has
+        // not run, and guessing at it would bake a guessed exception into the one
+        // check every later task depends on. The owner reopening its own session
+        // is still allowed and still replaces it, which
+        // `session_ownership_live.rs` characterises on purpose.
+        let sid = match supplied.clone() {
+            Some(want) => {
+                let held_by = st.sessions.get(&want).map(|s| s.owner.clone());
+                match held_by {
+                    Some(owner) if owner != *from => {
+                        // Logged, because a refusal that only reaches the caller
+                        // leaves the operator with a session that stopped working
+                        // and no reason why — and this refusal is the one a second
+                        // client provokes, so it is exactly the one that needs a
+                        // line in the log.
+                        tracing::warn!(
+                            session = %want,
+                            asked_by = %from,
+                            held_by = %owner,
+                            "session_open refused: that session id belongs to another connection"
+                        );
+                        return Err(err(
+                            codes::FORBIDDEN,
+                            &format!("session `{want}` belongs to another connection"),
+                        ));
+                    }
+                    _ => want,
+                }
+            }
+            None => {
+                // Exactly one draw per open. An earlier version of this computed
+                // a candidate id before the lock and minted again in here, which
+                // consumed two ids per open and left the candidate a step behind
+                // the value actually used — so the skip loop could never see the
+                // id it was guarding.
+                let mut candidate = SessionId::new(self.next("sess"));
+                while st.sessions.contains_key(&candidate) {
+                    candidate = SessionId::new(self.next("sess"));
+                }
+                candidate
+            }
+        };
+
         st.sessions.insert(
             sid.clone(),
             Session {
@@ -1371,9 +1437,19 @@ impl Hub {
             },
         );
         // The principal may now act on the session; dispatch checks it later.
+        // Not pushed when it is already there: a reopen must not accumulate a
+        // second, identical authorisation for the same id.
         if let Some(c) = st.conns.get_mut(from) {
-            c.principal.session_ids.push(sid.clone());
+            if !c.principal.session_ids.contains(&sid) {
+                c.principal.session_ids.push(sid.clone());
+            }
         }
+        tracing::info!(
+            session = %sid,
+            owner = %from,
+            client_named_it = client_named_it,
+            "session opened"
+        );
         Ok(serde_json::to_value(SessionOpenResult { session_id: sid }).unwrap())
     }
 
