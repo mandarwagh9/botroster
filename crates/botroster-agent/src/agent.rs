@@ -463,7 +463,7 @@ impl Agent {
                     if events
                         .send(AgentEvent::ToolProgress {
                             call_id: p.call_id,
-                            payload: p.payload,
+                            payload: p.body,
                         })
                         .is_err()
                     {

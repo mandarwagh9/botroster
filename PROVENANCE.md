@@ -39,17 +39,58 @@ end reads, and it failed before any of the newer upstream features came into it.
 produced the old wording was sound — a reimplementation should not silently fork the protocol — but
 "compatible" was asserted rather than checked, and nobody checked it. The table below is the check.
 
-An unmodified upstream harness **cannot** talk to `botrosterd`. Every difference below was read from
-both trees at the pinned `SOURCE_REV`; the left column is a recorded fact about that revision, and the
-right column is checked against the live types by `crates/botroster-proto/tests/divergence.rs`.
+An unmodified upstream harness **cannot** complete a call against `botrosterd`. Every difference below was
+read from both trees at the pinned `SOURCE_REV`; the left column is a recorded fact about that revision,
+and the right column is checked against the live types by
+`crates/botroster-proto/tests/divergence.rs`.
 
 | Divergence | Upstream `xai-tool-protocol` | BOTROSTER `botroster-proto` |
 |---|:---:|:---:|
-| tool call id field | `tool_call_id` | `call_id` |
-| tool call arguments field | `arguments` | `args` |
 | approval request method | `permission_request` (in `xai-computer-hub-sdk`) | `approval.request` |
 | approval reply | `hook_reply`, a second frame | `ApprovalDecision`, the JSON-RPC result of the request |
 | tool id character set | `[a-zA-Z0-9_-]+` per segment, at most one `:` | unvalidated; `fs.read`, `shell.exec` and `browser.*` are dotted and do not parse upstream |
+| `serve` tool list shape | `Vec<ToolDescriptionWithSchema>`, each item nested as `{description: {…}, input_schema}` with the tool id **derived** from `description.{namespace, name}` | flat `Vec<ToolDescription>`, id stated explicitly as `name` |
+
+The `serve` row is benign today and is recorded because a row that is currently
+harmless is exactly the one nobody writes down. Upstream's own comment calls it
+"the v2 protocol — no separate serve RPC needed"
+(`xai-computer-hub-sdk/src/server.rs:1624`): a published server sends `serve`,
+logs a `-32602 invalid params` warning when this hub refuses it, and registers
+its tools from the `session.bind` response instead, which works. It was found by
+reading a running peer's log, not by a test failing.
+
+#### Field renames that are now matched, and the shape differences they exposed
+
+The rows above are what is still different. The two field-name rows that used to sit here — `call_id`
+against `tool_call_id`, and `args` against `arguments` — are gone because the wire names now match
+upstream. The Rust field names are deliberately unchanged, so no call site in this workspace moved and
+only the bytes did; the old spellings remain read aliases, so a stored run record or a fixture written
+before the rename still parses. `crates/botroster-proto/tests/wire_names.rs` pins all of it, because a
+reverted rename breaks nothing in this workspace — it compiles, it passes its own tests, and only a
+published client notices.
+
+Matching those two names turned out to be a smaller part of the work than the table implied, and the
+reasons are the useful finding here. Each of the following was discovered against a running upstream
+peer, and none of them is visible in either tree's type definitions:
+
+- **`session.bind` carries its session in `params` — and must *not* also carry one on the envelope.**
+  `xai-computer-hub-sdk/src/demux.rs:387` routes any frame with an envelope `session_id` to a
+  per-session inbox; only a frame without one reaches the notification channel that is the only thing
+  answering a bind. A hub that sends it in both places is routed away from the code that would have
+  replied, and the bind is dropped **silently** — no error, no reply — so the symptom is a timeout and
+  a message blaming the peer. Upstream pins the shape in its own test,
+  `connection_tests.rs:2358-2364`. Note the mirror image: `session_open`'s published params have no
+  session field at all and ride it on the envelope. Two session-carrying frames, two conventions.
+- **A tool description's name is `name`, not `tool_id`, and its schema is `arguments_schema`.** `name`
+  is not optional upstream, so a snapshot carrying `tool_id` fails with `missing field 'name'` before a
+  single tool is looked at. The three optional fields upstream allows (`namespace`, `title`, `kind`) are
+  carried so a description from a published server round-trips through this hub intact.
+- **A progress frame carries a `kind`,** which upstream requires and this hub did not have, and its
+  body is `body` rather than `payload`. Upstream also carries an optional `dropped_count` for
+  rate-pressure bookkeeping; this hub never drops progress and so has no such field, rather than one
+  that is always `None` and would imply a rate limiter that does not exist.
+
+The handshake and version rows from `computer_hub_version` were matched earlier on the same terms.
 
 **Every application error number we share with upstream, and what it means on each side.** These are
 the rows that matter most in the table, because a collision is not a mismatch: a peer that maps numbers

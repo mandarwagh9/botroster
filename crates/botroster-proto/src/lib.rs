@@ -603,8 +603,11 @@ impl Request {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolCallParams {
     pub tool_id: ToolId,
+    /// Serialised as `tool_call_id`; see [`crate::frames::ToolCallRequestParams`].
+    #[serde(rename = "tool_call_id", alias = "call_id")]
     pub call_id: ToolCallId,
-    #[serde(default)]
+    /// Serialised as `arguments`.
+    #[serde(default, rename = "arguments", alias = "args")]
     pub args: Value,
 }
 

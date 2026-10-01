@@ -315,12 +315,17 @@ async fn run_tool(
         let tx = tx.clone();
         let call_id = call_id.clone();
         let session = session.clone();
-        let mut sink = move |payload: serde_json::Value| {
+        let mut sink = move |chunk: serde_json::Value| {
             let mut n = Notification::new(
                 Method::ToolCallProgress,
                 ToolCallProgressFrame {
                     call_id: call_id.clone(),
-                    payload,
+                    // Set explicitly rather than leaning on the `kind` default:
+                    // this is the one place in the workspace that produces
+                    // progress, so the value it puts on the wire is the value
+                    // worth reading off the type.
+                    kind: PROGRESS_KIND_LOG_CHUNK.to_owned(),
+                    body: chunk,
                 },
             );
             n.session_id = session.clone();

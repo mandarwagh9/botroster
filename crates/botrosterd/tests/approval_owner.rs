@@ -456,7 +456,8 @@ async fn progress_cannot_be_injected_by_a_bystander() -> anyhow::Result<()> {
         Method::ToolCallProgress,
         &ToolCallProgressFrame {
             call_id: ToolCallId::new("call-1"),
-            payload: json!({ "stage": "reading your private notes" }),
+            kind: PROGRESS_KIND_LOG_CHUNK.to_owned(),
+            body: json!({ "stage": "reading your private notes" }),
         },
     );
     bystander

@@ -724,7 +724,7 @@ async fn a_replay_answers_from_the_record_and_the_file_never_reappears() -> anyh
                 "the replay did not return what was recorded"
             );
             assert_eq!(
-                v["call_id"].as_str(),
+                v["tool_call_id"].as_str(),
                 Some("call-7"),
                 "the replay answered with the recorded call's id instead of this one's: {v}"
             );
