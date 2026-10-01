@@ -261,6 +261,71 @@ fn default_progress_kind() -> String {
     PROGRESS_KIND_LOG_CHUNK.to_owned()
 }
 
+// ── permission hooks ──
+
+/// The permission request a hub puts to the client that owns a session.
+///
+/// Hand written from `xai-tool-protocol/src/frames.rs:941-963` and
+/// `hook.rs` at SOURCE_REV, field for field, because under D1 = A no upstream
+/// code enters this repository. `HookFrame` is not a request/response pair in
+/// the JSON-RPC sense: the frame may carry an `id`, but the answer arrives as a
+/// **separate `hook_reply` notification** correlated by `hook_id`
+/// (`harness.rs:2079-2092`). A hub that waits for a response to the `hook`
+/// waits forever.
+///
+/// `session_id` is required here *and* the frame is sent with the session on the
+/// request envelope, because upstream delivers a hook to its handler only
+/// through the session inbox, which `demux.route` feeds only for a frame
+/// carrying an envelope session (`demux.rs:387`). Dropping the envelope copy
+/// loses the frame with no error at all.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HookFrame {
+    pub session_id: SessionId,
+    /// The tool server the hook is for. `None` means every server bound to the
+    /// session. Never set for a permission request, which goes to the person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_id: Option<ToolId>,
+    /// The running call a `Cancel` ends. Not set for a permission request, which
+    /// arrives before the call is dispatched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<ToolCallId>,
+    /// The correlation id the responder echoes in its [`HookReplyFrame`]. This is
+    /// the hub's own request id, so one number ties a question to its answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hook_id: Option<String>,
+    pub event: HookEvent,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_context: Option<String>,
+}
+
+/// Internally tagged on `type`, matching upstream. `Custom` is the escape hatch
+/// that carries a permission request, and it is why the payload below is an open
+/// value rather than a struct: upstream's own renderer adds fields to it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum HookEvent {
+    Cancel,
+    Pause,
+    Resume,
+    SessionEnded,
+    Custom { kind: String, payload: Value },
+}
+
+/// The answer to a [`HookFrame`] that carried a `hook_id`.
+///
+/// Sent as a notification, never as a JSON-RPC response: `session_id` is pinned
+/// to the responder's own session so params cannot disagree with the envelope.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HookReplyFrame {
+    pub session_id: SessionId,
+    pub hook_id: String,
+    /// Open on purpose. Upstream reads `outcome` and `followup_message` out of it
+    /// and treats anything it does not recognise as a rejection
+    /// (`hub_permission.rs:197-245`), so a struct here would be a claim about a
+    /// shape the hub does not own.
+    pub result: Value,
+}
+
 // ── connection keepalive ──
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
