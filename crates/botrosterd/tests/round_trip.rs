@@ -285,8 +285,8 @@ async fn progress_frames_are_relayed_before_the_terminal() -> anyhow::Result<()>
         "expected starting + finished, got {:?}",
         h.progress
     );
-    assert_eq!(h.progress[0].payload["stage"], "starting");
-    assert_eq!(h.progress[1].payload["stage"], "finished");
+    assert_eq!(h.progress[0].body["stage"], "starting");
+    assert_eq!(h.progress[1].body["stage"], "finished");
     assert!(h
         .progress
         .iter()

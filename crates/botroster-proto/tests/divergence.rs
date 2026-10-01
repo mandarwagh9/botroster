@@ -131,14 +131,24 @@ fn the_divergences_the_table_records_are_real() {
     assert_eq!(back.hub_version, "0.5.1");
 
     let call = call_json();
+    // Slice B2 matched this pair as well, on the same terms as the ack above:
+    // the wire now carries the published names, the Rust fields did not move,
+    // and the old spellings still parse so a stored run record or a fixture
+    // written before the rename keeps reading.
     assert!(
-        call.get("call_id").is_some() && call.get("tool_call_id").is_none(),
-        "the tool call id field moved; PROVENANCE.md's divergence table is stale"
+        call.get("tool_call_id").is_some() && call.get("call_id").is_none(),
+        "the tool call id field moved; if it is a divergence again, PROVENANCE.md §1 \
+         needs its row back"
     );
     assert!(
-        call.get("args").is_some() && call.get("arguments").is_none(),
-        "the tool call arguments field moved; PROVENANCE.md's divergence table is stale"
+        call.get("arguments").is_some() && call.get("args").is_none(),
+        "the tool call arguments field moved; if it is a divergence again, \
+         PROVENANCE.md §1 needs its row back"
     );
+    let legacy_call: ToolCallRequestParams =
+        serde_json::from_value(json!({ "tool_id": "fs.read", "call_id": "call-1", "args": {} }))
+            .expect("the pre-B2 spellings must still parse");
+    assert_eq!(legacy_call.call_id.as_str(), "call-1");
 
     assert_eq!(
         (codes::FORBIDDEN, codes::APPROVAL_DENIED),
@@ -289,8 +299,9 @@ fn the_error_number_table_lists_no_number_upstream_leaves_free() {
 #[test]
 fn every_divergence_is_written_down_in_provenance() {
     let md = provenance();
-    assert_recorded(&md, "the tool call id field", "call_id", "tool_call_id");
-    assert_recorded(&md, "the tool call arguments field", "args", "arguments");
+    // No assertion for the tool call id or arguments fields: both are matched
+    // now, so there is no divergence to record and a row naming both spellings
+    // would be describing a difference that is gone.
     assert_recorded(
         &md,
         "the approval request method",

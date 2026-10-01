@@ -83,6 +83,14 @@ pub const DEFAULT_APPROVAL_TIMEOUT: std::time::Duration = std::time::Duration::f
 /// a backstop is that it exists and is finite, not that it is tight.
 pub const DEFAULT_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3900);
 
+/// How long a tool server has to answer `session.bind` before the bind fails.
+///
+/// Short by comparison with [`DEFAULT_CALL_TIMEOUT`], and deliberately so: a bind
+/// is a handshake the hub and the server complete in one exchange, and a server
+/// that has not answered one in thirty seconds is not going to. The longer
+/// backstop is for a call already in flight, where the work itself may be slow.
+pub const DEFAULT_BIND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Methods supported beyond the base protocol, advertised in `hello_ack`.
 /// Clients gate fallbacks on membership rather than probing.
 const EXTRA_CAPABILITIES: &[&str] = &["session_attach_server", "computer.takeover"];
@@ -362,6 +370,9 @@ pub struct Hub {
     approval_timeout: std::time::Duration,
     /// Injectable for the same reason: an hour is not a test.
     call_timeout: std::time::Duration,
+    /// How long a tool server has to answer `session.bind`. See
+    /// [`Hub::binding_within`].
+    bind_timeout: std::time::Duration,
     /// `PreToolUse` hooks, consulted here rather than in the client: a check
     /// the caller evaluates is a check the caller can delete (SPEC §6.0).
     hooks: Option<Arc<dyn PreToolUse>>,
@@ -397,6 +408,7 @@ impl Hub {
             sessions: None,
             approval_timeout: DEFAULT_APPROVAL_TIMEOUT,
             call_timeout: DEFAULT_CALL_TIMEOUT,
+            bind_timeout: DEFAULT_BIND_TIMEOUT,
             hooks: None,
             secrets: None,
         }
@@ -524,6 +536,17 @@ impl Hub {
 
     pub fn with_approval_timeout(mut self, d: std::time::Duration) -> Self {
         self.approval_timeout = d;
+        self
+    }
+
+    /// How long a tool server has to answer `session.bind`.
+    ///
+    /// Injectable for the same reason as the other two: the failure this bounds
+    /// is a silent one. A tool server that never replies leaves the hub waiting
+    /// with nothing to log, so a test that has to wait it out learns only that
+    /// something is slow. Five seconds is plenty for a real server on loopback.
+    pub fn binding_within(mut self, d: std::time::Duration) -> Self {
+        self.bind_timeout = d;
         self
     }
 
@@ -1433,15 +1456,32 @@ impl Hub {
             st.hub_calls
                 .insert(call_id.clone(), (server_conn.clone(), tx));
         }
+        // The session goes in `params` and **not** on the envelope, which is the
+        // opposite of every other request this hub sends, and the reason is
+        // upstream's frame router. `demux.rs:387` sends any frame carrying an
+        // envelope `session_id` to a per-session inbox; only a frame *without*
+        // one reaches the notification channel, and that channel is the only
+        // thing that answers a bind (`server.rs:1583-1649`). Carrying both
+        // therefore looks helpful and is exactly why a bind is dropped in
+        // silence. Upstream pins the shape in its own test,
+        // `connection_tests.rs:2358-2364`: `{"id":"b1","method":"session.bind",
+        // "params":{"session_id":"s1"}}` must route as a Notification.
+        //
+        // Our own guest reads the envelope session for `tool_call_request` and
+        // not for a bind, so nothing on this side loses it.
         let bind_req = Request::new(
             RpcId::Str(call_id.clone()),
             Method::SessionBind,
-            Some(serde_json::to_value(SessionBindParams {}).unwrap()),
-        )
-        .in_session(sid.clone());
+            Some(
+                serde_json::to_value(SessionBindParams {
+                    session_id: Some(sid.clone()),
+                })
+                .unwrap(),
+            ),
+        );
         self.send(&server_conn, &Frame::Request(bind_req)).await;
 
-        let outcome = match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+        let outcome = match tokio::time::timeout(self.bind_timeout, rx).await {
             Ok(Ok(o)) => o,
             _ => {
                 self.state.lock().await.hub_calls.remove(&call_id);
