@@ -1580,7 +1580,14 @@ impl Hub {
                         if d.decision == Decision::AllowAlways {
                             let mut st = self.state.lock().await;
                             if let Some(sess) = st.sessions.get_mut(&sid) {
-                                sess.policy.allow_from_now_on(params.tool_id.as_str());
+                                // Scoped by the policy, not here: for a tool
+                                // whose argument is the destination, "always"
+                                // means always at this origin. Recording it
+                                // against the tool made one answer about a
+                                // website an answer about the whole web
+                                // (backlog T2-3, F-GT3).
+                                sess.policy
+                                    .allow_from_now_on_for(params.tool_id.as_str(), &params.args);
                             }
                         }
                     }

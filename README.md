@@ -276,6 +276,15 @@ approvals only for its own input and only while you are driving.
 - **Bots are not a security boundary.** See above.
 - **The browser is a normal browser.** It runs headless at a desktop size. Automation remains
   detectable, and BOTROSTER makes no attempt to hide it.
+- **`browser.open` asks; the rest of the browser does not.** Opening a URL sends a request from your
+  computer to a destination the Bot chose, with whatever the Bot put in the path, so it is a `GET`
+  that writes to somebody else's server rather than a read. It therefore asks first. Answering "allow
+  for the session" covers **that origin only** — `example.com` for the rest of the session, not the
+  web — while "allow once" covers the single call. Reading the page afterwards (`browser.read`,
+  `browser.links`, `browser.snapshot`, `browser.scroll`) never asks, because it describes a page the
+  Bot already has open. To browse somewhere new without being asked each time, allow the origin once
+  and it stays allowed for that session. Note that a grant is still a grant: an origin you approved is
+  an origin a compromised page can then steer later calls toward.
 - **Prompt injection is a live risk.** A page a Bot visits can issue instructions to it. Approvals
   are the mitigation; keep consequential actions behind them.
 - **The hub asks who you are, and that is not the same as isolation.** `botroster up` generates a
