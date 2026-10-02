@@ -370,10 +370,42 @@ identity, which is a decision for whoever ships it.
 ## Provenance
 
 BOTROSTER is not a fork, and it contains no xAI code. `botroster-proto` was reimplemented from the
-published Grok Build types and is **modelled on** them, not wire-compatible: an unmodified upstream
-harness cannot talk to `botrosterd`, and the field-level differences are listed in
-[`PROVENANCE.md`](PROVENANCE.md) §1. That file maps every adopted component to its upstream and
-licence, and nothing enters the repository without a row in that table.
+published Grok Build types, and it now matches the published protocol closely enough that an unmodified
+upstream harness can open a session, bind a tool server, list tools and run an approved call against
+`botrosterd`. Every remaining difference is listed in [`PROVENANCE.md`](PROVENANCE.md) §1, which is
+the authority on this: the tables there are checked against the live types by a test, so they cannot
+quietly drift away from the code. That file also maps every adopted component to its upstream and
+licence, and nothing enters the repository without a row in it.
+
+### Talking to an upstream client
+
+Off by default. A hub started without `BOTROSTER_INTEROP=1` answers only this project's own
+`botroster-1` handshake, so nothing here changes what an existing installation accepts. Set the
+variable to `1` and the hub will also answer an upstream client's `"1.0.0"` hello, which is how the
+matching above was tested against a real SDK rather than against a description of one.
+
+What matches today: the handshake and its credential, the frame and field names for bind, tool list,
+tool call, progress and tool descriptions, session ownership, and approvals — an upstream harness is
+asked with the permission hook it already knows how to answer.
+
+What does not, and is listed in full in `PROVENANCE.md` §1:
+
+- **Error numbers still collide.** Several numbers mean different things on each side. Receivers are
+  advised to switch on a string `data.code` rather than the number, which does not help a client that
+  maps numbers.
+- **Tool ids are not yet upstream's shape.** Upstream wants `[a-zA-Z0-9_-]` segments separated by at
+  most one `:`, and this project's ids include dotted ones such as `fs.read`.
+- **Reconnect is not implemented.** An upstream SDK reconnects and replays transparently; this hub
+  ignores `resume`, so a session comes back empty after a dropped connection.
+- **The older `approval.request` dialect is kept, not replaced.** The dialect is chosen per connection
+  from the version the client announced, and this project's own clients are unaffected.
+
+One behaviour is deliberately weaker than an upstream renderer may offer. If a client answers a
+permission hook with an "always" answer — including a scoped one such as "always allow `git status`" —
+the hub treats it as a single yes and remembers nothing, because it has nowhere to keep a scoped grant.
+The hub says so in the request itself, by sending `tool_approval_policy: "always_prompt"`. If a
+renderer ignores that field, a user sees an "always" that behaves as "once": a safe failure, and a
+visible one.
 
 ## Contributing
 
