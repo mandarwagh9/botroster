@@ -188,6 +188,17 @@ fn the_browser_works_when_up_is_run_from_a_relative_directory() {
         ])
         .current_dir(dir.path())
         .env("NO_COLOR", "1")
+        // The page this opens is served from `127.0.0.1` by `serve_a_page`
+        // below, and the hub now refuses `browser.open` to a literal loopback
+        // address outright. This test is about `up` working from a relative
+        // directory, not about which destinations are allowed, so it takes the
+        // documented opt-in rather than the refusal. It goes on `up` and not on
+        // `call`, because the policy is evaluated in the hub.
+        //
+        // The browser still has to be told to allow the page, which is the
+        // `--approve auto` on the `call` below: the opt-in lifts the refusal and
+        // not the approval.
+        .env("BOTROSTER_ALLOW_PRIVATE_BROWSER_OPEN", "1")
         .env_remove("BOTROSTER_HUB_URL")
         .env_remove("BOTROSTER_HOME")
         .env_remove("BOTROSTER_WORKSPACE")

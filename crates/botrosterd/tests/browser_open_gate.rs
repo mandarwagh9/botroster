@@ -51,7 +51,15 @@ enum Gate {
 /// A hub on the shipped default policy, a real guest bound to it, and a harness
 /// with one open session.
 async fn stage() -> anyhow::Result<(Sock, SessionId)> {
-    let hub = Arc::new(Hub::with_policy(Policy::default()));
+    stage_with(Policy::default()).await
+}
+
+/// The same, on a policy the caller chooses.
+///
+/// Separate from `stage` so the existing tests keep reading as the shipped
+/// default, which is the thing they are about.
+async fn stage_with(policy: Policy) -> anyhow::Result<(Sock, SessionId)> {
+    let hub = Arc::new(Hub::with_policy(policy));
     let (listener, addr) = Server::bind("127.0.0.1:0").await?;
     tokio::spawn(Arc::new(Server::new(Arc::clone(&hub))).serve(listener));
 
@@ -244,6 +252,79 @@ async fn one_answer_covers_one_origin_and_no_more() {
         matches!(&third, Gate::Asked(_)),
         "approving one origin silently approved another: {third:?}"
     );
+}
+
+/// A literal metadata address is refused, with nobody asked.
+///
+/// This is the case the refusal exists for. `169.254.169.254` is where the cloud
+/// metadata service answers, and it hands out credentials to whoever asks; a
+/// person shown an approval card cannot tell that from any other URL, because
+/// the card would be describing an address rather than the fact that the address
+/// is the one thing worth refusing.
+///
+/// The assertion is that `Asked` never arrives, not merely that the call failed.
+/// A refusal that first parks for approval would let a person who does not read
+/// the card click through, and would make this the same control as a public URL.
+#[tokio::test]
+async fn a_literal_metadata_address_is_refused_without_a_prompt() {
+    let (mut sock, sid) = stage().await.expect("stage");
+    let gate = open(
+        &mut sock,
+        &sid,
+        30,
+        "http://169.254.169.254/latest/meta-data/",
+        None,
+    )
+    .await
+    .expect("the hub answered");
+
+    match gate {
+        Gate::Refused(message) => {
+            assert!(
+                message.contains("169.254") || message.contains("link-local"),
+                "the refusal should name the range it refused, so the reason survives \
+                 into whatever read the record: {message:?}"
+            );
+            assert!(
+                message.contains("BOTROSTER_ALLOW_PRIVATE_BROWSER_OPEN"),
+                "the refusal should say how to develop against a local server, or the \
+                 only way to find out is to read this file: {message:?}"
+            );
+        }
+        other => panic!("expected a refusal with no prompt, got {other:?}"),
+    }
+}
+
+/// The same address, with the opt-in set, asks instead of being refused.
+///
+/// The legitimate case is a Bot developing against a server on its own machine,
+/// and the test that matters is that lifting the refusal lifts *only* the
+/// refusal: the call still costs one approval, so the opt-in is not a switch
+/// from "gated" to "ungated".
+#[tokio::test]
+async fn the_config_line_re_enables_a_private_destination_and_it_still_asks() {
+    let (mut sock, sid) = stage_with(Policy::allowing_private_browser_destinations())
+        .await
+        .expect("stage");
+
+    let gate = open(&mut sock, &sid, 31, "http://127.0.0.1:8080/dev", None)
+        .await
+        .expect("the hub answered");
+
+    match gate {
+        Gate::Asked(reason) => assert!(
+            !reason.contains("refuses"),
+            "the approval card is carrying the refusal text: {reason:?}"
+        ),
+        Gate::Refused(message) => panic!(
+            "the opt-in did not lift the refusal: {message:?}. A Bot developing \
+             against a local server has no other way in."
+        ),
+        Gate::ReachedGuest(v) => panic!(
+            "the private destination reached the guest with nobody asked, so the \
+             opt-in lifted the approval as well as the refusal: {v}"
+        ),
+    }
 }
 
 async fn request(

