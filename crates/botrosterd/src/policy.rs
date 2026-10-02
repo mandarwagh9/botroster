@@ -127,6 +127,14 @@ pub struct Policy {
     /// prompt, never an outright refusal.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub grants: BTreeSet<String>,
+    /// Whether `browser.open` may reach a literal loopback, link-local, private
+    /// or metadata address.
+    ///
+    /// Off by default and `skip_serializing_if` false, so a policy written by an
+    /// older build reads back with the refusal in force: a stored policy must not
+    /// silently gain a permission because it was deserialised.
+    #[serde(default)]
+    pub allow_private_browser_destinations: bool,
 }
 
 impl Default for Policy {
@@ -213,11 +221,42 @@ impl Default for Policy {
             ],
             fallback: Action::RequireApproval,
             grants: BTreeSet::new(),
+            allow_private_browser_destinations: private_browser_destinations_allowed(),
         }
     }
 }
 
+/// Whether `BOTROSTER_ALLOW_PRIVATE_BROWSER_OPEN` asks for the refusal to be
+/// lifted.
+///
+/// An environment variable rather than a policy file entry, so that turning it on
+/// is visible in the process's own configuration: `env` in a `ps`, the
+/// orchestrator's spec, the run command. Off unless it is exactly `1`, because a
+/// knob that treats "true", "yes" and any non-empty string as consent is a knob
+/// that gets set by accident.
+fn private_browser_destinations_allowed() -> bool {
+    match std::env::var("BOTROSTER_ALLOW_PRIVATE_BROWSER_OPEN") {
+        Ok(v) => v == "1",
+        Err(_) => false,
+    }
+}
+
 impl Policy {
+    /// The shipped default with the `browser.open` private-address refusal
+    /// lifted, for a Bot developing against a server on its own machine.
+    ///
+    /// Named rather than left as a boolean someone sets, because the difference
+    /// between "this build refuses loopback" and "this build does not" is not the
+    /// kind of thing that should be visible only in a struct literal. What it does
+    /// *not* lift is the approval: an allowed private destination still costs one
+    /// prompt, as every other `browser.open` does.
+    pub fn allowing_private_browser_destinations() -> Self {
+        Self {
+            allow_private_browser_destinations: true,
+            ..Self::default()
+        }
+    }
+
     /// A policy that approves everything. For non-interactive runs where the
     /// operator has accepted the risk explicitly; never a default.
     pub fn allow_all() -> Self {
@@ -225,12 +264,38 @@ impl Policy {
             rules: vec![Rule::allow("*")],
             fallback: Action::Allow,
             grants: BTreeSet::new(),
+            // A blanket allow is already an explicit acceptance of risk, and it
+            // is a test and non-interactive-run construct. Leaving the refusal
+            // on would mean `allow_all` still denied something, and a policy
+            // called "allow everything" that does not is a trap for whoever
+            // reaches for it next.
+            allow_private_browser_destinations: true,
         }
     }
 
-    /// Precedence, in order: deny, then a session grant, then ask, then
-    /// allow, then the fallback.
+    /// Precedence, in order: the private-address refusal, then deny, then a
+    /// session grant, then ask, then allow, then the fallback.
     pub fn evaluate(&self, tool: &str, args: &Value) -> Verdict {
+        // Ahead of every rule and every grant, and for the same reason a rule
+        // deny short-circuits: this is a refusal, not a prompt. A person asked to
+        // approve a fetch of the cloud metadata service is being offered a
+        // decision they cannot make from the card, and "allow for the session"
+        // would then let every later fetch of that address through with nobody
+        // asked. It is checked here rather than in the guest because the guest is
+        // the thing being gated: a check the guest evaluates is a check the
+        // guest can delete.
+        if !self.allow_private_browser_destinations && tool == "browser.open" {
+            if let Some(url) = args.get("url").and_then(|v| v.as_str()) {
+                if let Some(why) = private_destination_reason(url) {
+                    return Verdict::Deny(format!(
+                        "`browser.open` refuses {why}; a Bot developing against a server on \
+                         its own machine can set BOTROSTER_ALLOW_PRIVATE_BROWSER_OPEN=1, and \
+                         the fetch will still ask"
+                    ));
+                }
+            }
+        }
+
         let mut ask: Option<String> = None;
         let mut allowed = false;
 
@@ -354,6 +419,113 @@ impl Policy {
 /// `None` for anything that is not http(s), including a string that does not
 /// parse. Failing closed is the point: an origin the hub cannot establish is an
 /// origin no grant may cover, so a malformed URL skips nothing.
+/// Why this URL names an address that is not on the public internet, if it does.
+///
+/// **This sees names, not resolved addresses.** It refuses a destination whose
+/// *host* is a literal address in a private range, and it cannot tell you
+/// anything about a hostname that resolves into one. Two gaps follow, and both
+/// are real:
+///
+/// * A name that resolves to loopback or a metadata address passes. RFC 6761
+///   reserves `localhost` and `*.localhost` for exactly that, which is why they
+///   are refused by name here, but nothing stops `internal.example` from
+///   resolving to `10.0.0.1`.
+/// * A redirect is invisible. A public origin that answers `302` to
+///   `http://169.254.169.254/` is followed, and this never sees the second URL.
+///
+/// Both need an egress filter in front of the browser, which is a different and
+/// larger piece of work than a policy check. The code here must not imply
+/// otherwise, which is why the limit is stated here rather than only in the
+/// README.
+///
+/// Parsed, never string-matched, and deliberately so: the spellings that matter
+/// are exactly the ones a string test gets wrong. `2130706433`, `0x7f.1` and
+/// `017700000001` are all `127.0.0.1`, `http://allowed.example@127.0.0.1/`
+/// looks like a request to `allowed.example` and is not, and `localhost.` is a
+/// *different name* from `localhost` to the parser. The `url` crate has already
+/// resolved the numeric forms and dropped the userinfo by the time its `Host`
+/// enum reaches us, so this reads a decided value rather than re-deciding.
+///
+/// Non-http(s) schemes and unparseable URLs return `None`, which means "keep
+/// asking" rather than "refuse". This code cannot distinguish a malformed URL
+/// from a scheme it has not been taught, and a refusal carrying a misleading
+/// reason is worse than a prompt.
+fn private_destination_reason(url: &str) -> Option<&'static str> {
+    let parsed = url::Url::parse(url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    match parsed.host()? {
+        url::Host::Ipv4(a) => ipv4_private_reason(a),
+        url::Host::Ipv6(a) => match a.to_ipv4_mapped() {
+            // `[::ffff:127.0.0.1]` is `127.0.0.1` written by a dual-stack client.
+            // Without this the v4 ranges are invisible to a v6-looking URL, which
+            // is the same hole reached by asking nicely.
+            Some(v4) => ipv4_private_reason(v4),
+            None => ipv6_private_reason(a),
+        },
+        url::Host::Domain(d) => {
+            // The parser lowercases the host, but a trailing dot survives: it
+            // parses as the name `localhost.`, which resolves exactly like
+            // `localhost`. One dot is stripped and only one, because
+            // `localhost..` is not a thing anyone means.
+            let name = d.strip_suffix('.').unwrap_or(d);
+            if name.eq_ignore_ascii_case("localhost")
+                || name.to_ascii_lowercase().ends_with(".localhost")
+            {
+                // RFC 6761 reserves these for loopback, so a name that looks
+                // public and resolves to this machine is not a public address.
+                Some("a loopback name (`localhost` or `*.localhost`)")
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn ipv4_private_reason(a: std::net::Ipv4Addr) -> Option<&'static str> {
+    // Order is only for the message. The four are disjoint: 127/8 is neither
+    // link-local nor private, 169.254/16 is link-local and not private, and
+    // `is_private` is exactly 10/8, 172.16/12 and 192.168/16.
+    if a.is_loopback() {
+        return Some("a loopback address (127.0.0.0/8)");
+    }
+    if a.is_link_local() {
+        return Some(
+            "a link-local address (169.254.0.0/16), which is the range the cloud \
+             metadata service answers on at 169.254.169.254",
+        );
+    }
+    if a.is_unspecified() {
+        return Some("the unspecified address 0.0.0.0");
+    }
+    if a.is_private() {
+        return Some("a private address (10/8, 172.16/12 or 192.168/16)");
+    }
+    None
+}
+
+fn ipv6_private_reason(a: std::net::Ipv6Addr) -> Option<&'static str> {
+    if a.is_loopback() {
+        return Some("the IPv6 loopback address ::1");
+    }
+    if a.is_unspecified() {
+        return Some("the unspecified address ::");
+    }
+    let s = a.segments();
+    // Written out rather than `is_unique_local` / `is_unicast_link_local`, which
+    // are still unstable, and this crate promises MSRV 1.89.
+    if (s[0] & 0xffc0) == 0xfe80 {
+        return Some("an IPv6 link-local address (fe80::/10)");
+    }
+    // fc00::/7 is fc00 through fdff, so this also covers fd00:ec2::254, the IPv6
+    // cloud metadata endpoint. No special case for it.
+    if (s[0] & 0xfe00) == 0xfc00 {
+        return Some("a unique-local address (fc00::/7)");
+    }
+    None
+}
+
 fn url_origin(url: &str) -> Option<String> {
     let parsed = url::Url::parse(url).ok()?;
     if !matches!(parsed.scheme(), "http" | "https") {
@@ -455,6 +627,7 @@ mod tests {
             ],
             fallback: Action::Allow,
             grants: BTreeSet::new(),
+            allow_private_browser_destinations: false,
         };
         match p.evaluate("shell.exec", &json!({})) {
             Verdict::Deny(r) => assert_eq!(r, "no shell on this account"),
@@ -466,6 +639,7 @@ mod tests {
             rules: vec![Rule::deny("shell.exec", "no"), Rule::allow("shell.exec")],
             fallback: Action::Allow,
             grants: BTreeSet::new(),
+            allow_private_browser_destinations: false,
         };
         assert!(matches!(
             p2.evaluate("shell.exec", &json!({})),
@@ -481,6 +655,7 @@ mod tests {
             rules: vec![Rule::allow("*"), Rule::ask("shell.exec", "still asks")],
             fallback: Action::Allow,
             grants: BTreeSet::new(),
+            allow_private_browser_destinations: false,
         };
         assert!(matches!(
             p.evaluate("shell.exec", &json!({})),
@@ -498,6 +673,7 @@ mod tests {
             ],
             fallback: Action::Deny,
             grants: BTreeSet::new(),
+            allow_private_browser_destinations: false,
         };
         assert!(matches!(
             p.evaluate("fs.write", &json!({"path": "/etc/passwd"})),
@@ -542,6 +718,7 @@ mod tests {
             rules: vec![Rule::deny("shell.exec", "no shell on this account")],
             fallback: Action::Allow,
             grants: BTreeSet::new(),
+            allow_private_browser_destinations: false,
         };
         p.allow_from_now_on("shell.exec");
         assert!(matches!(
@@ -853,6 +1030,326 @@ mod tests {
         assert!(
             matches!(p.evaluate("secret.request", &json!({})), Verdict::Deny(_)),
             "an operator's `deny` did not beat the shipped allow"
+        );
+    }
+
+    // ── browser.open and private destinations ──
+    //
+    // Every case here is one spelling that reaches a non-public address. They
+    // are written as a table rather than a dozen near-identical tests because
+    // the failure mode is a *missed spelling*: the obvious `127.0.0.1` works,
+    // someone writes `2130706433`, and the guard passes a URL it thought it had
+    // stopped. A table makes the whole set readable in one place, so adding a
+    // spelling to the list is the easy move.
+    fn refuses(url: &str) -> String {
+        let p = Policy::default();
+        match p.evaluate("browser.open", &json!({ "url": url })) {
+            Verdict::Deny(why) => why,
+            other => panic!("{url} was not refused: {other:?}"),
+        }
+    }
+
+    fn asks(url: &str) -> bool {
+        let p = Policy::default();
+        !matches!(
+            p.evaluate("browser.open", &json!({ "url": url })),
+            Verdict::Deny(_)
+        )
+    }
+
+    /// Loopback, in every spelling the parser hands back as an address and in both
+    /// names RFC 6761 reserves for it.
+    ///
+    /// `127.1.2.3` is here because the `url` crate normalises it to an address
+    /// rather than leaving it as a name, and a guard written against
+    /// `starts_with("127.")` would miss it.
+    #[test]
+    fn loopback_is_refused_in_every_spelling() {
+        for url in [
+            "http://127.0.0.1/",
+            "http://127.0.0.1:8443/v1/tools",
+            "http://127.1.2.3/",
+            "http://[::1]/",
+            "http://[0:0:0:0:0:0:0:1]/",
+            "http://localhost/",
+            "http://LOCALHOST/",
+            "http://foo.localhost/",
+            // The trailing dot is a distinct spelling, and the url crate keeps
+            // it: `http://localhost./` parses as the *name* `localhost.`, not as
+            // `localhost`. A name comparison that does not strip it lets this
+            // through, and it is the same host.
+            "http://localhost./",
+        ] {
+            let why = refuses(url);
+            assert!(
+                why.contains("loopback"),
+                "{url} was refused without saying it was loopback: {why}"
+            );
+        }
+    }
+
+    /// The unspecified address, which is loopback's neighbour and not the same
+    /// thing.
+    ///
+    /// Separate because naming it correctly matters: `0.0.0.0` means "this host"
+    /// to a listener and is refused as the unspecified address, and the first
+    /// draft of this test asserted the word "loopback" for every entry in a list
+    /// that included it. The code was right and the assertion was wrong, which is
+    /// the only acceptable direction for that mistake.
+    #[test]
+    fn the_unspecified_address_is_refused() {
+        for url in ["http://0.0.0.0/", "http://0/"] {
+            let why = refuses(url);
+            assert!(
+                why.contains("unspecified"),
+                "{url} was refused without naming itself correctly: {why}"
+            );
+        }
+    }
+
+    /// Link-local, including the cloud metadata address on both stacks.
+    #[test]
+    fn link_local_and_metadata_addresses_are_refused() {
+        for url in [
+            "http://169.254.169.254/latest/meta-data/",
+            "http://169.254.0.1/",
+            "http://[fe80::1]/",
+            // AWS's IPv6 metadata endpoint. It is inside fc00::/7, so it is
+            // refused by the unique-local rule rather than by a special case,
+            // and this test is what says so.
+            "http://[fd00:ec2::254]/",
+        ] {
+            let why = refuses(url);
+            assert!(
+                !why.is_empty(),
+                "{url} was refused without saying which range it was in"
+            );
+        }
+    }
+
+    /// RFC1918 and unique-local.
+    #[test]
+    fn private_ranges_are_refused() {
+        for url in [
+            "http://10.0.0.1/",
+            "http://10.255.255.255/",
+            // 172.16.0.0/12 is 172.16 through 172.31, and NOT 172.32. The two
+            // neighbouring addresses are here because that boundary is exactly
+            // the sort of thing an off-by-one in a range check produces.
+            "http://172.16.0.1/",
+            "http://172.31.255.255/",
+            "http://192.168.1.1/",
+            "http://[fc00::1]/",
+            "http://[fd00::1]/",
+        ] {
+            refuses(url);
+        }
+        // Just outside every one of them, and public.
+        for url in [
+            "http://172.15.0.1/",
+            "http://172.32.0.1/",
+            "http://9.255.255.255/",
+        ] {
+            assert!(asks(url), "{url} is public and was refused");
+        }
+    }
+
+    /// An IPv4-mapped IPv6 address is the same address.
+    ///
+    /// `[::ffff:127.0.0.1]` and `[::ffff:10.0.0.1]` are how a dual-stack client
+    /// writes a v4 destination, and a v6-only range check would pass them.
+    #[test]
+    fn an_ipv4_mapped_ipv6_address_is_refused() {
+        refuses("http://[::ffff:127.0.0.1]/");
+        refuses("http://[::ffff:10.0.0.1]/");
+        refuses("http://[::ffff:169.254.169.254]/");
+        // And the mapped form of a public address is still public.
+        assert!(
+            asks("http://[::ffff:93.184.216.34]/"),
+            "the mapped form of a public address was refused"
+        );
+    }
+
+    /// Decimal, hexadecimal and octal IPv4, which the `url` crate resolves to
+    /// addresses before this code ever sees them.
+    ///
+    /// The first three are all `127.0.0.1`. A guard that read the host as a
+    /// string and looked for "127." would pass all three.
+    ///
+    /// The decimal constants are computed, not guessed: `10.0.0.1` is
+    /// `10*16777216 + 1` = `167772161`, and `169.254.169.254` is
+    /// `169*16777216 + 254*65536 + 169*256 + 254` = `2852039166`. The first
+    /// draft of this test used `282475776`, which is `16.214.61.0` and public, so
+    /// it failed - correctly, since a wrong constant here would have been a
+    /// private address asserted public, which is the shape of mistake that makes
+    /// this table worthless.
+    #[test]
+    fn decimal_hex_and_octal_ipv4_spellings_are_refused() {
+        for url in [
+            "http://2130706433/",
+            "http://0x7f.1/",
+            "http://017700000001/",
+            // A private address in all three notations.
+            "http://167772161/",
+            "http://0x0a000001/",
+            "http://0x0a.0.0.1/",
+            // And the metadata address in decimal and hex.
+            "http://2852039166/",
+            "http://0xa9fea9fe/",
+        ] {
+            refuses(url);
+        }
+        // A decimal number that is a public address still asks, which is what
+        // makes the refusal above about the address rather than the notation.
+        assert!(
+            asks("http://134744072/"),
+            "example.com's address was refused"
+        );
+    }
+
+    /// Userinfo cannot smuggle the host past the check.
+    ///
+    /// `http://allowed.example@127.0.0.1/` looks at a glance like a request to
+    /// `allowed.example`, and it is not: everything before the `@` is
+    /// credentials. The `url` crate drops the userinfo when it hands back the
+    /// host, so this passes only if the host is read as a `Host` rather than
+    /// picked out of the string.
+    #[test]
+    fn userinfo_cannot_disguise_a_private_address() {
+        refuses("http://allowed.example@127.0.0.1/");
+        refuses("http://user:pass@169.254.169.254/");
+        refuses("http://example.com@10.0.0.1/");
+        // And the reason is the real one rather than a generic refusal, which is
+        // what says the host was read as an address and not as the name in front
+        // of the `@`.
+        let why = refuses("http://allowed.example@127.0.0.1/");
+        assert!(
+            why.contains("loopback"),
+            "the refusal did not identify the address behind the userinfo: {why}"
+        );
+    }
+
+    /// The public internet still asks, which is the whole point of scoping the
+    /// refusal rather than refusing `browser.open`.
+    #[test]
+    fn a_public_address_still_asks() {
+        for url in [
+            "http://93.184.216.34/",
+            "https://example.com/",
+            "https://example.com:8443/path?q=1",
+        ] {
+            assert!(asks(url), "{url} is public and was refused");
+        }
+    }
+
+    /// The refusal is a refusal: no rule and no grant lifts it.
+    #[test]
+    fn no_grant_lifts_the_private_address_refusal() {
+        let mut p = Policy::default();
+        // An operator's blanket allow, and a session grant for the exact origin.
+        p.rules.push(Rule::allow("browser.open"));
+        p.grants
+            .insert(origin_grant_key("browser.open", "http://127.0.0.1:80"));
+        p.grants.insert("browser.open".to_owned());
+        assert!(
+            matches!(
+                p.evaluate("browser.open", &json!({ "url": "http://127.0.0.1/" })),
+                Verdict::Deny(_)
+            ),
+            "a grant lifted the private-address refusal, which is the one thing it \
+             must not do"
+        );
+    }
+
+    /// The opt-in lifts the refusal but not the approval.
+    #[test]
+    fn the_config_line_lifts_the_refusal_and_still_asks() {
+        let p = Policy::allowing_private_browser_destinations();
+        assert!(
+            matches!(
+                p.evaluate("browser.open", &json!({ "url": "http://127.0.0.1/" })),
+                Verdict::Ask(_)
+            ),
+            "with the refusal lifted, a loopback fetch should still cost one approval"
+        );
+        // A public URL is unaffected either way.
+        assert!(matches!(
+            p.evaluate("browser.open", &json!({ "url": "https://example.com/" })),
+            Verdict::Ask(_)
+        ));
+    }
+
+    /// Only `browser.open` is affected.
+    ///
+    /// Scoped by name rather than by "has a url argument", so a tool added later
+    /// with a `url` field does not silently inherit a refusal nobody decided on.
+    #[test]
+    fn only_browser_open_is_refused() {
+        let p = Policy::default();
+        assert!(
+            !matches!(
+                p.evaluate(
+                    "fs.read",
+                    &json!({ "path": "notes.md", "url": "http://127.0.0.1/" })
+                ),
+                Verdict::Deny(_)
+            ),
+            "a tool that merely carries a `url` field inherited the browser refusal"
+        );
+    }
+
+    /// Fail closed by asking, never by refusing.
+    ///
+    /// An unparseable URL and a non-http scheme get no verdict from the matcher,
+    /// so they fall through to the normal gate and cost one approval. Refusing
+    /// them would be tidier and wrong: this code cannot tell a malformed URL from
+    /// a scheme it has not been taught, and guessing "that is a private address"
+    /// would make `file://` and `data:` a refusal with a misleading reason.
+    #[test]
+    fn an_unparseable_url_keeps_asking() {
+        let p = Policy::default();
+        for url in ["not a url", "", "http://", "ht!tp://127.0.0.1"] {
+            assert!(
+                !matches!(
+                    p.evaluate("browser.open", &json!({ "url": url })),
+                    Verdict::Deny(_)
+                ),
+                "{url:?} was refused rather than asked; an unparseable URL must cost \
+                 an approval"
+            );
+        }
+        // And with no url at all.
+        assert!(!matches!(
+            p.evaluate("browser.open", &json!({})),
+            Verdict::Deny(_)
+        ));
+    }
+
+    /// What this does not cover, asserted so the gap is a test rather than a
+    /// caveat in prose somebody skips.
+    ///
+    /// A name is not an address. `127.0.0.1.nip.io` resolves to loopback and is
+    /// a `Host::Domain` here, so it asks; and a redirect from an approved public
+    /// origin to a private one is invisible to any check on the requested URL.
+    /// Both need an egress filter in front of the browser.
+    #[test]
+    fn a_name_that_resolves_to_a_private_address_still_asks() {
+        assert!(
+            asks("http://127.0.0.1.nip.io/"),
+            "this test exists to document that DNS is not resolved here; if it ever \
+             fails, something started resolving names and the comment above it needs \
+             rewriting"
+        );
+    }
+
+    /// The opt-in is off unless the variable is exactly `1`.
+    #[test]
+    fn the_config_line_is_explicit() {
+        // Set in-process rather than through the environment so the test does not
+        // depend on, or disturb, the runner's own environment.
+        assert!(
+            !Policy::default().allow_private_browser_destinations,
+            "the shipped default allows private destinations"
         );
     }
 }

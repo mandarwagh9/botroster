@@ -340,6 +340,7 @@ async fn a_refusal_is_recorded_and_names_who_refused() -> anyhow::Result<()> {
         rules: vec![Rule::deny("bot.send", "not from a test")],
         fallback: Action::Allow,
         grants: std::collections::BTreeSet::new(),
+        allow_private_browser_destinations: false,
     };
     let mut f = Fixture::start(policy).await?;
     let sid = f.open(Some("scout")).await?;
@@ -820,6 +821,7 @@ async fn a_refused_step_replays_as_refused() -> anyhow::Result<()> {
         rules: vec![Rule::deny("bot.send", "not from a test")],
         fallback: Action::Allow,
         grants: std::collections::BTreeSet::new(),
+        allow_private_browser_destinations: false,
     };
     let mut f = Fixture::start(policy).await?;
     let live = f.open(Some("scout")).await?;

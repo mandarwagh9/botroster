@@ -285,6 +285,22 @@ approvals only for its own input and only while you are driving.
   Bot already has open. To browse somewhere new without being asked each time, allow the origin once
   and it stays allowed for that session. Note that a grant is still a grant: an origin you approved is
   an origin a compromised page can then steer later calls toward.
+- **`browser.open` refuses a literal private or metadata address, with no prompt at all.** A URL whose
+  host is already an address in a loopback, link-local, private or cloud-metadata range — `127.0.0.1`,
+  `localhost`, `169.254.169.254`, `10.0.0.1`, `[::1]`, `fc00::/7` — is refused rather than asked about,
+  because a person looking at an approval card cannot tell that address from any other URL. This covers
+  the spellings that reach the same place: decimal, hexadecimal and octal IPv4, IPv4-mapped IPv6 like
+  `[::ffff:127.0.0.1]`, and userinfo such as `http://example.com@127.0.0.1/`. No rule and no session
+  grant lifts it. If your Bot is developing against a server on your own machine, set
+  `BOTROSTER_ALLOW_PRIVATE_BROWSER_OPEN=1` before starting the hub; the fetch will still ask, so the
+  opt-in removes the refusal and not the approval.
+
+  This checks the address in the URL and **cannot** see two things. A hostname that resolves to a
+  private address passes, because no name is resolved here — RFC 6761 reserves `localhost` and
+  `*.localhost` for exactly that case, which is why those two are refused by name, but nothing stops an
+  internal name from pointing at `10.0.0.1`. And a redirect is invisible: a public origin that answers
+  with a redirect to a metadata address is followed. Both need an egress filter in front of the browser,
+  which is separate work; treat this as a refusal of literal addresses, not as network containment.
 - **Prompt injection is a live risk.** A page a Bot visits can issue instructions to it. Approvals
   are the mitigation; keep consequential actions behind them.
 - **The hub asks who you are, and that is not the same as isolation.** `botroster up` generates a

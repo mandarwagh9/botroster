@@ -308,6 +308,7 @@ async fn a_policy_deny_refuses_without_asking_anyone() -> anyhow::Result<()> {
         rules: vec![Rule::deny("shell.exec", "no shell on this account")],
         fallback: Action::Allow,
         grants: Default::default(),
+        allow_private_browser_destinations: false,
     };
     let mut rig = rig(policy, approver.clone()).await?;
 
