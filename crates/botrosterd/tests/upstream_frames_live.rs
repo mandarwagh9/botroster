@@ -65,15 +65,29 @@ impl UpstreamToolServer {
         let keep_tool = tool_name.clone();
         let seen = std::sync::Arc::clone(&seen_binds);
 
-        let hello = Hello::tool_server(server_id.as_str()).with_description("upstream-shaped peer");
+        let mut hello =
+            Hello::tool_server(server_id.as_str()).with_description("upstream-shaped peer");
+        // Assigned, not patched in place.
+        //
+        // `Hello::tool_server` fills `token` from `hub_token()`, which reads the
+        // ambient home: this developer's `~/.botroster/hub.token`, an env
+        // variable, or nothing at all. The first version of this line was
+        // `if let Some(t) = hello.token.as_mut() { *t = TOKEN }`, which meant the
+        // tool server presented a token **only on a machine that happened to have
+        // one**. On CI, where no home has a token, it presented none, the hub
+        // refused it, and both tests in this file failed with "no tool server
+        // registered" - a message that reads like a hub that never saw the
+        // server, and was this line.
+        //
+        // A test whose fixture depends on the machine it runs on is not a test.
+        // The harness below already assigns its token outright for the same
+        // reason.
+        hello.token = Some(TOKEN.to_owned());
         tokio::spawn(async move {
             let Ok((mut req, _)) = connect_async(&url).await else {
                 return;
             };
-            let mut hello = hello;
-            if let Some(t) = hello.token.as_mut() {
-                *t = TOKEN.to_owned();
-            }
+            let hello = hello;
             if req
                 .send(Message::Text(serde_json::to_string(&hello).unwrap()))
                 .await
