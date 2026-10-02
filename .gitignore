@@ -17,6 +17,20 @@ Thumbs.db
 # Tauri regenerates these at build time.
 crates/botroster-app/gen/
 
+# The staged sidecar is a build artefact: `scripts/sidecar.sh` builds it for
+# whatever triple is being compiled, and Tauri's build script wants it to exist
+# before `botroster-app` will compile. CLAUDE.md says so and it used to be
+# ignored, but a 14.4 MB Windows binary was committed and stayed committed,
+# which is how it came to be in three consecutive handovers as an open question.
+#
+# It was not harmless. `ci.yml`'s bundle job greps the staged runtime for the
+# builtin signing key, and on Linux and macOS this directory was not empty at
+# checkout, so a `find | head -1` returned the committed Windows binary - built
+# on a laptop long before that key existed - and reported a correct build as
+# broken. The job now names the file it means, and this rule means there is only
+# ever one file there to name.
+crates/botroster-app/binaries/
+
 # The overnight UX loop. Competitor reference captures and iteration shots stay
 # local: origin is public, and this project's position is that it contains none
 # of their material. The loop's text artefacts are committed; its images are not.
