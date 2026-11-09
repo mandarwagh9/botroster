@@ -146,6 +146,22 @@ next step and what was done stays done. A run has a token budget (`--token-budge
 `token_budget` in `config.toml`), checked before each turn; when a provider reports no usage the
 budget cannot be enforced and BOTROSTER says so.
 
+### A local team that stays running
+
+Start `botroster up` and leave it running, then open the desktop client and connect using the same
+home and hub. The CLI and desktop client use the same home, so Bots created in either show up in the
+other. Create a Bot in the window, attach a file to a message, and send it: the file is copied into
+`attachments/` in the shared workspace, where every Bot can work with it. Files already in that
+workspace are shared the same way.
+
+Start the computer from the right-hand panel to give Bots their browser and workspace. Chromium or
+Chrome must be installed for browser tools; opening a new URL asks for approval.
+
+Create recurring work under **Settings → Runs on a schedule**. `botroster up` checks due routines
+once a minute, so it must remain running for those schedules to fire. Alternatively, turn off its
+routine timer and run `botroster routine tick` from cron or systemd once a minute. Do not run both
+schedulers, or a routine may execute twice.
+
 ### Configuration
 
 Settings live in `$BOTROSTER_HOME/config.toml` (default `~/.botroster`, `%USERPROFILE%\.botroster` on

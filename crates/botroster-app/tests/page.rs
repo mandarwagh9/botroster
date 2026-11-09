@@ -2401,7 +2401,8 @@ async fn settings_keeps_each_section_with_its_own_heading() {
         .text_of(concat!(
             "JSON.stringify([...document.querySelectorAll(",
             "'#rules-dialog h2, #rules-dialog #rules-list, #rules-dialog #rule-form,",
-            " #rules-dialog #connectors-list, #rules-dialog #routines-list')]",
+            " #rules-dialog #connectors-list, #rules-dialog #routines-scheduler-note,",
+            " #rules-dialog #routines-list')]",
             ".map(e => e.id || e.textContent.trim()))",
         ))
         .await
@@ -2413,9 +2414,27 @@ async fn settings_keeps_each_section_with_its_own_heading() {
     let list = order.find("rules-list").expect("no rules list");
     let form = order.find("rule-form").expect("no add-rule form");
     let apps = order.find("Connected apps").expect("no apps section");
+    let scheduler_note = order
+        .find("routines-scheduler-note")
+        .expect("no schedule runtime note");
+    let routines = order.find("routines-list").expect("no routines list");
     assert!(
         rules < list && list < form && form < apps,
         "the rules section is not contiguous: {order}"
+    );
+    assert!(
+        apps < scheduler_note && scheduler_note < routines,
+        "the scheduler requirement is not beside the routines: {order}"
+    );
+    let scheduler_copy = b
+        .text_of("document.getElementById('routines-scheduler-note').textContent")
+        .await
+        .unwrap();
+    assert!(
+        scheduler_copy.contains("botroster up")
+            && scheduler_copy.contains("botroster routine tick")
+            && scheduler_copy.contains("not both"),
+        "the scheduler requirement is incomplete: {scheduler_copy}"
     );
 }
 
@@ -2475,6 +2494,18 @@ async fn a_connector_is_listed_with_the_credential_it_needs() {
 async fn attachments_are_named_by_file_sent_by_path_and_dropped_on_leaving() {
     let Some((b, _p)) = page().await else { return };
     open_session(&b, "s1").await;
+
+    let attach_labels = b
+        .text_of(
+            "JSON.stringify({title:document.getElementById('attach').title,\
+             label:document.getElementById('attach').getAttribute('aria-label')})",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        attach_labels,
+        r#"{"title":"Copy a file into the shared workspace for all Bots","label":"Attach a file to the shared workspace for all Bots"}"#
+    );
 
     b.text_of(
         "(() => { window.__replies.attach_file =\

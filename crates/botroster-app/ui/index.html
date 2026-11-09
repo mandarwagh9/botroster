@@ -284,7 +284,7 @@
                pick one is the emptiest kind of empty state. The button is the
                path out of it, in the pane that has the room for one — the
                sidebar's own `+ New Bot` is a 200px target in the corner. -->
-          <p>Each Bot has one job, its own memory, and a computer it works on.
+          <p>Each Bot has one job and its own memory; all Bots share a computer.
           <span id="no-bot-copy">Pick one on the left, or make another.</span></p>
           <button id="no-bot-new" class="primary">Make your first Bot</button>
         </div>
@@ -307,7 +307,9 @@
         <ul id="attached" class="attached hidden" aria-label="Attached files"></ul>
         <textarea id="input" rows="2" placeholder="Ask the Bot…"></textarea>
         <div class="composer-actions">
-          <button type="button" id="attach" class="link" title="Attach a file">
+          <button type="button" id="attach" class="link"
+                  title="Copy a file into the shared workspace for all Bots"
+                  aria-label="Attach a file to the shared workspace for all Bots">
             <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 5.5l-4.6 4.6a1.6 1.6 0 0 0 2.3 2.3l5-5a3.2 3.2 0 0 0-4.5-4.5l-5 5a4.8 4.8 0 0 0 6.8 6.8l4-4"/></svg><span>Attach</span>
           </button>
           <!-- The window's face on `--approve auto`, which the CLI has had all
@@ -372,7 +374,7 @@
         <div id="computer-idle" class="computer-idle">
           <p id="computer-idle-why">
             No computer is running yet. Starting one gives every Bot here a
-            browser and a workspace to act in — and gives you somewhere to
+            browser and a shared workspace to act in — and gives you somewhere to
             watch them do it.
           </p>
           <button id="computer-start" class="primary">Start the computer</button>
@@ -487,6 +489,11 @@
       </p>
 
       <h2 class="section">Runs on a schedule</h2>
+      <p id="routines-scheduler-note" class="hint">
+        Scheduled runs need <code>botroster up</code> to stay running, or
+        <code>botroster routine tick</code> from cron or systemd once a minute.
+        Use one scheduler, not both.
+      </p>
       <dl id="routines-list" class="dialog-fields"></dl>
       <p id="routines-state" class="hint list-state hidden"></p>
 
